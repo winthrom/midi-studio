@@ -7,7 +7,7 @@ import os
 # Add parent directory to path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from platform import (
+from sys_platform import (
     APP_VERSION,
     APP_FULL_NAME,
     load_settings,
