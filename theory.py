@@ -1,0 +1,74 @@
+#!/usr/bin/env python3
+"""Musical theory data and constants."""
+
+GM_INSTRUMENTS = [
+    "Acoustic Grand Piano","Bright Acoustic Piano","Electric Grand Piano","Honky-tonk Piano",
+    "Electric Piano 1","Electric Piano 2","Harpsichord","Clavinet",
+    "Celesta","Glockenspiel","Music Box","Vibraphone",
+    "Marimba","Xylophone","Tubular Bells","Dulcimer",
+    "Drawbar Organ","Percussive Organ","Rock Organ","Church Organ",
+    "Reed Organ","Accordion","Harmonica","Tango Accordion",
+    "Nylon Guitar","Steel Guitar","Jazz Guitar","Clean Guitar",
+    "Muted Guitar","Overdriven Guitar","Distortion Guitar","Guitar Harmonics",
+    "Acoustic Bass","Finger Bass","Pick Bass","Fretless Bass",
+    "Slap Bass 1","Slap Bass 2","Synth Bass 1","Synth Bass 2",
+    "Violin","Viola","Cello","Contrabass",
+    "Tremolo Strings","Pizzicato Strings","Orchestral Harp","Timpani",
+    "String Ensemble 1","String Ensemble 2","Synth Strings 1","Synth Strings 2",
+    "Choir Aahs","Voice Oohs","Synth Voice","Orchestra Hit",
+    "Trumpet","Trombone","Tuba","Muted Trumpet",
+    "French Horn","Brass Section","Synth Brass 1","Synth Brass 2",
+    "Soprano Sax","Alto Sax","Tenor Sax","Baritone Sax",
+    "Oboe","English Horn","Bassoon","Clarinet",
+    "Piccolo","Flute","Recorder","Pan Flute",
+    "Blown Bottle","Shakuhachi","Whistle","Ocarina",
+    "Square Lead","Sawtooth Lead","Calliope Lead","Chiff Lead",
+    "Charang Lead","Voice Lead","Fifths Lead","Bass+Lead",
+    "New Age Pad","Warm Pad","Polysynth Pad","Choir Pad",
+    "Bowed Pad","Metallic Pad","Halo Pad","Sweep Pad",
+    "Rain FX","Soundtrack FX","Crystal FX","Atmosphere FX",
+    "Brightness FX","Goblins FX","Echoes FX","Sci-fi FX",
+    "Sitar","Banjo","Shamisen","Koto",
+    "Kalimba","Bagpipe","Fiddle","Shanai",
+    "Tinkle Bell","Agogo","Steel Drums","Woodblock",
+    "Taiko Drum","Melodic Tom","Synth Drum","Reverse Cymbal",
+    "Guitar Fret Noise","Breath Noise","Seashore","Bird Tweet",
+    "Telephone Ring","Helicopter","Applause","Gunshot",
+]
+
+NOTE_NAMES = ["C","C#","D","D#","E","F","F#","G","G#","A","A#","B"]
+
+_KEY_SIG_TO_LY = {
+    'C':('c','major'), 'G':('g','major'), 'D':('d','major'), 'A':('a','major'),
+    'E':('e','major'), 'B':('b','major'), 'F#':('fis','major'), 'C#':('cis','major'),
+    'F':('f','major'), 'Bb':('bes','major'), 'Eb':('ees','major'), 'Ab':('aes','major'),
+    'Db':('des','major'), 'Gb':('ges','major'), 'Cb':('ces','major'),
+    'Am':('a','minor'), 'Em':('e','minor'), 'Bm':('b','minor'), 'F#m':('fis','minor'),
+    'C#m':('cis','minor'), 'G#m':('gis','minor'), 'D#m':('dis','minor'), 'A#m':('ais','minor'),
+    'Dm':('d','minor'), 'Gm':('g','minor'), 'Cm':('c','minor'), 'Fm':('f','minor'),
+    'Bbm':('bes','minor'), 'Ebm':('ees','minor'), 'Abm':('aes','minor'),
+}
+
+_KEY_ACCIDENTAL_COUNT = {
+    ('c','major'):0, ('g','major'):1, ('d','major'):2, ('a','major'):3,
+    ('e','major'):4, ('b','major'):5, ('fis','major'):6, ('cis','major'):7,
+    ('f','major'):-1, ('bes','major'):-2, ('ees','major'):-3, ('aes','major'):-4,
+    ('des','major'):-5, ('ges','major'):-6, ('ces','major'):-7,
+    ('a','minor'):0, ('e','minor'):1, ('b','minor'):2, ('fis','minor'):3,
+    ('cis','minor'):4, ('gis','minor'):5, ('dis','minor'):6, ('ais','minor'):7,
+    ('d','minor'):-1, ('g','minor'):-2, ('c','minor'):-3, ('f','minor'):-4,
+    ('bes','minor'):-5, ('ees','minor'):-6, ('aes','minor'):-7,
+}
+
+_SHARP_ORDER_LETTERS = [3, 0, 4, 1, 5, 2, 6]
+_FLAT_ORDER_LETTERS  = [6, 2, 5, 1, 4, 0, 3]
+
+def key_sig_to_ly(key_str):
+    """Convert MIDI key_signature to LilyPond (tonic, mode) pair."""
+    return _KEY_SIG_TO_LY.get(key_str, ('c', 'major'))
+
+def key_sig_accidentals(key_str):
+    """Return (n_sharps, n_flats) for a MIDI key_signature string."""
+    tonic, mode = key_sig_to_ly(key_str)
+    count = _KEY_ACCIDENTAL_COUNT.get((tonic, mode), 0)
+    return (count, 0) if count > 0 else (0, -count)
