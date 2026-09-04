@@ -27,8 +27,8 @@ class TestPlatformModule(unittest.TestCase):
 
     def test_app_full_name(self):
         """Test app full name."""
-        self.assertIn("MIDI", APP_FULL_NAME)
         self.assertIn("Studio", APP_FULL_NAME)
+        self.assertIn("Synthesizer", APP_FULL_NAME)
 
     def test_settings_roundtrip(self):
         """Test save and load settings."""
