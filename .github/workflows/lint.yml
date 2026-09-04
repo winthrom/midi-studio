@@ -25,20 +25,20 @@ jobs:
 
     - name: Check formatting with black
       run: |
-        black --check platform.py theory.py midi_io.py synth.py export.py gui.py main.py
+        black --check sys_platform.py theory.py midi_io.py synth.py export.py gui.py main.py
       continue-on-error: true
 
     - name: Check import sorting with isort
       run: |
-        isort --check-only platform.py theory.py midi_io.py synth.py export.py gui.py main.py
+        isort --check-only sys_platform.py theory.py midi_io.py synth.py export.py gui.py main.py
       continue-on-error: true
 
     - name: Lint with flake8
       run: |
-        flake8 platform.py theory.py midi_io.py synth.py export.py gui.py main.py --count --select=E9,F63,F7,F82 --show-source --statistics
+        flake8 sys_platform.py theory.py midi_io.py synth.py export.py gui.py main.py --count --select=E9,F63,F7,F82 --show-source --statistics
       continue-on-error: true
 
     - name: Lint with pylint
       run: |
-        pylint --disable=R,C,W platform.py theory.py midi_io.py synth.py export.py main.py
+        pylint --disable=R,C,W sys_platform.py theory.py midi_io.py synth.py export.py main.py
       continue-on-error: true
