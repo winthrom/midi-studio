@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
 """GUI components: menus, piano roll, MIDI list, transport."""
 
-import tkinter as tk
-from tkinter import ttk, filedialog, messagebox, simpledialog
-import time
-import threading
-import webbrowser
 import os
+import threading
+import time
+import tkinter as tk
+import webbrowser
 import xml.etree.ElementTree as ET
+from tkinter import filedialog, messagebox, simpledialog, ttk
+
 
 class TkPopupMenu(tk.Toplevel):
     """A dropdown/context menu built entirely from ordinary Tk widgets in
@@ -35,19 +36,20 @@ class TkPopupMenu(tk.Toplevel):
     the mechanisms that opt a window OUT of normal window-manager
     desktop tracking, which is the root of this whole class of bug.
     """
-    _BG      = "#2b2b2b"
-    _FG      = "#eeeeee"
-    _HOVER   = "#3d6fa5"
-    _SEP     = "#555555"
+
+    _BG = "#2b2b2b"
+    _FG = "#eeeeee"
+    _HOVER = "#3d6fa5"
+    _SEP = "#555555"
     _ACCEL_FG = "#999999"
 
     def __init__(self, master, tearoff=0, **kw):
         super().__init__(master)
-        self._items = []            # (kind, label, payload, accelerator)
-        self._parent_menu = None    # set on submenus via add_cascade
+        self._items = []  # (kind, label, payload, accelerator)
+        self._parent_menu = None  # set on submenus via add_cascade
         self._submenu_open = None
         self._posted = False
-        self._row_widgets = []      # v22ze-56.1 — see _build_rows below
+        self._row_widgets = []  # v22ze-56.1 — see _build_rows below
         self.withdraw()
         self.resizable(False, False)
         self.configure(bg=self._BG, bd=1, relief="solid")
@@ -91,7 +93,7 @@ class TkPopupMenu(tk.Toplevel):
                 continue
             row = tk.Frame(self, bg=self._BG)
             row.pack(fill="x")
-            self._row_widgets.append(row)   # children of row are destroyed with it
+            self._row_widgets.append(row)  # children of row are destroyed with it
             prefix = ""
             if kind == "radio":
                 value, variable, _cmd = payload
@@ -102,13 +104,28 @@ class TkPopupMenu(tk.Toplevel):
                 text_lbl, accel_txt = label.split("\t", 1)
             else:
                 text_lbl, accel_txt = label, accel
-            lab = tk.Label(row, text=prefix + text_lbl, bg=self._BG, fg=self._FG,
-                           anchor="w", padx=10, pady=3, font=("TkDefaultFont", 10))
+            lab = tk.Label(
+                row,
+                text=prefix + text_lbl,
+                bg=self._BG,
+                fg=self._FG,
+                anchor="w",
+                padx=10,
+                pady=3,
+                font=("TkDefaultFont", 10),
+            )
             lab.pack(side="left", fill="x", expand=True)
             widgets = [row, lab]
             if accel_txt:
-                acc = tk.Label(row, text=accel_txt, bg=self._BG, fg=self._ACCEL_FG,
-                               anchor="e", padx=10, font=("TkDefaultFont", 9))
+                acc = tk.Label(
+                    row,
+                    text=accel_txt,
+                    bg=self._BG,
+                    fg=self._ACCEL_FG,
+                    anchor="e",
+                    padx=10,
+                    font=("TkDefaultFont", 9),
+                )
                 acc.pack(side="right")
                 widgets.append(acc)
             if kind == "cascade":
@@ -119,9 +136,11 @@ class TkPopupMenu(tk.Toplevel):
             def _hover_on(e, ws=widgets):
                 for w in ws:
                     w.configure(bg=self._HOVER)
+
             def _hover_off(e, ws=widgets):
                 for w in ws:
                     w.configure(bg=self._BG)
+
             for w in widgets:
                 w.bind("<Enter>", _hover_on)
                 w.bind("<Leave>", _hover_off)
@@ -135,12 +154,19 @@ class TkPopupMenu(tk.Toplevel):
             elif kind == "radio":
                 value, variable, cmd = payload
                 for w in widgets:
-                    w.bind("<ButtonRelease-1>",
-                           lambda e, v=value, var=variable, c=cmd: self._run_radio(v, var, c))
+                    w.bind(
+                        "<ButtonRelease-1>",
+                        lambda e, v=value, var=variable, c=cmd: self._run_radio(
+                            v, var, c
+                        ),
+                    )
             elif kind == "cascade":
                 sub = payload
                 for w in widgets:
-                    w.bind("<ButtonRelease-1>", lambda e, s=sub, r=row: self._open_submenu(s, r))
+                    w.bind(
+                        "<ButtonRelease-1>",
+                        lambda e, s=sub, r=row: self._open_submenu(s, r),
+                    )
 
     def _run(self, command):
         self._close_chain()
@@ -175,8 +201,10 @@ class TkPopupMenu(tk.Toplevel):
     def popup(self, x, y, _is_submenu=False):
         self._build_rows()
         self.update_idletasks()
-        sw = self.winfo_screenwidth(); sh = self.winfo_screenheight()
-        w = self.winfo_reqwidth();     h = self.winfo_reqheight()
+        sw = self.winfo_screenwidth()
+        sh = self.winfo_screenheight()
+        w = self.winfo_reqwidth()
+        h = self.winfo_reqheight()
         x = max(0, min(x, sw - w - 4))
         y = max(0, min(y, sh - h - 4))
         self.geometry(f"+{x}+{y}")
@@ -265,6 +293,7 @@ class TkMenuBar(tk.Frame):
     mb=tk.Menu(self.root); self.root.config(menu=mb) call — everything
     else (add_cascade with a TkPopupMenu) stays the same shape.
     """
+
     _BG = "#3c3c3c"
     _FG = "#eeeeee"
     _HOVER = "#3d6fa5"
@@ -275,12 +304,23 @@ class TkMenuBar(tk.Frame):
 
     def add_cascade(self, label="", menu=None, **kw):
         menu._parent_menu = None
-        lbl = tk.Label(self, text=label, bg=self._BG, fg=self._FG,
-                       padx=10, pady=4, font=("TkDefaultFont", 10))
+        lbl = tk.Label(
+            self,
+            text=label,
+            bg=self._BG,
+            fg=self._FG,
+            padx=10,
+            pady=4,
+            font=("TkDefaultFont", 10),
+        )
         lbl.pack(side="left")
         lbl.bind("<Enter>", lambda e: lbl.configure(bg=self._HOVER))
-        lbl.bind("<Leave>", lambda e: lbl.configure(
-            bg=self._HOVER if self._open_menu is menu else self._BG))
+        lbl.bind(
+            "<Leave>",
+            lambda e: lbl.configure(
+                bg=self._HOVER if self._open_menu is menu else self._BG
+            ),
+        )
         lbl.bind("<ButtonRelease-1>", lambda e: self._toggle(menu, lbl))
 
     def _toggle(self, menu, lbl):
@@ -296,6 +336,7 @@ class TkMenuBar(tk.Frame):
         menu.popup(x, y)
         self._open_menu = menu
         lbl.configure(bg=self._HOVER)
+
         # Reset this label's highlight once the menu actually closes,
         # regardless of how it was dismissed (command run, click-away,
         # Escape, or the v22ze-55 FocusOut safety net).
@@ -306,6 +347,7 @@ class TkMenuBar(tk.Frame):
                     self._open_menu = None
             else:
                 self.after(150, _watch_close)
+
         self.after(150, _watch_close)
 
 
@@ -338,10 +380,12 @@ def _make_scrollable(toplevel, bg="#0d1117"):
 
     def _on_inner_configure(event=None):
         canvas.configure(scrollregion=canvas.bbox("all"))
+
     inner.bind("<Configure>", _on_inner_configure)
 
     def _on_canvas_configure(event):
         canvas.itemconfig(inner_id, width=event.width)
+
     canvas.bind("<Configure>", _on_canvas_configure)
 
     def _on_mousewheel(event):
@@ -351,6 +395,7 @@ def _make_scrollable(toplevel, bg="#0d1117"):
             canvas.yview_scroll(1, "units")
         elif event.delta:
             canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+
     toplevel.bind("<Button-4>", _on_mousewheel, add="+")
     toplevel.bind("<Button-5>", _on_mousewheel, add="+")
     toplevel.bind("<MouseWheel>", _on_mousewheel, add="+")
@@ -388,10 +433,11 @@ def _backfill_musicxml_staff_tags(xml_doc):
     verified and corrected here, not just ones this function adds.
     """
     import xml.etree.ElementTree as ET
+
     root = xml_doc.tree.getroot()
-    for part in root.findall('part'):
-        for measure in part.findall('measure'):
-            notes = measure.findall('note')
+    for part in root.findall("part"):
+        for measure in part.findall("measure"):
+            notes = measure.findall("note")
 
             # v22ze-73 fix: this used to fill missing <staff> with a
             # single forward pass ("last explicit value seen so far,
@@ -410,7 +456,7 @@ def _backfill_musicxml_staff_tags(xml_doc):
             # explicit value that appears LATER in that same voice.
             by_voice = {}
             for n in notes:
-                voice_el = n.find('voice')
+                voice_el = n.find("voice")
                 voice = voice_el.text if voice_el is not None else "1"
                 by_voice.setdefault(voice, []).append(n)
 
@@ -418,12 +464,12 @@ def _backfill_musicxml_staff_tags(xml_doc):
             for voice, vnotes in by_voice.items():
                 last = None
                 for n in vnotes:
-                    st = n.find('staff')
+                    st = n.find("staff")
                     if st is not None:
                         last = st.text
                         resolved[id(n)] = last
                     else:
-                        resolved[id(n)] = last   # may be None -- backward pass fixes it
+                        resolved[id(n)] = last  # may be None -- backward pass fixes it
                 nxt = None
                 for n in reversed(vnotes):
                     if resolved[id(n)] is not None:
@@ -432,13 +478,15 @@ def _backfill_musicxml_staff_tags(xml_doc):
                         resolved[id(n)] = nxt
                 for n in vnotes:
                     if resolved[id(n)] is None:
-                        resolved[id(n)] = "1"   # last-resort: whole voice had no staff at all
+                        resolved[id(n)] = (
+                            "1"  # last-resort: whole voice had no staff at all
+                        )
 
             for note in notes:
                 val = resolved[id(note)]
-                staff_el = note.find('staff')
+                staff_el = note.find("staff")
                 if staff_el is None:
-                    staff_el = ET.SubElement(note, 'staff')
+                    staff_el = ET.SubElement(note, "staff")
                 staff_el.text = val
 
                 # Verify/correct position: <staff> must precede any
@@ -447,7 +495,7 @@ def _backfill_musicxml_staff_tags(xml_doc):
                 cur_idx = children.index(staff_el)
                 insert_at = None
                 for i, ch in enumerate(children):
-                    if i != cur_idx and ch.tag in ('beam', 'notations', 'lyric'):
+                    if i != cur_idx and ch.tag in ("beam", "notations", "lyric"):
                         insert_at = i
                         break
                 if insert_at is not None and insert_at < cur_idx:
@@ -497,7 +545,7 @@ def _strip_ly_block(text, keyword):
             elif text[k] == "}":
                 depth -= 1
             k += 1
-        i = k   # resume scanning right after the matched block's closing brace
+        i = k  # resume scanning right after the matched block's closing brace
     return "".join(out)
 
 
@@ -539,14 +587,16 @@ def _popup_menu_safe(menu, x, y):
         return
     top = menu.master.winfo_toplevel()
     top._pending_popup_menu = menu
-    if not getattr(top, '_focusout_menu_guard_installed', False):
+    if not getattr(top, "_focusout_menu_guard_installed", False):
+
         def _unpost_stuck_menu(event=None, _top=top):
-            m = getattr(_top, '_pending_popup_menu', None)
+            m = getattr(_top, "_pending_popup_menu", None)
             if m is not None:
                 try:
                     m.unpost()
                 except Exception:
                     pass
+
         top.bind("<FocusOut>", _unpost_stuck_menu, add="+")
         top._focusout_menu_guard_installed = True
     try:
@@ -569,6 +619,7 @@ def key_implied_accidental(letter_idx, key_str):
         return -1 if letter_idx in _FLAT_ORDER_LETTERS[:n_flats] else 0
     return 0
 
+
 # ── Key-signature auto-detection (Krumhansl-Schmuckler) ─────────────────────
 # Classic tonal-hierarchy profiles from key-finding research (Krumhansl &
 # Kessler 1982): how strongly each of the 12 pitch classes, relative to a
@@ -577,12 +628,52 @@ def key_implied_accidental(letter_idx, key_str):
 # modulation within a piece, and non-tonal music can all fool it -- so this
 # is offered as a SUGGESTED starting point for the user to confirm or
 # override, never as a silent, unreviewable decision.
-_KS_MAJOR_PROFILE = [6.35,2.23,3.48,2.33,4.38,4.09,2.52,5.19,2.39,3.66,2.29,2.88]
-_KS_MINOR_PROFILE = [6.33,2.68,3.52,5.38,2.60,3.53,2.54,4.75,3.98,2.69,3.34,3.17]
+_KS_MAJOR_PROFILE = [
+    6.35,
+    2.23,
+    3.48,
+    2.33,
+    4.38,
+    4.09,
+    2.52,
+    5.19,
+    2.39,
+    3.66,
+    2.29,
+    2.88,
+]
+_KS_MINOR_PROFILE = [
+    6.33,
+    2.68,
+    3.52,
+    5.38,
+    2.60,
+    3.53,
+    2.54,
+    4.75,
+    3.98,
+    2.69,
+    3.34,
+    3.17,
+]
 
 # MIDI key_signature strings for each of the 12 possible tonics, major/minor
-_KEY_STR_MAJOR = ['C','Db','D','Eb','E','F','F#','G','Ab','A','Bb','B']
-_KEY_STR_MINOR = ['Cm','C#m','Dm','Ebm','Em','Fm','F#m','Gm','G#m','Am','Bbm','Bm']
+_KEY_STR_MAJOR = ["C", "Db", "D", "Eb", "E", "F", "F#", "G", "Ab", "A", "Bb", "B"]
+_KEY_STR_MINOR = [
+    "Cm",
+    "C#m",
+    "Dm",
+    "Ebm",
+    "Em",
+    "Fm",
+    "F#m",
+    "Gm",
+    "G#m",
+    "Am",
+    "Bbm",
+    "Bm",
+]
+
 
 def detect_key_signature(notes_or_song):
     """Suggest a key signature from note content via the Krumhansl-
@@ -603,24 +694,24 @@ def detect_key_signature(notes_or_song):
     chromatic, can legitimately confuse any such algorithm).
     """
     notes = notes_or_song
-    if hasattr(notes_or_song, 'tracks'):
+    if hasattr(notes_or_song, "tracks"):
         notes = [n for tr in notes_or_song.tracks for n in tr.notes]
     if not notes:
-        return ('C', 0.0)
+        return ("C", 0.0)
 
     hist = [0.0] * 12
     for n in notes:
-        hist[n.pitch % 12] += max(1, getattr(n, 'duration', 1))
+        hist[n.pitch % 12] += max(1, getattr(n, "duration", 1))
     total = sum(hist)
     if total <= 0:
-        return ('C', 0.0)
+        return ("C", 0.0)
     hist = [h / total for h in hist]
 
     def correlation(a, b):
         ma, mb = sum(a) / len(a), sum(b) / len(b)
         num = sum((x - ma) * (y - mb) for x, y in zip(a, b))
-        da  = sum((x - ma) ** 2 for x in a) ** 0.5
-        db  = sum((y - mb) ** 2 for y in b) ** 0.5
+        da = sum((x - ma) ** 2 for x in a) ** 0.5
+        db = sum((y - mb) ** 2 for y in b) ** 0.5
         return num / (da * db) if da > 0 and db > 0 else 0.0
 
     scores = []  # (correlation, key_str)
@@ -635,20 +726,24 @@ def detect_key_signature(notes_or_song):
     runner_up_score = scores[1][0]
     return (best_key, best_score - runner_up_score)
 
+
 # Chromatic semitone → diatonic step and accidental, SHARP spelling
 # (chromatic note grouped with the natural note BELOW it, raised)
-_DIA_SHARP = [0,0,1,1,2,3,3,4,4,5,5,6]
-_ACC_SHARP = [0,1,0,1,0,0,1,0,1,0,1,0]
+_DIA_SHARP = [0, 0, 1, 1, 2, 3, 3, 4, 4, 5, 5, 6]
+_ACC_SHARP = [0, 1, 0, 1, 0, 0, 1, 0, 1, 0, 1, 0]
 # Chromatic semitone → diatonic step and accidental, FLAT spelling
 # (chromatic note grouped with the natural note ABOVE it, lowered)
-_DIA_FLAT  = [0,1,1,2,2,3,4,4,5,5,6,6]
-_ACC_FLAT  = [0,-1,0,-1,0,0,-1,0,-1,0,-1,0]
+_DIA_FLAT = [0, 1, 1, 2, 2, 3, 4, 4, 5, 5, 6, 6]
+_ACC_FLAT = [0, -1, 0, -1, 0, 0, -1, 0, -1, 0, -1, 0]
 # Back-compat aliases (old names, sharp-only) -- kept in case anything
 # else in the file references them directly by name.
 _DIA = _DIA_SHARP
 _ACC = _ACC_SHARP
 
-def note_name(p): return f"{NOTE_NAMES[p%12]}{p//12-1}"
+
+def note_name(p):
+    return f"{NOTE_NAMES[p%12]}{p//12-1}"
+
 
 def _rotated_ellipse_points(cx, cy, h_rad, v_rad, angle_deg=30, n=16):
     """Return a flat [x0,y0,x1,y1,...] point list approximating an
@@ -668,9 +763,10 @@ def _rotated_ellipse_points(cx, cy, h_rad, v_rad, angle_deg=30, n=16):
     for i in range(n):
         a = 2 * math.pi * i / n
         ex, ey = h_rad * math.cos(a), v_rad * math.sin(a)
-        pts.append(cx + ex*cos_t - ey*sin_t)
-        pts.append(cy + ex*sin_t + ey*cos_t)
+        pts.append(cx + ex * cos_t - ey * sin_t)
+        pts.append(cy + ex * sin_t + ey * cos_t)
     return pts
+
 
 def _draw_notehead(c, cx, cy, h_rad, v_rad, outline, fill, width=1, angle_deg=30):
     """Draw a single calligraphic (rotated-ellipse) notehead.
@@ -680,6 +776,7 @@ def _draw_notehead(c, cx, cy, h_rad, v_rad, outline, fill, width=1, angle_deg=30
     half/whole note sitting on a staff line."""
     pts = _rotated_ellipse_points(cx, cy, h_rad, v_rad, angle_deg)
     return c.create_polygon(*pts, outline=outline, fill=fill, width=width, smooth=True)
+
 
 def pitch_to_staff(pitch, use_flats=False):
     """Return (diatonic_pos_rel_C4, accidental).
@@ -697,12 +794,21 @@ def pitch_to_staff(pitch, use_flats=False):
     doesn't pass it explicitly keeps the old (sharp) behavior -- this is
     the risk-reducing default the earlier session note referred to.
     """
-    oct_, semi = divmod(int(round(pitch)), 12)   # ensure int — float pitch crashes table lookups
+    oct_, semi = divmod(
+        int(round(pitch)), 12
+    )  # ensure int — float pitch crashes table lookups
     dia, acc = (_DIA_FLAT, _ACC_FLAT) if use_flats else (_DIA_SHARP, _ACC_SHARP)
-    return oct_*7 + dia[semi] - 35, acc[semi]   # C4=octave5*7+0=35
+    return oct_ * 7 + dia[semi] - 35, acc[semi]  # C4=octave5*7+0=35
 
-_SPELL_ACC_DELTA = {'double_flat': -2, 'flat': -1, 'natural': 0,
-                     'sharp': 1, 'double_sharp': 2}
+
+_SPELL_ACC_DELTA = {
+    "double_flat": -2,
+    "flat": -1,
+    "natural": 0,
+    "sharp": 1,
+    "double_sharp": 2,
+}
+
 
 def note_staff_pos(note, use_flats=False):
     """Like pitch_to_staff(note.pitch, use_flats), but honors an explicit
@@ -719,14 +825,15 @@ def note_staff_pos(note, use_flats=False):
     unambiguous (both the sharp and flat spelling tables agree on every
     white-key letter), so this always lands on a real, valid line/space.
     """
-    spelling = getattr(note, 'spelling', '') or ''
+    spelling = getattr(note, "spelling", "") or ""
     acc = _SPELL_ACC_DELTA.get(spelling)
     if acc is not None:
         natural_pitch = note.pitch - acc
         nat_pos, nat_acc = pitch_to_staff(natural_pitch, use_flats)
-        if nat_acc == 0:   # sanity check -- should always hold
+        if nat_acc == 0:  # sanity check -- should always hold
             return nat_pos, acc
     return pitch_to_staff(note.pitch, use_flats)
+
 
 def _song_uses_flats(song):
     """True if `song`'s key signature should be spelled with flats.
@@ -735,12 +842,14 @@ def _song_uses_flats(song):
     with no key signature set."""
     if song is None:
         return False
-    _n_sharps, n_flats = key_sig_accidentals(getattr(song, 'key_sig', 'C') or 'C')
+    _n_sharps, n_flats = key_sig_accidentals(getattr(song, "key_sig", "C") or "C")
     return n_flats > 0
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Data model
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 def _find_split_pitch_for_track(notes, prefer_lh_octaves=True):
     """Find the best treble/bass split point for a piano track: one
@@ -759,13 +868,16 @@ def _find_split_pitch_for_track(notes, prefer_lh_octaves=True):
     both call sites use the exact same function on the exact same
     data, and agree by construction.
     """
-    if not notes: return 60
+    if not notes:
+        return 60
     pitches = sorted(set(n.pitch for n in notes))
-    if len(pitches) < 2: return 60
+    if len(pitches) < 2:
+        return 60
     # Find the largest gap between consecutive pitches
-    best_gap = 0; split = 60
+    best_gap = 0
+    split = 60
     for i in range(len(pitches) - 1):
-        gap = pitches[i+1] - pitches[i]
+        gap = pitches[i + 1] - pitches[i]
         if gap > best_gap:
             best_gap = gap
             # Split point = just above the lower pitch of the gap
@@ -794,7 +906,7 @@ def _find_split_pitch_for_track(notes, prefer_lh_octaves=True):
         highest_needed = split
         for tick, pset in by_tick.items():
             for p in pset:
-                if p + 12 in pset:   # simultaneous octave pair
+                if p + 12 in pset:  # simultaneous octave pair
                     lower, upper = p, p + 12
                     if lower < split <= upper:
                         highest_needed = max(highest_needed, upper + 1)
@@ -802,11 +914,27 @@ def _find_split_pitch_for_track(notes, prefer_lh_octaves=True):
 
     return split
 
+
 class MidiNote:
-    __slots__ = ("tick","pitch","velocity","duration","channel","articulation","spelling")
-    def __init__(self, tick, pitch, velocity, duration, channel=0, articulation="", spelling=""):
-        self.tick=tick; self.pitch=pitch; self.velocity=velocity
-        self.duration=duration; self.channel=channel; self.articulation=articulation
+    __slots__ = (
+        "tick",
+        "pitch",
+        "velocity",
+        "duration",
+        "channel",
+        "articulation",
+        "spelling",
+    )
+
+    def __init__(
+        self, tick, pitch, velocity, duration, channel=0, articulation="", spelling=""
+    ):
+        self.tick = tick
+        self.pitch = pitch
+        self.velocity = velocity
+        self.duration = duration
+        self.channel = channel
+        self.articulation = articulation
         # v22ze-51 fix: explicit accidental spelling override, set only
         # when the user picks an accidental via the Accidental tool (see
         # ScoreView._click_accidental). Empty string (the default) means
@@ -822,11 +950,16 @@ class MidiNote:
         # screen (the notehead visibly "jumped" to a different line/
         # space, changing the pitch by more than a semitone even though
         # the user only asked for a different accidental symbol).
-        self.spelling=spelling
+        self.spelling = spelling
+
 
 class MidiEvent:
-    __slots__ = ("tick","msg")
-    def __init__(self, tick, msg): self.tick=tick; self.msg=msg
+    __slots__ = ("tick", "msg")
+
+    def __init__(self, tick, msg):
+        self.tick = tick
+        self.msg = msg
+
 
 class Track:
     """One MIDI track: notes, raw events, and display properties.
@@ -842,15 +975,16 @@ class Track:
                   Set when the user chooses "Single-line instrument" when
                   arming a recording track (guitar, violin, flute, etc.).
     """
+
     def __init__(self, name="Track", channel=0, program=0, volume=100):
-        self.name      = name
-        self.channel   = channel
-        self.program   = program
-        self.volume    = volume
-        self.mute      = False
-        self.solo      = False
-        self.staff_mode = "auto"   # "auto" | "grand" | "single"
-        self.notes:  list[MidiNote]  = []
+        self.name = name
+        self.channel = channel
+        self.program = program
+        self.volume = volume
+        self.mute = False
+        self.solo = False
+        self.staff_mode = "auto"  # "auto" | "grand" | "single"
+        self.notes: list[MidiNote] = []
         self.events: list[MidiEvent] = []
         # v22ze-35: notation-only annotations (currently: dynamics
         # markings) that are NOT real MIDI messages -- kept separate from
@@ -867,7 +1001,10 @@ class Track:
         # only for a loaded file's leftover meta/tempo-only tracks, which
         # default to always_show=False.
         self.always_show = False
-    def note_count(self): return len(self.notes)
+
+    def note_count(self):
+        return len(self.notes)
+
 
 def _build_measure_map_core(tpb, sigs, total):
     """Core fixed-grid measure builder, shared by Song.build_measure_map()
@@ -879,7 +1016,7 @@ def _build_measure_map_core(tpb, sigs, total):
     Returns list of (idx, start_tick, end_tick, num, den, tpm).
     """
     first_tpm = max(1, int(tpb * 4 * sigs[0][1] / sigs[0][2]))
-    total = max(total, first_tpm * 4)   # pad to at least 4 measures
+    total = max(total, first_tpm * 4)  # pad to at least 4 measures
 
     measures = []
     m_idx = 0
@@ -901,12 +1038,17 @@ def _build_measure_map_core(tpb, sigs, total):
 
 class Song:
     def __init__(self):
-        self.ticks_per_beat=480; self.tempo=500000
-        self.time_sig_num=4; self.time_sig_den=4
-        self.sig_changes: list[tuple] = []   # [(abs_tick, numerator, denominator), ...]
-        self.key_sig: str = "C"              # e.g. "C", "Bb", "F#", "Gm" — from MIDI key_signature meta
+        self.ticks_per_beat = 480
+        self.tempo = 500000
+        self.time_sig_num = 4
+        self.time_sig_den = 4
+        self.sig_changes: list[tuple] = []  # [(abs_tick, numerator, denominator), ...]
+        self.key_sig: str = (
+            "C"  # e.g. "C", "Bb", "F#", "Gm" — from MIDI key_signature meta
+        )
         self.tracks: list[Track] = []
-        self.filename=None; self.modified=False
+        self.filename = None
+        self.modified = False
         # Set by Song.rationalize() to a measure map (idx,start,end,num,den,tpm)
         # constructed from actual beat content rather than a fixed external
         # grid.  When present, consumers (bake_to_score, to_ly, ScoreView,
@@ -914,9 +1056,12 @@ class Song:
         self.rationalized_measure_map = None
 
     @property
-    def bpm(self): return round(60_000_000/self.tempo)
+    def bpm(self):
+        return round(60_000_000 / self.tempo)
+
     @bpm.setter
-    def bpm(self, v): self.tempo=int(60_000_000/max(1,v))
+    def bpm(self, v):
+        self.tempo = int(60_000_000 / max(1, v))
 
     def ticks_per_measure(self):
         # Correct for all time signatures: tpb is always ticks-per-quarter-note.
@@ -1018,16 +1163,17 @@ class Song:
         Call rationalize() to actually fix problems.
         """
         import bisect as _bv
+
         mmap = self.get_measure_map()
         total = self.total_ticks()
         problems = []
 
         for m_idx, ms, me, num, den, tpm in mmap:
             if ms >= total:
-                break   # trailing padding measures — not a problem
+                break  # trailing padding measures — not a problem
 
             # Find all notes whose onset falls in this measure
-            used_end = ms   # furthest tick reached by any note
+            used_end = ms  # furthest tick reached by any note
             has_overflow = False
             for tr in self.tracks:
                 for n in tr.notes:
@@ -1040,40 +1186,51 @@ class Song:
             used = used_end - ms
             underfill = used < tpm
             if has_overflow or underfill:
-                problems.append({
-                    'measure':      m_idx + 1,
-                    'start':        ms,
-                    'expected_tpm': tpm,
-                    'used_ticks':   used,
-                    'overflow':     has_overflow,
-                    'underfill':    underfill,
-                })
+                problems.append(
+                    {
+                        "measure": m_idx + 1,
+                        "start": ms,
+                        "expected_tpm": tpm,
+                        "used_ticks": used,
+                        "overflow": has_overflow,
+                        "underfill": underfill,
+                    }
+                )
 
         return problems
 
     def total_ticks(self):
-        mx = self.ticks_per_beat*4
+        mx = self.ticks_per_beat * 4
         for t in self.tracks:
-            for n in t.notes: mx=max(mx, n.tick+n.duration)
+            for n in t.notes:
+                mx = max(mx, n.tick + n.duration)
         return mx
 
     def add_track(self, name=None):
-        n=len(self.tracks)+1; ch=min(15,len(self.tracks))
-        if ch>=9: ch+=1
-        ch=ch%16
-        t=Track(name or f"Track {n}", channel=ch)
-        t.always_show = True   # v22v: keep visible even before it has notes
-        self.tracks.append(t); self.modified=True; return t
+        n = len(self.tracks) + 1
+        ch = min(15, len(self.tracks))
+        if ch >= 9:
+            ch += 1
+        ch = ch % 16
+        t = Track(name or f"Track {n}", channel=ch)
+        t.always_show = True  # v22v: keep visible even before it has notes
+        self.tracks.append(t)
+        self.modified = True
+        return t
 
     def delete_track(self, idx):
-        if 0<=idx<len(self.tracks): self.tracks.pop(idx); self.modified=True
+        if 0 <= idx < len(self.tracks):
+            self.tracks.pop(idx)
+            self.modified = True
 
     # ── MIDI import ──────────────────────────────────────────────────────────
     @classmethod
     def from_mid(cls, path):
-        mid=mido.MidiFile(path); song=cls()
-        song.filename=path; song.ticks_per_beat=mid.ticks_per_beat
-        song.midi_type=mid.type
+        mid = mido.MidiFile(path)
+        song = cls()
+        song.filename = path
+        song.ticks_per_beat = mid.ticks_per_beat
+        song.midi_type = mid.type
 
         def _close_note(open_n, key, abs_t, notes_list, channel):
             """Close an open note safely; returns True if a note was appended."""
@@ -1085,13 +1242,15 @@ class Song:
                     return True
             return False
 
-        if mid.type==0 and len(mid.tracks)==1:
+        if mid.type == 0 and len(mid.tracks) == 1:
             # Type 0: single track — auto-split by channel
-            ch_prog={}; abs_t=0
+            ch_prog = {}
+            abs_t = 0
             for msg in mid.tracks[0]:
-                abs_t+=msg.time
-                if msg.type=="set_tempo": song.tempo=msg.tempo
-                elif msg.type=="time_signature":
+                abs_t += msg.time
+                if msg.type == "set_tempo":
+                    song.tempo = msg.tempo
+                elif msg.type == "time_signature":
                     # v22ze-45 fix: this used to overwrite time_sig_num/
                     # den on EVERY time_signature event, so a piece with
                     # real mid-piece meter changes (common in classical
@@ -1104,78 +1263,100 @@ class Song:
                     # way; only the single "primary" field needs to stay
                     # at the first (opening) value.
                     if not song.sig_changes:
-                        song.time_sig_num=msg.numerator; song.time_sig_den=msg.denominator
+                        song.time_sig_num = msg.numerator
+                        song.time_sig_den = msg.denominator
                     song.sig_changes.append((abs_t, msg.numerator, msg.denominator))
-                elif msg.type=="key_signature":
-                    song.key_sig=msg.key   # e.g. "Bb", "F#", "C"
-                elif msg.type=="program_change": ch_prog[msg.channel]=msg.program
-            ch_tracks={}; open_n={}; abs_t=0
+                elif msg.type == "key_signature":
+                    song.key_sig = msg.key  # e.g. "Bb", "F#", "C"
+                elif msg.type == "program_change":
+                    ch_prog[msg.channel] = msg.program
+            ch_tracks = {}
+            open_n = {}
+            abs_t = 0
             for msg in mid.tracks[0]:
-                abs_t+=msg.time
-                ch=getattr(msg,"channel",None)
-                if ch is None: continue
+                abs_t += msg.time
+                ch = getattr(msg, "channel", None)
+                if ch is None:
+                    continue
                 if ch not in ch_tracks:
-                    prog=ch_prog.get(ch,0)
-                    ch_tracks[ch]=Track(name=f"Ch {ch+1} - {GM_INSTRUMENTS[prog]}",
-                                        channel=ch,program=prog)
-                if msg.type=="note_on" and msg.velocity>0:
-                    k=(ch,msg.note)
+                    prog = ch_prog.get(ch, 0)
+                    ch_tracks[ch] = Track(
+                        name=f"Ch {ch+1} - {GM_INSTRUMENTS[prog]}",
+                        channel=ch,
+                        program=prog,
+                    )
+                if msg.type == "note_on" and msg.velocity > 0:
+                    k = (ch, msg.note)
                     # Close any still-open note on this pitch before re-striking
                     _close_note(open_n, k, abs_t, ch_tracks[ch].notes, ch)
-                    open_n[k]=(abs_t,msg.velocity)
-                elif msg.type in ("note_off",) or (msg.type=="note_on" and msg.velocity==0):
-                    k=(ch,msg.note)
+                    open_n[k] = (abs_t, msg.velocity)
+                elif msg.type in ("note_off",) or (
+                    msg.type == "note_on" and msg.velocity == 0
+                ):
+                    k = (ch, msg.note)
                     _close_note(open_n, k, abs_t, ch_tracks[ch].notes, ch)
-                elif msg.type=="control_change":
-                    if msg.control==7: ch_tracks[ch].volume=msg.value
-                    ch_tracks[ch].events.append(MidiEvent(abs_t,msg))
+                elif msg.type == "control_change":
+                    if msg.control == 7:
+                        ch_tracks[ch].volume = msg.value
+                    ch_tracks[ch].events.append(MidiEvent(abs_t, msg))
             # Flush any unclosed notes (file truncated or missing note-off)
             for (ch, pitch), (s, v) in open_n.items():
                 dur = max(1, mid.ticks_per_beat // 2)
                 ch_tracks[ch].notes.append(MidiNote(s, pitch, v, dur, ch))
             for ch in sorted(ch_tracks):
-                if ch_tracks[ch].notes: song.tracks.append(ch_tracks[ch])
+                if ch_tracks[ch].notes:
+                    song.tracks.append(ch_tracks[ch])
         else:
             for i, mt in enumerate(mid.tracks):
-                tr=Track(name=mt.name or f"Track {i+1}")
-                abs_t=0; open_n={}
+                tr = Track(name=mt.name or f"Track {i+1}")
+                abs_t = 0
+                open_n = {}
                 for msg in mt:
-                    abs_t+=msg.time
-                    if msg.type=="set_tempo":
-                        song.tempo=msg.tempo; tr.events.append(MidiEvent(abs_t,msg))
-                    elif msg.type=="time_signature":
+                    abs_t += msg.time
+                    if msg.type == "set_tempo":
+                        song.tempo = msg.tempo
+                        tr.events.append(MidiEvent(abs_t, msg))
+                    elif msg.type == "time_signature":
                         # v22ze-45 fix: same issue as the Type-0 loop
                         # above -- only the FIRST time_signature event
                         # should set the "primary" field; sig_changes
                         # still records every change.
                         if not song.sig_changes:
-                            song.time_sig_num=msg.numerator; song.time_sig_den=msg.denominator
+                            song.time_sig_num = msg.numerator
+                            song.time_sig_den = msg.denominator
                         song.sig_changes.append((abs_t, msg.numerator, msg.denominator))
-                    elif msg.type=="key_signature":
-                        song.key_sig=msg.key   # store on song; last one wins
-                    elif msg.type=="program_change":
-                        tr.program=msg.program; tr.channel=msg.channel
-                        tr.events.append(MidiEvent(abs_t,msg))
-                    elif msg.type=="note_on" and msg.velocity>0:
-                        k=(msg.channel,msg.note)
+                    elif msg.type == "key_signature":
+                        song.key_sig = msg.key  # store on song; last one wins
+                    elif msg.type == "program_change":
+                        tr.program = msg.program
+                        tr.channel = msg.channel
+                        tr.events.append(MidiEvent(abs_t, msg))
+                    elif msg.type == "note_on" and msg.velocity > 0:
+                        k = (msg.channel, msg.note)
                         # Re-strike: close previous note first
                         _close_note(open_n, k, abs_t, tr.notes, msg.channel)
-                        open_n[k]=(abs_t,msg.velocity)
-                        tr.channel=msg.channel
-                    elif msg.type in ("note_off",) or (msg.type=="note_on" and msg.velocity==0):
-                        k=(msg.channel,msg.note)
+                        open_n[k] = (abs_t, msg.velocity)
+                        tr.channel = msg.channel
+                    elif msg.type in ("note_off",) or (
+                        msg.type == "note_on" and msg.velocity == 0
+                    ):
+                        k = (msg.channel, msg.note)
                         _close_note(open_n, k, abs_t, tr.notes, msg.channel)
-                    elif msg.type=="control_change":
-                        if msg.control==7: tr.volume=msg.value
-                        tr.events.append(MidiEvent(abs_t,msg))
+                    elif msg.type == "control_change":
+                        if msg.control == 7:
+                            tr.volume = msg.value
+                        tr.events.append(MidiEvent(abs_t, msg))
                     else:
-                        try: tr.events.append(MidiEvent(abs_t,msg))
-                        except: pass
+                        try:
+                            tr.events.append(MidiEvent(abs_t, msg))
+                        except:
+                            pass
                 # Flush unclosed notes
                 for (ch, pitch), (s, v) in open_n.items():
                     dur = max(1, mid.ticks_per_beat // 2)
                     tr.notes.append(MidiNote(s, pitch, v, dur, ch))
-                if tr.notes or (tr.events and i>0): song.tracks.append(tr)
+                if tr.notes or (tr.events and i > 0):
+                    song.tracks.append(tr)
         return song
 
     # ── MIDI export ──────────────────────────────────────────────────────────
@@ -1188,11 +1369,18 @@ class Song:
         match what the score displays.
         """
         import copy as _tmcopy
-        mid=mido.MidiFile(ticks_per_beat=self.ticks_per_beat)
-        tt=mido.MidiTrack()
-        tt.append(mido.MetaMessage("set_tempo",tempo=self.tempo,time=0))
-        tt.append(mido.MetaMessage("time_signature",numerator=self.time_sig_num,
-                                   denominator=self.time_sig_den,time=0))
+
+        mid = mido.MidiFile(ticks_per_beat=self.ticks_per_beat)
+        tt = mido.MidiTrack()
+        tt.append(mido.MetaMessage("set_tempo", tempo=self.tempo, time=0))
+        tt.append(
+            mido.MetaMessage(
+                "time_signature",
+                numerator=self.time_sig_num,
+                denominator=self.time_sig_den,
+                time=0,
+            )
+        )
         # v22ze fix: key_sig was never written here at all -- set_tempo and
         # time_signature were, but key_signature wasn't, so self.key_sig
         # (correctly read on load, correctly used by the screen renderer,
@@ -1203,11 +1391,13 @@ class Song:
         # string format this class already reads back in from_mid()
         # (e.g. "C", "Gm", "F#"), so no conversion is needed here.
         try:
-            tt.append(mido.MetaMessage("key_signature",
-                                        key=getattr(self, 'key_sig', 'C') or 'C',
-                                        time=0))
+            tt.append(
+                mido.MetaMessage(
+                    "key_signature", key=getattr(self, "key_sig", "C") or "C", time=0
+                )
+            )
         except Exception:
-            pass   # a key_sig value mido doesn't recognize shouldn't block saving
+            pass  # a key_sig value mido doesn't recognize shouldn't block saving
         # v22ze-45 fix: this used to write exactly ONE time_signature
         # event (the single self.time_sig_num/den field), silently
         # collapsing a piece with genuine mid-piece meter changes
@@ -1221,12 +1411,17 @@ class Song:
         # track, tracked via _last_sig_tick starting from the tick-0
         # baseline already established above.
         _last_sig_tick = 0
-        for _chg_tick, _chg_num, _chg_den in sorted(getattr(self, 'sig_changes', [])):
+        for _chg_tick, _chg_num, _chg_den in sorted(getattr(self, "sig_changes", [])):
             if _chg_tick <= 0:
-                continue   # already covered by the initial tick-0 event above
-            tt.append(mido.MetaMessage("time_signature", numerator=_chg_num,
-                                       denominator=_chg_den,
-                                       time=_chg_tick - _last_sig_tick))
+                continue  # already covered by the initial tick-0 event above
+            tt.append(
+                mido.MetaMessage(
+                    "time_signature",
+                    numerator=_chg_num,
+                    denominator=_chg_den,
+                    time=_chg_tick - _last_sig_tick,
+                )
+            )
             _last_sig_tick = _chg_tick
         mid.tracks.append(tt)
         for tr in self.tracks:
@@ -1239,7 +1434,7 @@ class Song:
             # last_of_pitch[pitch] → index into merged[] of the open note
             last_of_pitch: dict = {}
             for n in sorted_notes:
-                if getattr(n, 'articulation', '') == 'tie_continuation':
+                if getattr(n, "articulation", "") == "tie_continuation":
                     idx = last_of_pitch.get(n.pitch)
                     if idx is not None:
                         # Extend the predecessor to cover this continuation
@@ -1254,22 +1449,67 @@ class Song:
                 last_of_pitch[nc.pitch] = len(merged)
                 merged.append(nc)
 
-            mt=mido.MidiTrack(); mt.name=tr.name
-            evs=[(0,mido.Message("program_change",channel=tr.channel,program=tr.program,time=0)),
-                 (0,mido.Message("control_change",channel=tr.channel,control=7,value=tr.volume,time=0))]
+            mt = mido.MidiTrack()
+            mt.name = tr.name
+            evs = [
+                (
+                    0,
+                    mido.Message(
+                        "program_change", channel=tr.channel, program=tr.program, time=0
+                    ),
+                ),
+                (
+                    0,
+                    mido.Message(
+                        "control_change",
+                        channel=tr.channel,
+                        control=7,
+                        value=tr.volume,
+                        time=0,
+                    ),
+                ),
+            ]
             for n in merged:
-                evs.append((n.tick,mido.Message("note_on",channel=tr.channel,note=n.pitch,velocity=n.velocity,time=0)))
-                evs.append((n.tick+n.duration,mido.Message("note_off",channel=tr.channel,note=n.pitch,velocity=0,time=0)))
+                evs.append(
+                    (
+                        n.tick,
+                        mido.Message(
+                            "note_on",
+                            channel=tr.channel,
+                            note=n.pitch,
+                            velocity=n.velocity,
+                            time=0,
+                        ),
+                    )
+                )
+                evs.append(
+                    (
+                        n.tick + n.duration,
+                        mido.Message(
+                            "note_off",
+                            channel=tr.channel,
+                            note=n.pitch,
+                            velocity=0,
+                            time=0,
+                        ),
+                    )
+                )
             for e in tr.events:
-                if e.msg.type not in ("set_tempo","time_signature","program_change"):
-                    evs.append((e.tick,e.msg))
-            evs.sort(key=lambda x:x[0]); prev=0
-            for tick,msg in evs:
-                try: mt.append(msg.copy(time=tick-prev)); prev=tick
-                except: pass
-            mt.append(mido.MetaMessage("end_of_track",time=0))
+                if e.msg.type not in ("set_tempo", "time_signature", "program_change"):
+                    evs.append((e.tick, e.msg))
+            evs.sort(key=lambda x: x[0])
+            prev = 0
+            for tick, msg in evs:
+                try:
+                    mt.append(msg.copy(time=tick - prev))
+                    prev = tick
+                except:
+                    pass
+            mt.append(mido.MetaMessage("end_of_track", time=0))
             mid.tracks.append(mt)
-        mid.save(path); self.filename=path; self.modified=False
+        mid.save(path)
+        self.filename = path
+        self.modified = False
 
     # ── MuseScore .mscx export ───────────────────────────────────────────────
     def to_mscx(self, path):
@@ -1304,18 +1544,25 @@ class Song:
         ET.SubElement(score, "showMargins").text = "0"
 
         # metaTags
-        for name, val in [("arranger",""),("composer",""),("copyright",""),
-                           ("lyricist",""),("originalFormat","mid"),
-                           ("platform","Linux"),("source",""),("workTitle","")]:
+        for name, val in [
+            ("arranger", ""),
+            ("composer", ""),
+            ("copyright", ""),
+            ("lyricist", ""),
+            ("originalFormat", "mid"),
+            ("platform", "Linux"),
+            ("source", ""),
+            ("workTitle", ""),
+        ]:
             mt = ET.SubElement(score, "metaTag", name=name)
             mt.text = val
 
         # ── Part definitions (stubs — no measures here) ───────────────────
         staff_id = 1
-        track_staff_ids = []   # list of (first_staff_id, n_staves) per track
+        track_staff_ids = []  # list of (first_staff_id, n_staves) per track
 
         for tr in self.tracks:
-            is_piano = (tr.program < 8 or tr.program in range(16,24))
+            is_piano = tr.program < 8 or tr.program in range(16, 24)
             n_staves = 2 if is_piano else 1
             track_staff_ids.append((staff_id, n_staves))
 
@@ -1327,7 +1574,9 @@ class Song:
                 stype = ET.SubElement(stub, "StaffType", group="pitched")
                 ET.SubElement(stype, "name").text = "stdNormal"
                 if n_staves == 2 and si == 0:
-                    ET.SubElement(stub, "bracket", type="1", span="2", col="0", visible="1")
+                    ET.SubElement(
+                        stub, "bracket", type="1", span="2", col="0", visible="1"
+                    )
                     ET.SubElement(stub, "barLineSpan").text = "1"
                 if n_staves == 2 and si == 1:
                     ET.SubElement(stub, "defaultClef").text = "F"
@@ -1337,7 +1586,9 @@ class Song:
             instr_id = _program_to_instrument_id(tr.program)
             instr = ET.SubElement(part, "Instrument", id=instr_id)
             ET.SubElement(instr, "longName").text = GM_INSTRUMENTS[tr.program]
-            ET.SubElement(instr, "shortName").text = GM_INSTRUMENTS[tr.program][:4] + "."
+            ET.SubElement(instr, "shortName").text = (
+                GM_INSTRUMENTS[tr.program][:4] + "."
+            )
             ET.SubElement(instr, "trackName").text = GM_INSTRUMENTS[tr.program]
             ET.SubElement(instr, "minPitchP").text = "0"
             ET.SubElement(instr, "maxPitchP").text = "127"
@@ -1358,10 +1609,7 @@ class Song:
             first_sid, n_staves = track_staff_ids[ti]
             notes_sorted = sorted(tr.notes, key=lambda n: n.tick)
 
-            print(
-                 "[RESTSRC]",
-                 [(n.tick, n.duration) for n in notes_sorted[:10]]
-                 )
+            print("[RESTSRC]", [(n.tick, n.duration) for n in notes_sorted[:10]])
 
             for si in range(n_staves):
                 sid = first_sid + si
@@ -1370,13 +1618,17 @@ class Song:
                 # Split notes: treble (pitch >= 60) → staff 1, bass (pitch < 60) → staff 2
                 # For non-piano, all notes go to staff 1
                 if n_staves == 2:
-                    staff_notes = [n for n in notes_sorted if (si == 0 and n.pitch >= 60) or
-                                                               (si == 1 and n.pitch < 60)]
+                    staff_notes = [
+                        n
+                        for n in notes_sorted
+                        if (si == 0 and n.pitch >= 60) or (si == 1 and n.pitch < 60)
+                    ]
                 else:
                     staff_notes = notes_sorted
 
                 for m in range(n_meas):
-                    ms = m * tpm; me = ms + tpm
+                    ms = m * tpm
+                    me = ms + tpm
                     meas_notes = [n for n in staff_notes if ms <= n.tick < me]
                     meas_el = ET.SubElement(staff_el, "Measure")
 
@@ -1386,12 +1638,16 @@ class Song:
                     # First measure: add KeySig, TimeSig, Tempo
                     if m == 0 and sid == first_sid:
                         keysig = ET.SubElement(voice_el, "KeySig")
-                        ET.SubElement(keysig, "concertKey").text = str(getattr(self,'key_sig',0))
+                        ET.SubElement(keysig, "concertKey").text = str(
+                            getattr(self, "key_sig", 0)
+                        )
                         tsig = ET.SubElement(voice_el, "TimeSig")
                         ET.SubElement(tsig, "sigN").text = str(self.time_sig_num)
                         ET.SubElement(tsig, "sigD").text = str(self.time_sig_den)
                         tempo_el = ET.SubElement(voice_el, "Tempo")
-                        ET.SubElement(tempo_el, "tempo").text = str(round(self.bpm / 60.0, 6))
+                        ET.SubElement(tempo_el, "tempo").text = str(
+                            round(self.bpm / 60.0, 6)
+                        )
                         txt = ET.SubElement(tempo_el, "text")
                         ET.SubElement(txt, "sym").text = "metNoteQuarterUp"
                     elif m == 0:
@@ -1405,11 +1661,14 @@ class Song:
                     if not meas_notes:
                         rest = ET.SubElement(voice_el, "Rest")
                         ET.SubElement(rest, "durationType").text = "measure"
-                        ET.SubElement(rest, "duration").text =                             f"{self.time_sig_num}/{self.time_sig_den}"
+                        ET.SubElement(rest, "duration").text = (
+                            f"{self.time_sig_num}/{self.time_sig_den}"
+                        )
                         continue
 
                     # Group notes by tick into chords
                     from itertools import groupby
+
                     cursor = ms
                     tick_groups = []
                     for tick, grp in groupby(meas_notes, key=lambda n: n.tick):
@@ -1433,7 +1692,9 @@ class Song:
                         for note in chord_notes:
                             note_el = ET.SubElement(chord_el, "Note")
                             ET.SubElement(note_el, "pitch").text = str(note.pitch)
-                            ET.SubElement(note_el, "tpc").text = str(_midi_to_tpc(note.pitch))
+                            ET.SubElement(note_el, "tpc").text = str(
+                                _midi_to_tpc(note.pitch)
+                            )
                             ET.SubElement(note_el, "velocity").text = str(note.velocity)
 
                         cursor = tick + chord_dur
@@ -1444,9 +1705,10 @@ class Song:
                         _write_rest_sequence(voice_el, tail, tpb)
 
         # ── Serialise ─────────────────────────────────────────────────────
-        raw  = ET.tostring(root, encoding="unicode", xml_declaration=False)
-        nice = minidom.parseString('<?xml version="1.0" encoding="UTF-8"?>' + raw
-                                   ).toprettyxml(indent="  ")
+        raw = ET.tostring(root, encoding="unicode", xml_declaration=False)
+        nice = minidom.parseString(
+            '<?xml version="1.0" encoding="UTF-8"?>' + raw
+        ).toprettyxml(indent="  ")
         # minidom adds its own declaration; strip the duplicate
         lines = nice.split("\n")
         if lines[0].startswith("<?xml") and lines[1].startswith("<?xml"):
@@ -1489,37 +1751,39 @@ class Song:
         -------
         Song  — a new Song object (copy with corrections applied)
         """
-        import copy, statistics, math
+        import copy
+        import math
+        import statistics
 
         p = {
-            'arpeggio_window':   None,   # None = auto (≈20 ms in ticks at song tempo)
-            'quantize_div':       8,
-            'quantize_strength': 0.85,
-            'rest_threshold':     0,
-            'max_span':          14,
-            'max_notes_per_hand': 5,    # v22ze NEW — see _split_cost below
-            'detect_tempo':    True,
-            'tempo_override':  None,
-            'detect_timesig':  True,    # NEW v22i — auto-detect time signature
-            'timesig_override': None,   # NEW v22i — (num, den) tuple, overrides detection
-            'preserve_hands':  False,   # NEW v22t — skip DP hand separation, trust
-                                        # the file's own existing RH/LH tracks
-            'pedal_voice_limit': 4,     # NEW v22ze-53 — max simultaneous onset
-                                        # EVENTS (chords count as one event, not
-                                        # one per note) a pedal is allowed to
-                                        # keep ringing at once. Models a half/
-                                        # third pedal: once a NEW onset arrives
-                                        # and this many are already sustaining,
-                                        # the OLDEST is damped off right at that
-                                        # new onset, same as a real (or partial)
-                                        # pedal doesn't let an unlimited number
-                                        # of struck notes ring forever. Prevents
-                                        # fast pedaled arpeggios from tying every
-                                        # single note into one barline cluster
-                                        # (see the v22ze-52 fix note above the
-                                        # actual tie-split, which restored ties
-                                        # for genuinely-held pedal notes but
-                                        # reopened exactly this risk for runs).
+            "arpeggio_window": None,  # None = auto (≈20 ms in ticks at song tempo)
+            "quantize_div": 8,
+            "quantize_strength": 0.85,
+            "rest_threshold": 0,
+            "max_span": 14,
+            "max_notes_per_hand": 5,  # v22ze NEW — see _split_cost below
+            "detect_tempo": True,
+            "tempo_override": None,
+            "detect_timesig": True,  # NEW v22i — auto-detect time signature
+            "timesig_override": None,  # NEW v22i — (num, den) tuple, overrides detection
+            "preserve_hands": False,  # NEW v22t — skip DP hand separation, trust
+            # the file's own existing RH/LH tracks
+            "pedal_voice_limit": 4,  # NEW v22ze-53 — max simultaneous onset
+            # EVENTS (chords count as one event, not
+            # one per note) a pedal is allowed to
+            # keep ringing at once. Models a half/
+            # third pedal: once a NEW onset arrives
+            # and this many are already sustaining,
+            # the OLDEST is damped off right at that
+            # new onset, same as a real (or partial)
+            # pedal doesn't let an unlimited number
+            # of struck notes ring forever. Prevents
+            # fast pedaled arpeggios from tying every
+            # single note into one barline cluster
+            # (see the v22ze-52 fix note above the
+            # actual tie-split, which restored ties
+            # for genuinely-held pedal notes but
+            # reopened exactly this risk for runs).
         }
         if params:
             p.update(params)
@@ -1530,16 +1794,16 @@ class Song:
         # Default: ~20 ms in ticks at song tempo.  At 120 BPM/tpb=480 that is
         # ≈19 ticks — far tighter than the old fixed 60, so fast melodic runs
         # (16th notes at 108 BPM ≈ 111 ticks apart) are no longer collapsed.
-        if p['arpeggio_window'] is None:
-            _tempo_us   = self.tempo if self.tempo > 0 else 500_000
+        if p["arpeggio_window"] is None:
+            _tempo_us = self.tempo if self.tempo > 0 else 500_000
             _ms_per_tick = _tempo_us / (tpb * 1000.0)
-            p['arpeggio_window'] = max(1, int(20.0 / _ms_per_tick))
+            p["arpeggio_window"] = max(1, int(20.0 / _ms_per_tick))
         # ── 0. Collect all notes, tagged with source track ───────────────────
         # We keep a PARALLEL list src_track_ids (same length and order as
         # all_notes) instead of setting attributes on MidiNote.  MidiNote uses
         # __slots__ which forbids dynamic attributes, and touching __slots__
         # causes stale-bytecode surprises.  A parallel list is simpler and safe.
-        all_notes    = []
+        all_notes = []
         src_track_ids = []
         for tr_idx, tr in enumerate(self.tracks):
             for n in tr.notes:
@@ -1549,8 +1813,8 @@ class Song:
         paired = sorted(zip(all_notes, src_track_ids), key=lambda x: x[0].tick)
         if not paired:
             return copy.deepcopy(self)
-        all_notes,    src_track_ids = zip(*paired)
-        all_notes     = list(all_notes)
+        all_notes, src_track_ids = zip(*paired)
+        all_notes = list(all_notes)
         src_track_ids = list(src_track_ids)
 
         # ── 0.1. Preserve-hands tagging ────────────────────────────────────
@@ -1565,23 +1829,28 @@ class Song:
         # re-running DP on already-correct data can reassign individual
         # notes in fast interleaved passages where the DP's heuristics
         # disagree with the file's ground truth.
-        _preserve_hands = bool(p.get('preserve_hands', False))
+        _preserve_hands = bool(p.get("preserve_hands", False))
         if _preserve_hands:
             _hand_info = self.detect_separated_hands()
-            if _hand_info['separated']:
-                _rh_idx = _hand_info['rh_track_idx']
-                _lh_idx = _hand_info['lh_track_idx']
+            if _hand_info["separated"]:
+                _rh_idx = _hand_info["rh_track_idx"]
+                _lh_idx = _hand_info["lh_track_idx"]
                 for _n, _src in zip(all_notes, src_track_ids):
                     _n.channel = 0 if _src == _rh_idx else 1
-                print(f"[rationalize] Preserve-hands: RH=track{_rh_idx} "
-                      f"({_hand_info['rh_notes']} notes), "
-                      f"LH=track{_lh_idx} ({_hand_info['lh_notes']} notes)",
-                      file=sys.stderr)
+                print(
+                    f"[rationalize] Preserve-hands: RH=track{_rh_idx} "
+                    f"({_hand_info['rh_notes']} notes), "
+                    f"LH=track{_lh_idx} ({_hand_info['lh_notes']} notes)",
+                    file=sys.stderr,
+                )
             else:
-                _preserve_hands = False   # fall back — couldn't detect 2 hands
-                print("[rationalize] Preserve-hands requested but file does "
-                      "not have exactly 2 note-bearing tracks — falling back "
-                      "to automatic hand separation.", file=sys.stderr)
+                _preserve_hands = False  # fall back — couldn't detect 2 hands
+                print(
+                    "[rationalize] Preserve-hands requested but file does "
+                    "not have exactly 2 note-bearing tracks — falling back "
+                    "to automatic hand separation.",
+                    file=sys.stderr,
+                )
         if not all_notes:
             return copy.deepcopy(self)
 
@@ -1604,9 +1873,11 @@ class Song:
             cc64 = []
             for tr in tracks:
                 for ev in tr.events:
-                    if (hasattr(ev, 'msg') and
-                            ev.msg.type == 'control_change' and
-                            ev.msg.control == 64):
+                    if (
+                        hasattr(ev, "msg")
+                        and ev.msg.type == "control_change"
+                        and ev.msg.control == 64
+                    ):
                         cc64.append((ev.tick, ev.msg.value))
             cc64.sort()
             segs, ped_on = [], None
@@ -1658,15 +1929,15 @@ class Song:
             pitch_idx = _dd(list)
             for n in notes:
                 pitch_idx[n.pitch].append(n.tick)
-            ped_ons  = [s[0] for s in pedal_segs]
+            ped_ons = [s[0] for s in pedal_segs]
             ped_offs = [s[1] for s in pedal_segs]
             for n in notes:
-                if getattr(n, 'articulation', '') == 'staccato':
+                if getattr(n, "articulation", "") == "staccato":
                     continue
                 tick = n.tick
                 onsets = pitch_idx[n.pitch]
-                idx    = _bisect.bisect_right(onsets, tick)
-                nsp    = onsets[idx] if idx < len(onsets) else None
+                idx = _bisect.bisect_right(onsets, tick)
+                nsp = onsets[idx] if idx < len(onsets) else None
                 npd = None
                 seg_idx = _bisect.bisect_right(ped_ons, tick) - 1
                 if 0 <= seg_idx < len(pedal_segs):
@@ -1681,7 +1952,7 @@ class Song:
                     new_dur = max(n.duration, min(bounds) - tick)
                 else:
                     new_dur = max(n.duration, _decay_ticks)
-                if new_dur > n.duration and n.articulation == '':
+                if new_dur > n.duration and n.articulation == "":
                     # Mark via the articulation SLOT (not id() or a tuple key).
                     # articulation is a real __slots__ field, so it survives
                     # every copy.copy() made downstream (quantize, Pass A/B) —
@@ -1691,7 +1962,7 @@ class Song:
                     # barline chord-cluster regression: the v22q id()-based
                     # check silently always failed because Pass A saw a
                     # freshly-copied note with a new id().
-                    n.articulation = 'pedal_extended'
+                    n.articulation = "pedal_extended"
                     n_extended_count[0] += 1
                 n.duration = new_dur
 
@@ -1699,30 +1970,37 @@ class Song:
             # Only touches notes actually marked pedal_extended above; every
             # other note (including a note whose OWN written duration was
             # already long enough) is left exactly as the first pass set it.
-            _win = p['arpeggio_window']
+            _win = p["arpeggio_window"]
             for seg_on, seg_off in pedal_segs:
                 seg_notes = sorted(
-                    (n for n in notes
-                     if getattr(n, 'articulation', '') == 'pedal_extended'
-                     and seg_on <= n.tick < seg_off),
-                    key=lambda n: n.tick)
+                    (
+                        n
+                        for n in notes
+                        if getattr(n, "articulation", "") == "pedal_extended"
+                        and seg_on <= n.tick < seg_off
+                    ),
+                    key=lambda n: n.tick,
+                )
                 if not seg_notes:
                     continue
                 # Cluster into onset events: notes within one arpeggio_window
                 # of the event's start tick are "simultaneous" (a chord) and
                 # share one ringing slot.
-                events = []   # list of (event_tick, [notes])
+                events = []  # list of (event_tick, [notes])
                 for n in seg_notes:
                     if events and n.tick - events[-1][0] <= _win:
                         events[-1][1].append(n)
                     else:
                         events.append((n.tick, [n]))
-                ringing = []   # list of (event_tick, [notes]) still sounding
+                ringing = []  # list of (event_tick, [notes]) still sounding
                 for ev_tick, ev_notes in events:
                     # Drop anything that already ended naturally by now —
                     # no stealing needed, it wasn't competing for a slot.
-                    ringing = [r for r in ringing
-                               if max(rn.tick + rn.duration for rn in r[1]) > ev_tick]
+                    ringing = [
+                        r
+                        for r in ringing
+                        if max(rn.tick + rn.duration for rn in r[1]) > ev_tick
+                    ]
                     if len(ringing) >= voice_limit:
                         oldest_tick, oldest_notes = ringing.pop(0)
                         for on_note in oldest_notes:
@@ -1735,14 +2013,21 @@ class Song:
         n_extended_count = [0]
         pedal_segs = _build_pedal_segs(self.tracks)
         if pedal_segs:
-            _pedal_duration_correct(all_notes, pedal_segs, voice_limit=p['pedal_voice_limit'])
+            _pedal_duration_correct(
+                all_notes, pedal_segs, voice_limit=p["pedal_voice_limit"]
+            )
             _pedal_extended_count = n_extended_count[0]
-            print(f'[rationalize] Pedal correction applied '
-                  f'({len(pedal_segs)} segments, {_pedal_extended_count} notes extended)',
-                  file=sys.stderr)
+            print(
+                f"[rationalize] Pedal correction applied "
+                f"({len(pedal_segs)} segments, {_pedal_extended_count} notes extended)",
+                file=sys.stderr,
+            )
         else:
-            print('[rationalize] No CC64 pedal events — '
-                  'skipping pedal duration correction', file=sys.stderr)
+            print(
+                "[rationalize] No CC64 pedal events — "
+                "skipping pedal duration correction",
+                file=sys.stderr,
+            )
 
         # ── 0.55. Grace note detection ───────────────────────────────────────
         # A grace note is a note shorter than 2× the arpeggio window that
@@ -1755,23 +2040,23 @@ class Song:
         # This distinguishes:
         #   staccato = note IS on the beat, played short by performer choice
         #   grace    = note is BEFORE the beat, played short by definition
-        _grace_thresh = p['arpeggio_window'] * 2   # notes shorter than this
-        _beat_window  = tpb // 2                    # must be within half-beat of next
+        _grace_thresh = p["arpeggio_window"] * 2  # notes shorter than this
+        _beat_window = tpb // 2  # must be within half-beat of next
         all_notes_sorted = sorted(all_notes, key=lambda n: n.tick)
         for i, n in enumerate(all_notes_sorted):
             if n.duration >= _grace_thresh:
-                continue   # too long to be a grace note
-            if getattr(n, 'articulation', ''):
-                continue   # already marked
+                continue  # too long to be a grace note
+            if getattr(n, "articulation", ""):
+                continue  # already marked
             # Look for a longer note within one beat following this note
             for j in range(i + 1, len(all_notes_sorted)):
                 m = all_notes_sorted[j]
                 gap = m.tick - (n.tick + n.duration)
                 if gap > _beat_window:
-                    break   # too far ahead — not a grace
+                    break  # too far ahead — not a grace
                 if m.duration >= _grace_thresh and m.pitch != n.pitch:
                     # This short note precedes a longer different-pitch note
-                    n.articulation = 'grace'
+                    n.articulation = "grace"
                     break
 
         # ── 0.6. Staccato detection (AFTER pedal correction) ─────────────────
@@ -1794,22 +2079,25 @@ class Song:
         # a chord is staccato -- or isn't -- as one decision, not one
         # decision per notehead.
         import bisect as _bisect_stac
-        _arp_win  = p['arpeggio_window']
+
+        _arp_win = p["arpeggio_window"]
         _all_tick = sorted(n.tick for n in all_notes)
-        _stac_groups = []   # [(tick, [notes])], notes within _arp_win of tick
+        _stac_groups = []  # [(tick, [notes])], notes within _arp_win of tick
         for _n in sorted(all_notes, key=lambda n: n.tick):
             if _stac_groups and _n.tick - _stac_groups[-1][0] <= _arp_win:
                 _stac_groups[-1][1].append(_n)
             else:
                 _stac_groups.append((_n.tick, [_n]))
         for _tick, _chord in _stac_groups:
-            _chord_live = [n for n in _chord
-                           if getattr(n, 'articulation', '') != 'pedal_extended']
+            _chord_live = [
+                n for n in _chord if getattr(n, "articulation", "") != "pedal_extended"
+            ]
             if not _chord_live:
-                continue   # every note here is pedal-extended -- see below
+                continue  # every note here is pedal-extended -- see below
             _idx = _bisect_stac.bisect_right(_all_tick, _tick)
             _next_mean = next(
-                (t for t in _all_tick[_idx:] if t - _tick > _arp_win), None)
+                (t for t in _all_tick[_idx:] if t - _tick > _arp_win), None
+            )
             if _next_mean is None:
                 continue
             _ioi = _next_mean - _tick
@@ -1826,8 +2114,8 @@ class Song:
                     # BOTH the representative-duration calculation and this
                     # assignment, so the guard here is just a second,
                     # cheap safety net, not the primary mechanism.
-                    if getattr(_n, 'articulation', '') != 'pedal_extended':
-                        _n.articulation = 'staccato'
+                    if getattr(_n, "articulation", "") != "pedal_extended":
+                        _n.articulation = "staccato"
 
         # ── 1. Tempo detection ───────────────────────────────────────────────
         # Strategy: group notes into chord events (arpeggio collapse),
@@ -1847,49 +2135,56 @@ class Song:
                 if s == cur_src and n.tick - cur[0].tick <= window:
                     cur.append(n)
                 else:
-                    groups.append(cur);  g_src.append(cur_src)
+                    groups.append(cur)
+                    g_src.append(cur_src)
                     cur, cur_src = [n], s
-            groups.append(cur);  g_src.append(cur_src)
+            groups.append(cur)
+            g_src.append(cur_src)
             return groups, g_src
 
-        chord_groups, chord_src_ids = _collapse(all_notes, src_track_ids, p['arpeggio_window'])
+        chord_groups, chord_src_ids = _collapse(
+            all_notes, src_track_ids, p["arpeggio_window"]
+        )
         chord_onsets = [g[0].tick for g in chord_groups]
 
-        performed_tpb = tpb   # may be updated below
-        if p['tempo_override']:
-            new_bpm = p['tempo_override']
+        performed_tpb = tpb  # may be updated below
+        if p["tempo_override"]:
+            new_bpm = p["tempo_override"]
             performed_tpb = int(round(tpb * self.bpm / new_bpm))
-        elif p['detect_tempo']:
-            bass_onsets = sorted(set(
-                round(n.tick / 10) * 10
-                for n in all_notes if n.pitch < 55
-            ))
+        elif p["detect_tempo"]:
+            bass_onsets = sorted(
+                set(round(n.tick / 10) * 10 for n in all_notes if n.pitch < 55)
+            )
             # Merge bass onsets within 30 ticks
             merged = [bass_onsets[0]] if bass_onsets else chord_onsets[:1]
             for o in bass_onsets[1:]:
                 if o - merged[-1] > 30:
                     merged.append(o)
-            iois = [merged[i+1] - merged[i]
-                    for i in range(len(merged)-1)
-                    if 100 < merged[i+1] - merged[i] < tpb * 4]
+            iois = [
+                merged[i + 1] - merged[i]
+                for i in range(len(merged) - 1)
+                if 100 < merged[i + 1] - merged[i] < tpb * 4
+            ]
             if len(iois) >= 4:
                 # The median IOI approximates the 8th-note (or beat) period.
                 # We then find which standard note value it best matches.
-                med_ioi  = statistics.median(iois)
+                med_ioi = statistics.median(iois)
                 # Test note value multiples: 8th, quarter, dotted-quarter, half
                 candidates = {
-                    'eighth':         tpb / 2,
-                    'quarter':        tpb,
-                    'dotted-quarter': tpb * 1.5,
-                    'half':           tpb * 2,
+                    "eighth": tpb / 2,
+                    "quarter": tpb,
+                    "dotted-quarter": tpb * 1.5,
+                    "half": tpb * 2,
                 }
-                best_name, best_ratio = None, None   # None = no match yet
+                best_name, best_ratio = None, None  # None = no match yet
                 for name, std_val in candidates.items():
                     ratio = med_ioi / std_val
                     if 0.7 < ratio < 1.4:
-                        if best_ratio is None or abs(ratio - 1.0) < abs(best_ratio - 1.0):
+                        if best_ratio is None or abs(ratio - 1.0) < abs(
+                            best_ratio - 1.0
+                        ):
                             best_ratio = ratio
-                            best_name  = name
+                            best_name = name
                 # Only apply tempo scaling when we have a confident match.
                 # If no candidate matched the IOI, leave performed_tpb = tpb
                 # so we don't blindly halve all tick values (old bug: defaulted
@@ -1919,23 +2214,36 @@ class Song:
                 # noise of its own.
                 TEMPO_DEAD_ZONE = 0.03
                 if best_ratio is not None and abs(best_ratio - 1.0) < TEMPO_DEAD_ZONE:
-                    print(f"[rationalize] IOI median={med_ioi:.0f}t → "
-                          f"best match={best_name} (ratio={best_ratio:.3f}) → "
-                          f"within {TEMPO_DEAD_ZONE*100:.0f}% of nominal tempo; "
-                          f"treating as already correct, skipping rescale.",
-                          file=sys.stderr)
+                    print(
+                        f"[rationalize] IOI median={med_ioi:.0f}t → "
+                        f"best match={best_name} (ratio={best_ratio:.3f}) → "
+                        f"within {TEMPO_DEAD_ZONE*100:.0f}% of nominal tempo; "
+                        f"treating as already correct, skipping rescale.",
+                        file=sys.stderr,
+                    )
                 elif best_ratio is not None and 0.75 < best_ratio < 1.35:
                     performed_tpb = int(round(tpb * best_ratio))
-                    detected_bpm  = round(60_000_000 / (performed_tpb * (self.tempo / tpb)))
-                    print(f"[rationalize] IOI median={med_ioi:.0f}t → "
-                          f"best match={best_name} (ratio={best_ratio:.3f}) → "
-                          f"detected BPM≈{detected_bpm}", file=sys.stderr)
+                    detected_bpm = round(
+                        60_000_000 / (performed_tpb * (self.tempo / tpb))
+                    )
+                    print(
+                        f"[rationalize] IOI median={med_ioi:.0f}t → "
+                        f"best match={best_name} (ratio={best_ratio:.3f}) → "
+                        f"detected BPM≈{detected_bpm}",
+                        file=sys.stderr,
+                    )
                 else:
-                    print(f"[rationalize] IOI median={med_ioi:.0f}t → "
-                          f"no candidate matched; skipping tempo rescale.", file=sys.stderr)
+                    print(
+                        f"[rationalize] IOI median={med_ioi:.0f}t → "
+                        f"no candidate matched; skipping tempo rescale.",
+                        file=sys.stderr,
+                    )
             else:
-                print("[rationalize] Not enough bass onsets for tempo detection; "
-                      "using song BPM.", file=sys.stderr)
+                print(
+                    "[rationalize] Not enough bass onsets for tempo detection; "
+                    "using song BPM.",
+                    file=sys.stderr,
+                )
 
         # ── 1.5. Time signature detection ──────────────────────────────────
         # Run BEFORE building new_song's shell so the detected/overridden
@@ -1944,12 +2252,13 @@ class Song:
         # cause of bass-clef notes overflowing/underflowing measures after
         # a manual time-signature change in Score Setup; see
         # session_brief_v22h_design.txt Issue 4).
-        if p['timesig_override']:
-            detected_num, detected_den = p['timesig_override']
-            ts_confidence, ts_note = 1.0, 'User override'
-        elif p['detect_timesig']:
-            detected_num, detected_den, ts_confidence, ts_note = \
+        if p["timesig_override"]:
+            detected_num, detected_den = p["timesig_override"]
+            ts_confidence, ts_note = 1.0, "User override"
+        elif p["detect_timesig"]:
+            detected_num, detected_den, ts_confidence, ts_note = (
                 self.detect_time_signature()
+            )
             # v22ze-40 fix: ts_confidence was computed but never actually
             # used as a gate -- the detected signature got applied
             # UNCONDITIONALLY, however weak the signal. This is what
@@ -1965,18 +2274,22 @@ class Song:
             # otherwise keep what the song already has.
             MIN_TIMESIG_CONFIDENCE = 0.3
             if ts_confidence < MIN_TIMESIG_CONFIDENCE:
-                print(f"[rationalize] Time signature detection LOW CONFIDENCE "
-                      f"({ts_confidence:.0%}) -- keeping existing "
-                      f"{self.time_sig_num}/{self.time_sig_den} instead of "
-                      f"the {detected_num}/{detected_den} guess. {ts_note}",
-                      file=sys.stderr)
+                print(
+                    f"[rationalize] Time signature detection LOW CONFIDENCE "
+                    f"({ts_confidence:.0%}) -- keeping existing "
+                    f"{self.time_sig_num}/{self.time_sig_den} instead of "
+                    f"the {detected_num}/{detected_den} guess. {ts_note}",
+                    file=sys.stderr,
+                )
                 detected_num, detected_den = self.time_sig_num, self.time_sig_den
             else:
-                print(f"[rationalize] Time signature detection: {ts_note}",
-                      file=sys.stderr)
+                print(
+                    f"[rationalize] Time signature detection: {ts_note}",
+                    file=sys.stderr,
+                )
         else:
             detected_num, detected_den = self.time_sig_num, self.time_sig_den
-            ts_confidence, ts_note = 1.0, 'Detection disabled — using song default'
+            ts_confidence, ts_note = 1.0, "Detection disabled — using song default"
 
         # ── 2. Build the rationalized Song shell ─────────────────────────────
         new_song = Song()
@@ -1992,8 +2305,8 @@ class Song:
             new_song.tempo = self.tempo
         new_song.time_sig_num = detected_num
         new_song.time_sig_den = detected_den
-        new_song.sig_changes  = [(0, detected_num, detected_den)]
-        new_song.key_sig      = getattr(self, 'key_sig', 'C')
+        new_song.sig_changes = [(0, detected_num, detected_den)]
+        new_song.key_sig = getattr(self, "key_sig", "C")
 
         # ── 3. Measure range filter ──────────────────────────────────────────
         mmap = self.build_measure_map()
@@ -2001,18 +2314,20 @@ class Song:
             m0 = max(0, measure_range[0] - 1)
             m1 = min(len(mmap) - 1, measure_range[1] - 1)
             range_start = mmap[m0][1]
-            range_end   = mmap[m1][2]
+            range_end = mmap[m1][2]
             in_range = lambda t: range_start <= t < range_end
         else:
             in_range = lambda t: True
 
         # ── 4. Re-scale ticks if tempo correction applied ────────────────────
         if performed_tpb != tpb and performed_tpb > 0:
-            scale = tpb / performed_tpb   # < 1 if performer was slower
+            scale = tpb / performed_tpb  # < 1 if performer was slower
             for n in all_notes:
-                n.tick     = int(round(n.tick     * scale))
+                n.tick = int(round(n.tick * scale))
                 n.duration = max(1, int(round(n.duration * scale)))
-            chord_groups, chord_src_ids = _collapse(all_notes, src_track_ids, p['arpeggio_window'])
+            chord_groups, chord_src_ids = _collapse(
+                all_notes, src_track_ids, p["arpeggio_window"]
+            )
             chord_onsets = [g[0].tick for g in chord_groups]
 
         # ── 5. Adaptive quantize chord onsets ────────────────────────────────
@@ -2020,15 +2335,15 @@ class Song:
         #   min(max_grid, IOI_to_next_chord)
         # so 16th-note chords use a 16th grid while quarter-note chords
         # use the max grid.  Short notes are never coarsened to 8ths.
-        max_grid = max(1, tpb // p['quantize_div'])
-        min_grid = max(1, tpb // 32)   # never finer than 32nd note
-        strength = p['quantize_strength']
+        max_grid = max(1, tpb // p["quantize_div"])
+        min_grid = max(1, tpb // 32)  # never finer than 32nd note
+        strength = p["quantize_strength"]
 
         # Standard grids from whole down to 32nd
-        _std_grids = sorted(set(
-            tpb * m for m in [4, 2, 1]) |
-            set(tpb // d for d in [2, 4, 8, 16, 32]
-                if tpb // d >= min_grid))
+        _std_grids = sorted(
+            set(tpb * m for m in [4, 2, 1])
+            | set(tpb // d for d in [2, 4, 8, 16, 32] if tpb // d >= min_grid)
+        )
 
         def _adaptive_grid(ioi):
             """Grid = min(max_grid, largest standard value ≤ ioi)."""
@@ -2060,7 +2375,7 @@ class Song:
             offset = int(strength * (q_tick - rep_tick))
             new_group = []
             for n in group:
-                nc      = copy.copy(n)
+                nc = copy.copy(n)
                 nc.tick = max(0, n.tick + offset)
                 # Snap duration to nearest grid multiple without forcing a
                 # minimum of `grid` — preserves staccato and short notes.
@@ -2068,7 +2383,7 @@ class Song:
                 if q_dur > 0:
                     nc.duration = int(n.duration + strength * (q_dur - n.duration))
                 else:
-                    nc.duration = n.duration   # shorter than half grid — keep as-is
+                    nc.duration = n.duration  # shorter than half grid — keep as-is
                 nc.duration = max(1, nc.duration)
                 new_group.append(nc)
             q_groups.append(new_group)
@@ -2087,16 +2402,16 @@ class Song:
         # long is essentially always intentional regardless of any other
         # setting, and this ceiling no longer depends on an unrelated
         # control the user didn't touch.
-        thresh = min(p['rest_threshold'], max(0, tpb - 1))
+        thresh = min(p["rest_threshold"], max(0, tpb - 1))
         if thresh > 0:
             cleaned = []
             for i, group in enumerate(q_groups):
                 if i == 0:
                     cleaned.append(group)
                     continue
-                prev_end  = max(n.tick + n.duration for n in cleaned[-1])
+                prev_end = max(n.tick + n.duration for n in cleaned[-1])
                 cur_start = group[0].tick
-                gap       = cur_start - prev_end
+                gap = cur_start - prev_end
                 if 0 < gap < thresh:
                     # Extend previous group's notes to fill the gap
                     for n in cleaned[-1]:
@@ -2181,10 +2496,12 @@ class Song:
         # (corrected) tpb/time-signature using the module-level
         # _build_measure_map_core() helper, sized to the actual extent of
         # the quantized notes rather than the original song's tick range.
-        _extent = max((n.tick + n.duration for group in q_groups for n in group),
-                      default=tpb * 4)
+        _extent = max(
+            (n.tick + n.duration for group in q_groups for n in group), default=tpb * 4
+        )
         new_mmap = _build_measure_map_core(
-            tpb, [(0, detected_num, detected_den)], _extent)
+            tpb, [(0, detected_num, detected_den)], _extent
+        )
 
         # Fast O(1) lookup: tick → (m_start, m_end, tpm)
         _mmap_starts = [ms for (_, ms, me, *_) in new_mmap]
@@ -2192,6 +2509,7 @@ class Song:
         def _measure_bounds(tick):
             """Return (m_start, m_end, tpm) for the measure containing tick."""
             import bisect as _b
+
             i = _b.bisect_right(_mmap_starts, tick) - 1
             if 0 <= i < len(new_mmap):
                 _, ms, me, _, _, tpm_m = new_mmap[i]
@@ -2199,7 +2517,7 @@ class Song:
             return None, None, None
 
         # ── Pass A+B: overflow split and barline clamp ────────────────────────
-        extra_groups = []   # tie-continuation notes added here
+        extra_groups = []  # tie-continuation notes added here
         for group in q_groups:
             for n in group:
                 ms, me, tpm_m = _measure_bounds(n.tick)
@@ -2209,9 +2527,11 @@ class Song:
                 if max_dur <= 0:
                     # Pass B: note starts exactly at or past barline — clamp onset
                     # back to last grid position inside the measure.
-                    ms_prev, me_prev, tpm_prev = _measure_bounds(ms - 1) if ms > 0 else (None, None, None)
+                    ms_prev, me_prev, tpm_prev = (
+                        _measure_bounds(ms - 1) if ms > 0 else (None, None, None)
+                    )
                     if ms_prev is not None:
-                        n.tick = me_prev - max(1, tpm_prev // p['quantize_div'])
+                        n.tick = me_prev - max(1, tpm_prev // p["quantize_div"])
                         ms, me, tpm_m = _measure_bounds(n.tick)
                         if ms is None:
                             continue
@@ -2233,15 +2553,15 @@ class Song:
                     # _pedal_duration_correct above -- is done) so it
                     # doesn't linger and get mistaken for something still
                     # pedal-active downstream.
-                    if n.articulation == 'pedal_extended':
-                        n.articulation = ''
+                    if n.articulation == "pedal_extended":
+                        n.articulation = ""
                     remainder = n.duration - max_dur
-                    n.duration = max_dur           # clip to barline
+                    n.duration = max_dur  # clip to barline
                     # Build tie-continuation note
                     tie_note = copy.copy(n)
-                    tie_note.tick = me             # starts at next barline
+                    tie_note.tick = me  # starts at next barline
                     tie_note.duration = remainder
-                    tie_note.articulation = 'tie_continuation'
+                    tie_note.articulation = "tie_continuation"
                     extra_groups.append([tie_note])
 
         # Merge tie-continuations in so that they get Pass A+B treatment too
@@ -2257,7 +2577,7 @@ class Song:
                         continue
                     max_dur = me - n.tick
                     if max_dur <= 0:
-                        n.tick = ms   # snap to measure start if somehow past end
+                        n.tick = ms  # snap to measure start if somehow past end
                         max_dur = tpm_m
                     if n.duration > max_dur:
                         remainder = n.duration - max_dur
@@ -2265,11 +2585,11 @@ class Song:
                         cont = copy.copy(n)
                         cont.tick = me
                         cont.duration = remainder
-                        cont.articulation = 'tie_continuation'
+                        cont.articulation = "tie_continuation"
                         newly_added.append([cont])
             q_groups.extend(extra_groups)
             extra_groups = newly_added
-        q_groups.extend(extra_groups)   # flush any last remainder
+        q_groups.extend(extra_groups)  # flush any last remainder
 
         # ── Pass C: rest infill ──────────────────────────────────────────────
         # Build a per-measure occupied-tick map, then record gap intervals on
@@ -2283,12 +2603,12 @@ class Song:
 
         # Collect all notes in tick order for gap analysis
         all_q_notes = sorted(
-            (n for group in q_groups for n in group),
-            key=lambda n: (n.tick, n.pitch)
+            (n for group in q_groups for n in group), key=lambda n: (n.tick, n.pitch)
         )
 
         # Build measure → list of (onset, end) intervals (one per note)
         from collections import defaultdict as _dd2
+
         measure_note_intervals = _dd2(list)  # ms → [(onset, end), ...]
         for n in all_q_notes:
             ms, me, tpm_m = _measure_bounds(n.tick)
@@ -2309,17 +2629,17 @@ class Song:
             return out
 
         # For each measure, compute gap list (rest intervals)
-        measure_rests = {}   # ms → [(rest_start, rest_dur), ...]
+        measure_rests = {}  # ms → [(rest_start, rest_dur), ...]
         for _, ms, me, _, _, tpm_m in new_mmap:
             ivs = _merge_intervals(measure_note_intervals.get(ms, []))
             gaps = []
             cursor = ms
-            for (s, e) in ivs:
+            for s, e in ivs:
                 if s > cursor:
-                    gaps.append((cursor, s - cursor))   # rest before this note
+                    gaps.append((cursor, s - cursor))  # rest before this note
                 cursor = max(cursor, e)
             if cursor < me:
-                gaps.append((cursor, me - cursor))      # trailing rest
+                gaps.append((cursor, me - cursor))  # trailing rest
             if gaps:
                 measure_rests[ms] = gaps
 
@@ -2330,7 +2650,7 @@ class Song:
         new_song._measure_rests = measure_rests
         # Also store per-note rest metadata as an external dict keyed by
         # (tick, pitch, channel) — avoids setting attributes on __slots__ MidiNote.
-        rests_before_map = {}   # (tick,pitch,channel) → [(rest_start, rest_dur),...]
+        rests_before_map = {}  # (tick,pitch,channel) → [(rest_start, rest_dur),...]
         for n in all_q_notes:
             ms2, me2, tpm_m2 = _measure_bounds(n.tick)
             if ms2 is None:
@@ -2358,8 +2678,8 @@ class Song:
         # A note's _arpeggio_group is stored in a parallel dict (not on the
         # MidiNote object itself, since __slots__ forbids dynamic attributes).
 
-        _arp_groups = {}   # id(note) → group_idx (int)
-        _arp_group_hand = {}   # group_idx → 'LH' | 'RH' | None (undecided)
+        _arp_groups = {}  # id(note) → group_idx (int)
+        _arp_group_hand = {}  # group_idx → 'LH' | 'RH' | None (undecided)
         _next_group = [0]
 
         def _detect_arpeggios(groups_list):
@@ -2372,8 +2692,8 @@ class Song:
             if len(single_events) < 3:
                 return
 
-            tol = p['arpeggio_window'] * 3   # IOI tolerance
-            min_span = 7                       # at least a fifth
+            tol = p["arpeggio_window"] * 3  # IOI tolerance
+            min_span = 7  # at least a fifth
 
             i = 0
             while i < len(single_events) - 2:
@@ -2381,13 +2701,14 @@ class Song:
                 # Compute IOI from n0 to n1
                 ioi_ref = single_events[i + 1].tick - n0.tick
                 if ioi_ref <= 0:
-                    i += 1; continue
+                    i += 1
+                    continue
 
                 # Collect run of notes with similar IOI
                 run = [n0]
                 for j in range(i + 1, len(single_events)):
-                    nj   = single_events[j]
-                    ioi  = nj.tick - single_events[j - 1].tick
+                    nj = single_events[j]
+                    ioi = nj.tick - single_events[j - 1].tick
                     if abs(ioi - ioi_ref) <= tol:
                         run.append(nj)
                     else:
@@ -2395,20 +2716,25 @@ class Song:
 
                 if len(run) >= 3:
                     pitches = [n.pitch for n in run]
-                    span    = max(pitches) - min(pitches)
+                    span = max(pitches) - min(pitches)
                     # Check directional consistency (ascending or descending)
-                    diffs = [pitches[k+1] - pitches[k] for k in range(len(pitches)-1)]
-                    ascending  = sum(1 for d in diffs if d > 0)
+                    diffs = [
+                        pitches[k + 1] - pitches[k] for k in range(len(pitches) - 1)
+                    ]
+                    ascending = sum(1 for d in diffs if d > 0)
                     descending = sum(1 for d in diffs if d < 0)
-                    directional = ascending >= len(diffs)//2 or descending >= len(diffs)//2
+                    directional = (
+                        ascending >= len(diffs) // 2 or descending >= len(diffs) // 2
+                    )
 
                     if span >= min_span and directional:
-                        grp_idx = _next_group[0]; _next_group[0] += 1
+                        grp_idx = _next_group[0]
+                        _next_group[0] += 1
                         for n in run:
                             _arp_groups[id(n)] = grp_idx
                         # Hand for this group = based on lowest note's register
                         low_pitch = min(pitches)
-                        _arp_group_hand[grp_idx] = 'LH' if low_pitch < 60 else 'RH'
+                        _arp_group_hand[grp_idx] = "LH" if low_pitch < 60 else "RH"
                         i += len(run)
                         continue
                 i += 1
@@ -2416,7 +2742,9 @@ class Song:
         _detect_arpeggios(q_groups)
         if _arp_groups:
             n_groups = _next_group[0]
-            print(f'[rationalize] Arpeggio groups detected: {n_groups}', file=sys.stderr)
+            print(
+                f"[rationalize] Arpeggio groups detected: {n_groups}", file=sys.stderr
+            )
 
         # ── 8. DP hand separation ─────────────────────────────────────────────
         # State: (lh_center, rh_center) = pitch center of last LH and RH chords
@@ -2430,10 +2758,10 @@ class Song:
         #
         # We use a beam search (keep top K states) for efficiency.
 
-        BEAM_K   = 6
-        MAX_SPAN = p['max_span']
-        MAX_NOTES_PER_HAND = p['max_notes_per_hand']
-        INF      = float('inf')
+        BEAM_K = 6
+        MAX_SPAN = p["max_span"]
+        MAX_NOTES_PER_HAND = p["max_notes_per_hand"]
+        INF = float("inf")
 
         def _split_cost(pitches_lh, pitches_rh, prev_lh, prev_rh):
             if not pitches_lh and not pitches_rh:
@@ -2470,9 +2798,11 @@ class Song:
             # where most of the notes are actually near C4, so a big
             # chord entirely up in the treble isn't penalized just
             # because LH isn't sharing notes nowhere near its reach.
-            NEAR_C4_RANGE = 12   # within an octave of C4 (48-72)
+            NEAR_C4_RANGE = 12  # within an octave of C4 (48-72)
             if len(pitches_rh) >= 3:
-                near_c4_count = sum(1 for p in pitches_rh if abs(p - 60) <= NEAR_C4_RANGE)
+                near_c4_count = sum(
+                    1 for p in pitches_rh if abs(p - 60) <= NEAR_C4_RANGE
+                )
                 if near_c4_count >= 3:
                     cost += (len(pitches_rh) - 2) * 6
             # Span violations
@@ -2503,7 +2833,12 @@ class Song:
                 if lh_mean > rh_mean:
                     cost += 40
                 # Extra penalty: LH notes above C4 when RH has lower notes
-                if pitches_lh and min(pitches_lh) > 60 and pitches_rh and min(pitches_rh) < 60:
+                if (
+                    pitches_lh
+                    and min(pitches_lh) > 60
+                    and pitches_rh
+                    and min(pitches_rh) < 60
+                ):
                     cost += 50
                 # Extra penalty: RH notes below E3 (52) — almost always LH territory
                 if pitches_rh and min(pitches_rh) < 52:
@@ -2530,8 +2865,8 @@ class Song:
 
         # Beam state: list of (cost, lh_center, rh_center, assignments)
         # assignments: list of (lh_note_indices, rh_note_indices) per group so far
-        lh_start = 45.0   # E2 — typical LH starting position
-        rh_start = 65.0   # F4 — typical RH starting position
+        lh_start = 45.0  # E2 — typical LH starting position
+        rh_start = 65.0  # F4 — typical RH starting position
         beam = [(0.0, lh_start, rh_start, [])]
 
         for group in q_groups:
@@ -2548,11 +2883,14 @@ class Song:
                     if result == INF:
                         continue
                     step_cost, new_lh_c, new_rh_c = result
-                    new_beam.append((
-                        cost + step_cost,
-                        new_lh_c, new_rh_c,
-                        assigns + [(set(lh_p), set(rh_p))]
-                    ))
+                    new_beam.append(
+                        (
+                            cost + step_cost,
+                            new_lh_c,
+                            new_rh_c,
+                            assigns + [(set(lh_p), set(rh_p))],
+                        )
+                    )
 
             # Keep top BEAM_K states
             new_beam.sort(key=lambda s: s[0])
@@ -2561,13 +2899,12 @@ class Song:
                 # Fallback: median split
                 mid = statistics.median(pitches)
                 lh_p = [p for p in pitches if p <= mid]
-                rh_p = [p for p in pitches if p >  mid]
-                beam = [(INF, lh_c, rh_c,
-                         assigns + [(set(lh_p), set(rh_p))])]
+                rh_p = [p for p in pitches if p > mid]
+                beam = [(INF, lh_c, rh_c, assigns + [(set(lh_p), set(rh_p))])]
 
         # Best assignment
         best = beam[0]
-        assignments = best[3]   # one (lh_set, rh_set) per chord group
+        assignments = best[3]  # one (lh_set, rh_set) per chord group
         # NOTE: when _preserve_hands is True, this DP result is computed but
         # discarded — see the final assignment loop below (step 9), which
         # checks n.channel directly rather than n.pitch-in-rh_set.  Using
@@ -2578,7 +2915,7 @@ class Song:
         # Use the track names / programs from the first matching source track
         src_track = self.tracks[0] if self.tracks else None
         prog = src_track.program if src_track else 0
-        name = src_track.name    if src_track else "Piano"
+        name = src_track.name if src_track else "Piano"
         # v22ze-43 fix: re-rationalizing an already-rationalized song (its
         # tracks already named "X (RH)"/"X (LH)" from a prior pass) used
         # to blindly append ANOTHER "(RH)"/"(LH)" suffix on top, producing
@@ -2587,7 +2924,7 @@ class Song:
         # regardless of how many times this has already run.
         for _suffix in (" (RH)", " (LH)"):
             if name.endswith(_suffix):
-                name = name[:-len(_suffix)]
+                name = name[: -len(_suffix)]
                 break
 
         rh_track = Track(name=f"{name} (RH)", channel=0, program=prog)
@@ -2601,9 +2938,11 @@ class Song:
         other_events = []
         for tr in self.tracks:
             for ev in tr.events:
-                if (hasattr(ev, 'msg') and
-                        ev.msg.type == 'control_change' and
-                        ev.msg.control == 64):
+                if (
+                    hasattr(ev, "msg")
+                    and ev.msg.type == "control_change"
+                    and ev.msg.control == 64
+                ):
                     pedal_events.append(ev)
                 else:
                     other_events.append(ev)
@@ -2628,10 +2967,12 @@ class Song:
                 # no algorithm re-derives what the file already told us.
                 if _preserve_hands:
                     if n.channel == 0:
-                        nc = copy.copy(n); nc.channel = 0
+                        nc = copy.copy(n)
+                        nc.channel = 0
                         rh_track.notes.append(nc)
                     else:
-                        nc = copy.copy(n); nc.channel = 1
+                        nc = copy.copy(n)
+                        nc.channel = 1
                         lh_track.notes.append(nc)
                     continue
 
@@ -2644,20 +2985,24 @@ class Song:
                 grp_idx = _arp_groups.get(id(n))
                 if grp_idx is not None:
                     forced_hand = _arp_group_hand.get(grp_idx)
-                    if forced_hand == 'RH':
-                        nc = copy.copy(n); nc.channel = 0
+                    if forced_hand == "RH":
+                        nc = copy.copy(n)
+                        nc.channel = 0
                         rh_track.notes.append(nc)
                         continue
-                    elif forced_hand == 'LH':
-                        nc = copy.copy(n); nc.channel = 1
+                    elif forced_hand == "LH":
+                        nc = copy.copy(n)
+                        nc.channel = 1
                         lh_track.notes.append(nc)
                         continue
                 # Normal DP assignment
                 if n.pitch in rh_set:
-                    nc = copy.copy(n); nc.channel = 0
+                    nc = copy.copy(n)
+                    nc.channel = 0
                     rh_track.notes.append(nc)
                 else:
-                    nc = copy.copy(n); nc.channel = 1
+                    nc = copy.copy(n)
+                    nc.channel = 1
                     lh_track.notes.append(nc)
 
         rh_track.notes.sort(key=lambda n: n.tick)
@@ -2670,17 +3015,19 @@ class Song:
         # Score Setup) prefer it over a fixed declared-time-signature grid.
         final_extent = max(new_song.total_ticks(), tpb * 4)
         new_song.rationalized_measure_map = _build_measure_map_core(
-            tpb, [(0, detected_num, detected_den)], final_extent)
+            tpb, [(0, detected_num, detected_den)], final_extent
+        )
 
-        print(f"[rationalize] Done: {len(rh_track.notes)} RH notes, "
-              f"{len(lh_track.notes)} LH notes, "
-              f"tempo={new_song.bpm} BPM, "
-              f"time_sig={detected_num}/{detected_den} "
-              f"(confidence {ts_confidence:.0%}), "
-              f"measures={len(new_song.rationalized_measure_map)}",
-              file=sys.stderr)
+        print(
+            f"[rationalize] Done: {len(rh_track.notes)} RH notes, "
+            f"{len(lh_track.notes)} LH notes, "
+            f"tempo={new_song.bpm} BPM, "
+            f"time_sig={detected_num}/{detected_den} "
+            f"(confidence {ts_confidence:.0%}), "
+            f"measures={len(new_song.rationalized_measure_map)}",
+            file=sys.stderr,
+        )
         return new_song
-
 
     # ── LilyPond .ly export ──────────────────────────────────────────────────
     def detect_calibration(self):
@@ -2703,8 +3050,11 @@ class Song:
         tpb = self.ticks_per_beat
         all_notes = [n for tr in self.tracks for n in tr.notes]
         if len(all_notes) < 8:
-            return {'bpm': None, 'confidence': 0.0,
-                    'note': 'Too few notes for reliable detection.'}
+            return {
+                "bpm": None,
+                "confidence": 0.0,
+                "note": "Too few notes for reliable detection.",
+            }
 
         all_notes.sort(key=lambda n: n.tick)
 
@@ -2715,26 +3065,30 @@ class Song:
             bass = all_notes
 
         ticks = sorted(set(n.tick for n in bass))
-        iois  = [ticks[i+1] - ticks[i] for i in range(len(ticks)-1) if ticks[i+1] > ticks[i]]
+        iois = [
+            ticks[i + 1] - ticks[i]
+            for i in range(len(ticks) - 1)
+            if ticks[i + 1] > ticks[i]
+        ]
         if not iois:
-            return {'bpm': None, 'confidence': 0.0, 'note': 'Cannot compute IOI.'}
+            return {"bpm": None, "confidence": 0.0, "note": "Cannot compute IOI."}
 
         med_ioi = _st.median(iois)
 
         # Standard note values to match against (in ticks)
         _std = {
-            'whole':    tpb * 4,
-            'half':     tpb * 2,
-            'q-dot':    int(tpb * 1.5),
-            'quarter':  tpb,
-            'e-dot':    int(tpb * 0.75),
-            'eighth':   tpb // 2,
-            'sixteenth': tpb // 4,
+            "whole": tpb * 4,
+            "half": tpb * 2,
+            "q-dot": int(tpb * 1.5),
+            "quarter": tpb,
+            "e-dot": int(tpb * 0.75),
+            "eighth": tpb // 2,
+            "sixteenth": tpb // 4,
         }
 
-        best_name  = None
+        best_name = None
         best_ratio = None
-        best_conf  = 0.0
+        best_conf = 0.0
 
         for name, val in _std.items():
             if val <= 0:
@@ -2745,23 +3099,28 @@ class Song:
                 deviation = abs(ratio - mult) / mult
                 conf = max(0.0, 1.0 - deviation * 4)
                 if conf > best_conf:
-                    best_conf  = conf
-                    best_ratio = ratio / mult   # actual tpb correction factor
-                    best_name  = f'{mult}×{name}'
+                    best_conf = conf
+                    best_ratio = ratio / mult  # actual tpb correction factor
+                    best_name = f"{mult}×{name}"
 
         if best_conf < 0.3 or best_ratio is None:
-            return {'bpm': None, 'confidence': best_conf,
-                    'note': f'Weak IOI match (conf={best_conf:.2f}). '
-                            'Try setting BPM manually.'}
+            return {
+                "bpm": None,
+                "confidence": best_conf,
+                "note": f"Weak IOI match (conf={best_conf:.2f}). "
+                "Try setting BPM manually.",
+            }
 
         performed_tpb = tpb / best_ratio
-        current_bpm   = 60_000_000 / self.tempo if self.tempo > 0 else 120.0
+        current_bpm = 60_000_000 / self.tempo if self.tempo > 0 else 120.0
         suggested_bpm = round(current_bpm * (performed_tpb / tpb), 1)
         suggested_bpm = max(20.0, min(300.0, suggested_bpm))
 
-        note = (f'IOI median={med_ioi:.0f}t matched {best_name} '
-                f'(conf={best_conf:.2f}) → {suggested_bpm:.1f} BPM')
-        return {'bpm': suggested_bpm, 'confidence': best_conf, 'note': note}
+        note = (
+            f"IOI median={med_ioi:.0f}t matched {best_name} "
+            f"(conf={best_conf:.2f}) → {suggested_bpm:.1f} BPM"
+        )
+        return {"bpm": suggested_bpm, "confidence": best_conf, "note": note}
 
     def detect_separated_hands(self):
         """Detect whether the file already has hands separated into two tracks.
@@ -2784,27 +3143,32 @@ class Song:
         """
         non_empty = [(i, tr) for i, tr in enumerate(self.tracks) if tr.notes]
         if len(non_empty) != 2:
-            return {'separated': False, 'rh_track_idx': None, 'lh_track_idx': None,
-                    'rh_notes': 0, 'lh_notes': 0}
+            return {
+                "separated": False,
+                "rh_track_idx": None,
+                "lh_track_idx": None,
+                "rh_notes": 0,
+                "lh_notes": 0,
+            }
 
         (i0, t0), (i1, t1) = non_empty
 
         def _name_hint(name):
             n = name.lower()
-            if 'right' in n or 'rh' in n:
-                return 'RH'
-            if 'left' in n or 'lh' in n:
-                return 'LH'
+            if "right" in n or "rh" in n:
+                return "RH"
+            if "left" in n or "lh" in n:
+                return "LH"
             return None
 
         hint0, hint1 = _name_hint(t0.name), _name_hint(t1.name)
-        if hint0 == 'RH' and hint1 != 'RH':
+        if hint0 == "RH" and hint1 != "RH":
             rh_idx, lh_idx = i0, i1
-        elif hint1 == 'RH' and hint0 != 'RH':
+        elif hint1 == "RH" and hint0 != "RH":
             rh_idx, lh_idx = i1, i0
-        elif hint0 == 'LH' and hint1 != 'LH':
+        elif hint0 == "LH" and hint1 != "LH":
             rh_idx, lh_idx = i1, i0
-        elif hint1 == 'LH' and hint0 != 'LH':
+        elif hint1 == "LH" and hint0 != "LH":
             rh_idx, lh_idx = i0, i1
         else:
             # No usable name hint — fall back to average pitch
@@ -2813,11 +3177,11 @@ class Song:
             rh_idx, lh_idx = (i0, i1) if avg0 >= avg1 else (i1, i0)
 
         return {
-            'separated': True,
-            'rh_track_idx': rh_idx,
-            'lh_track_idx': lh_idx,
-            'rh_notes': len(self.tracks[rh_idx].notes),
-            'lh_notes': len(self.tracks[lh_idx].notes),
+            "separated": True,
+            "rh_track_idx": rh_idx,
+            "lh_track_idx": lh_idx,
+            "rh_notes": len(self.tracks[rh_idx].notes),
+            "lh_notes": len(self.tracks[lh_idx].notes),
         }
 
     def detect_time_signature(self, beat_ticks=None):
@@ -2847,29 +3211,43 @@ class Song:
 
         all_notes = [n for tr in self.tracks for n in tr.notes]
         if len(all_notes) < 16:
-            return (self.time_sig_num, self.time_sig_den, 0.0,
-                    'Too few notes for reliable meter detection.')
+            return (
+                self.time_sig_num,
+                self.time_sig_den,
+                0.0,
+                "Too few notes for reliable meter detection.",
+            )
 
         if beat_ticks is None:
             bass = [n for n in all_notes if n.pitch < 55] or all_notes
             onsets = sorted(set(round(n.tick / 10) * 10 for n in bass))
             if len(onsets) < 8:
-                return (self.time_sig_num, self.time_sig_den, 0.0,
-                        'Not enough onsets for meter detection.')
+                return (
+                    self.time_sig_num,
+                    self.time_sig_den,
+                    0.0,
+                    "Not enough onsets for meter detection.",
+                )
             merged = [onsets[0]]
             for o in onsets[1:]:
                 if o - merged[-1] > 30:
                     merged.append(o)
-            iois = [merged[i + 1] - merged[i] for i in range(len(merged) - 1)
-                    if 50 < merged[i + 1] - merged[i] < self.ticks_per_beat * 4]
+            iois = [
+                merged[i + 1] - merged[i]
+                for i in range(len(merged) - 1)
+                if 50 < merged[i + 1] - merged[i] < self.ticks_per_beat * 4
+            ]
             if len(iois) < 8:
-                return (self.time_sig_num, self.time_sig_den, 0.0,
-                        'Not enough IOI data for meter detection.')
+                return (
+                    self.time_sig_num,
+                    self.time_sig_den,
+                    0.0,
+                    "Not enough IOI data for meter detection.",
+                )
             beat_ticks = _st.median(iois)
 
         if beat_ticks <= 0:
-            return (self.time_sig_num, self.time_sig_den, 0.0,
-                    'Invalid beat period.')
+            return (self.time_sig_num, self.time_sig_den, 0.0, "Invalid beat period.")
 
         # Per-beat accent strength: velocity weighted toward bass register
         accent = _dd_ts(float)
@@ -2881,15 +3259,19 @@ class Song:
         candidates = (2, 3, 4, 6)
         raw_scores = {}
         for num in candidates:
-            on_beat  = [v for k, v in accent.items() if k % num == 0]
+            on_beat = [v for k, v in accent.items() if k % num == 0]
             off_beat = [v for k, v in accent.items() if k % num != 0]
             if not on_beat or not off_beat:
                 continue
             raw_scores[num] = _st.mean(on_beat) - _st.mean(off_beat)
 
         if not raw_scores:
-            return (self.time_sig_num, self.time_sig_den, 0.0,
-                    'Could not score any meter candidate.')
+            return (
+                self.time_sig_num,
+                self.time_sig_den,
+                0.0,
+                "Could not score any meter candidate.",
+            )
 
         # ── Simplicity bias (v22k) ────────────────────────────────────────
         # Penalise a larger candidate when a smaller divisor already accounts
@@ -2909,17 +3291,19 @@ class Song:
                     if adjusted[larger] < adjusted[num] * 1.15:
                         adjusted[larger] = adjusted[larger] / ratio
 
-        best_num   = max(adjusted, key=adjusted.get)
+        best_num = max(adjusted, key=adjusted.get)
         best_score = adjusted[best_num]
-        ordered    = sorted(adjusted.values(), reverse=True)
-        runner_up  = ordered[1] if len(ordered) > 1 else 0.0
-        spread     = best_score - runner_up
+        ordered = sorted(adjusted.values(), reverse=True)
+        runner_up = ordered[1] if len(ordered) > 1 else 0.0
+        spread = best_score - runner_up
         confidence = max(0.0, min(1.0, spread / (abs(best_score) + 1e-6)))
 
-        note = (f'Beat period={beat_ticks:.0f}t; '
-                f'raw={{{", ".join(f"{k}:{round(v,1)}" for k,v in raw_scores.items())}}}; '
-                f'adj={{{", ".join(f"{k}:{round(v,1)}" for k,v in adjusted.items())}}} '
-                f'→ {best_num}/4 (confidence {confidence:.0%})')
+        note = (
+            f"Beat period={beat_ticks:.0f}t; "
+            f'raw={{{", ".join(f"{k}:{round(v,1)}" for k,v in raw_scores.items())}}}; '
+            f'adj={{{", ".join(f"{k}:{round(v,1)}" for k,v in adjusted.items())}}} '
+            f"→ {best_num}/4 (confidence {confidence:.0%})"
+        )
         return (best_num, 4, confidence, note)
 
     def detect_notation_division(self):
@@ -2940,8 +3324,10 @@ class Song:
             return 2
 
         # Find shortest duration in ticks, ignoring sub-grace-threshold noise
-        min_dur = min((n.duration for n in all_notes if n.duration >= grace_ticks(tpb)),
-                      default=tpb)
+        min_dur = min(
+            (n.duration for n in all_notes if n.duration >= grace_ticks(tpb)),
+            default=tpb,
+        )
 
         # Map shortest duration to required division
         # tpb      = quarter  → division 1
@@ -2955,7 +3341,7 @@ class Song:
         elif min_dur >= tpb // 4:
             return 4
         else:
-            return 4   # cap at sixteenth — 32nds make scores unreadably dense
+            return 4  # cap at sixteenth — 32nds make scores unreadably dense
 
     def bake_to_score(self):
         """Return a NEW Song whose note data matches exactly what the score displays.
@@ -2975,7 +3361,7 @@ class Song:
         """
         import copy as _bk
 
-        tpb  = self.ticks_per_beat
+        tpb = self.ticks_per_beat
         mmap = self.get_measure_map()
 
         # ── Duration vocabulary ────────────────────────────────────────────────
@@ -2995,17 +3381,17 @@ class Song:
         # them either, so this also brings the note and rest vocabularies
         # into agreement down to the sixteenth-note level.
         _STD_VALS = [
-            tpb * 4,        # whole
-            tpb * 3,        # dotted half
-            tpb * 2,        # half
-            tpb * 3 // 2,   # dotted quarter
-            tpb,            # quarter
-            tpb * 3 // 4,   # dotted eighth
-            tpb // 2,       # eighth
-            tpb * 3 // 8,   # dotted sixteenth
-            tpb // 4,       # sixteenth
-            tpb // 8,       # 32nd             ← NO dotted-32nd
-            tpb // 16,      # 64th
+            tpb * 4,  # whole
+            tpb * 3,  # dotted half
+            tpb * 2,  # half
+            tpb * 3 // 2,  # dotted quarter
+            tpb,  # quarter
+            tpb * 3 // 4,  # dotted eighth
+            tpb // 2,  # eighth
+            tpb * 3 // 8,  # dotted sixteenth
+            tpb // 4,  # sixteenth
+            tpb // 8,  # 32nd             ← NO dotted-32nd
+            tpb // 16,  # 64th
         ]
         _STD_VALS = [v for v in _STD_VALS if v > 0]
 
@@ -3045,7 +3431,7 @@ class Song:
                 if not candidates:
                     candidates = list(plain_vals)
                 chosen = min(max(candidates), available)
-                is_staccato = (ticks < chosen * 0.75)
+                is_staccato = ticks < chosen * 0.75
                 return chosen, is_staccato
 
         def _best_dur_le(ticks):
@@ -3066,21 +3452,22 @@ class Song:
 
         # ── Build the new Song shell ──────────────────────────────────────────
         out = Song()
-        out.ticks_per_beat  = tpb
-        out.tempo           = self.tempo
-        out.time_sig_num    = self.time_sig_num
-        out.time_sig_den    = self.time_sig_den
-        out.sig_changes     = _bk.deepcopy(self.sig_changes)
-        out.filename        = self.filename
-        out.title           = getattr(self, 'title', '')
-        out.modified        = True   # baked copy always needs a Save
+        out.ticks_per_beat = tpb
+        out.tempo = self.tempo
+        out.time_sig_num = self.time_sig_num
+        out.time_sig_den = self.time_sig_den
+        out.sig_changes = _bk.deepcopy(self.sig_changes)
+        out.filename = self.filename
+        out.title = getattr(self, "title", "")
+        out.modified = True  # baked copy always needs a Save
 
         for tr in self.tracks:
             if not tr.notes:
-                continue   # drop empty tracks — they carry no musical content
+                continue  # drop empty tracks — they carry no musical content
 
-            out_tr = Track(name=tr.name, channel=tr.channel,
-                           program=tr.program, volume=tr.volume)
+            out_tr = Track(
+                name=tr.name, channel=tr.channel, program=tr.program, volume=tr.volume
+            )
             out_tr.mute = tr.mute
             out_tr.solo = tr.solo
             # Copy non-note events (pedal CC, etc.) unchanged
@@ -3096,10 +3483,10 @@ class Song:
 
                 # ── Step 1: snap onsets to grid ───────────────────────────────
                 snapped = []
-                budget  = int(tpm)
-                _gt = grace_ticks(tpb)   # v22s: scaled to this song's resolution
+                budget = int(tpm)
+                _gt = grace_ticks(tpb)  # v22s: scaled to this song's resolution
                 for n in meas_notes:
-                    rel  = int(n.tick) - ms
+                    rel = int(n.tick) - ms
                     qrel = round(rel / grid) * grid
                     # grace_ticks(tpb) tolerance: same musical meaning as the
                     # renderer, scaled correctly for this file's resolution.
@@ -3119,14 +3506,17 @@ class Song:
                 # regardless of duration — they will be rendered as small
                 # prefatory noteheads before the beat.
                 min_dur = _gt
-                snapped = [(q, n) for q, n in snapped
-                           if n.duration >= min_dur
-                           or getattr(n, 'articulation', '') == 'grace']
+                snapped = [
+                    (q, n)
+                    for q, n in snapped
+                    if n.duration >= min_dur
+                    or getattr(n, "articulation", "") == "grace"
+                ]
                 if not snapped:
                     continue
 
                 # ── Step 3: group same-tick notes into chords ─────────────────
-                groups: list = []   # [(grid_tick, [notes])]
+                groups: list = []  # [(grid_tick, [notes])]
                 for q, n in snapped:
                     if groups and groups[-1][0] == q:
                         groups[-1][1].append(n)
@@ -3140,16 +3530,16 @@ class Song:
                     if available <= 0:
                         continue
 
-                    raw_dur             = max(n.duration for n in chord)
+                    raw_dur = max(n.duration for n in chord)
                     chosen, is_staccato = _snap_note(raw_dur, available)
                     if chosen <= 0:
                         chosen = grid
 
                     abs_tick = ms + tick
                     for n in chord:
-                        nc           = _bk.copy(n)
-                        nc.tick      = abs_tick
-                        nc.duration  = chosen
+                        nc = _bk.copy(n)
+                        nc.tick = abs_tick
+                        nc.duration = chosen
                         # v22ze-48 fix: this used to clear the
                         # tie_continuation marker RIGHT HERE, before
                         # Step 5 below ever got a chance to see it --
@@ -3163,8 +3553,8 @@ class Song:
                         # intact here; Step 5 is responsible for
                         # clearing it (only on the orphan fallback path,
                         # where no predecessor was found to merge into).
-                        if is_staccato and nc.articulation == '':
-                            nc.articulation = 'staccato'
+                        if is_staccato and nc.articulation == "":
+                            nc.articulation = "staccato"
                         baked_notes.append(nc)
 
                     # If chosen < available, the gap is a rest.
@@ -3178,9 +3568,9 @@ class Song:
             # falls outside the predecessor's snapped window.  Merge them now.
             baked_notes.sort(key=lambda n: n.tick)
             merged: list = []
-            last_of_pitch: dict = {}   # pitch → index into merged[]
+            last_of_pitch: dict = {}  # pitch → index into merged[]
             for n in baked_notes:
-                if getattr(n, 'articulation', '') == 'tie_continuation':
+                if getattr(n, "articulation", "") == "tie_continuation":
                     idx = last_of_pitch.get(n.pitch)
                     if idx is not None:
                         pred = merged[idx]
@@ -3193,7 +3583,7 @@ class Song:
                     # so it doesn't carry a meaningless 'tie_continuation'
                     # tag into the final, exported note data.
                     n = _bk.copy(n)
-                    n.articulation = ''
+                    n.articulation = ""
                 nc = _bk.copy(n)
                 last_of_pitch[nc.pitch] = len(merged)
                 merged.append(nc)
@@ -3222,11 +3612,13 @@ class Song:
                                       per page).
         """
 
-        tpb  = self.ticks_per_beat
+        tpb = self.ticks_per_beat
         mmap = self.get_measure_map()
-        tpm  = mmap[0][5] if mmap else self.ticks_per_measure()   # first measure tpm (for compat)
+        tpm = (
+            mmap[0][5] if mmap else self.ticks_per_measure()
+        )  # first measure tpm (for compat)
         n_meas = len(mmap)
-        title  = os.path.splitext(os.path.basename(path))[0]
+        title = os.path.splitext(os.path.basename(path))[0]
 
         # v22x: compute the filtered (non-empty) track list and a dynamic
         # `indent` value BEFORE the \paper block is written, fixing a real
@@ -3242,7 +3634,8 @@ class Song:
         # that will actually be used in THIS score, clamped to a sane range.
         _ly_track_list_preview = [tr for tr in self.tracks if tr.notes]
         _longest_name_len = max(
-            (len(tr.name) for tr in _ly_track_list_preview), default=5)
+            (len(tr.name) for tr in _ly_track_list_preview), default=5
+        )
         # ~0.09in per character is a reasonable estimate for the default
         # instrument-name font at staff-size 16; clamp so a very long name
         # can't blow out the page and a very short one still gets a
@@ -3253,7 +3646,8 @@ class Song:
 
         def W(f, s=""):
             f.write(s + "\n")
-    #===============================================================================================================
+
+        # ===============================================================================================================
 
         # ── helpers ──────────────────────────────────────────────────────────
 
@@ -3295,17 +3689,17 @@ class Song:
         # full reasoning. This also brings notes and rest_seq's rest
         # vocabulary (below) into full agreement.
         _STD_DURS = [
-            (tpb * 4,        "1"),
-            (tpb * 3,        "2."),    # dotted half
-            (tpb * 2,        "2"),
-            (tpb * 3 // 2,   "4."),   # dotted quarter
-            (tpb,            "4"),
-            (tpb * 3 // 4,   "8."),   # dotted eighth
-            (tpb // 2,       "8"),
-            (tpb * 3 // 8,   "16."),  # dotted sixteenth
-            (tpb // 4,       "16"),
-            (tpb // 8,       "32"),   # 32nd — NO dotted-32nd
-            (tpb // 16,      "64"),
+            (tpb * 4, "1"),
+            (tpb * 3, "2."),  # dotted half
+            (tpb * 2, "2"),
+            (tpb * 3 // 2, "4."),  # dotted quarter
+            (tpb, "4"),
+            (tpb * 3 // 4, "8."),  # dotted eighth
+            (tpb // 2, "8"),
+            (tpb * 3 // 8, "16."),  # dotted sixteenth
+            (tpb // 4, "16"),
+            (tpb // 8, "32"),  # 32nd — NO dotted-32nd
+            (tpb // 16, "64"),
         ]
         _STD_DURS = [(v, s) for v, s in _STD_DURS if v > 0]
         _STD_VALS = [v for v, _ in _STD_DURS]
@@ -3343,23 +3737,25 @@ class Song:
             # cause was dur_str's nearest-match rounding, fixed via
             # chosen = best_dur_le(chosen) above.
             table = [
-                (tpb*4,     "r1"),
-                (tpb*3,     "r2."),
-                (tpb*2,     "r2"),
-                (tpb*3//2,  "r4."),
-                (tpb,       "r4"),
-                (tpb*3//4,  "r8."),
-                (tpb//2,    "r8"),
-                (tpb*3//8,  "r16."),
-                (tpb//4,    "r16"),
-                (tpb//8,    "r32"),
-                (tpb//16,   "r64"),
+                (tpb * 4, "r1"),
+                (tpb * 3, "r2."),
+                (tpb * 2, "r2"),
+                (tpb * 3 // 2, "r4."),
+                (tpb, "r4"),
+                (tpb * 3 // 4, "r8."),
+                (tpb // 2, "r8"),
+                (tpb * 3 // 8, "r16."),
+                (tpb // 4, "r16"),
+                (tpb // 8, "r32"),
+                (tpb // 16, "r64"),
             ]
             table = [(v, s) for v, s in table if v > 0]
-            result = []; rem = int(ticks)
+            result = []
+            rem = int(ticks)
             for val, sym in table:
                 while rem >= val:
-                    result.append(sym); rem -= val
+                    result.append(sym)
+                    rem -= val
             # v22ze: also return the number of ticks actually consumed
             # (== ticks minus whatever undecomposable residual was
             # dropped, per the v22zd fallback-removal note below).
@@ -3397,18 +3793,58 @@ class Song:
         # still gets an explicit accidental every time regardless of the
         # key signature being correct. Pick flat vs sharp spelling once,
         # for the whole piece, from the same key_sig used for \key.
-        _FLAT_KEYS = {'F','Bb','Eb','Ab','Db','Gb','Cb',
-                      'Dm','Gm','Cm','Fm','Bbm','Ebm','Abm'}
-        _use_flats = getattr(self, 'key_sig', 'C') in _FLAT_KEYS
-        _SHARP_NAMES = ["c","cis","d","dis","e","f","fis","g","gis","a","ais","b"]
-        _FLAT_NAMES  = ["c","des","d","ees","e","f","ges","g","aes","a","bes","b"]
+        _FLAT_KEYS = {
+            "F",
+            "Bb",
+            "Eb",
+            "Ab",
+            "Db",
+            "Gb",
+            "Cb",
+            "Dm",
+            "Gm",
+            "Cm",
+            "Fm",
+            "Bbm",
+            "Ebm",
+            "Abm",
+        }
+        _use_flats = getattr(self, "key_sig", "C") in _FLAT_KEYS
+        _SHARP_NAMES = [
+            "c",
+            "cis",
+            "d",
+            "dis",
+            "e",
+            "f",
+            "fis",
+            "g",
+            "gis",
+            "a",
+            "ais",
+            "b",
+        ]
+        _FLAT_NAMES = [
+            "c",
+            "des",
+            "d",
+            "ees",
+            "e",
+            "f",
+            "ges",
+            "g",
+            "aes",
+            "a",
+            "bes",
+            "b",
+        ]
 
-        _LY_LETTER = {0: 'c', 2: 'd', 4: 'e', 5: 'f', 7: 'g', 9: 'a', 11: 'b'}
-        _LY_SUFFIX = {-2: 'eses', -1: 'es', 0: '', 1: 'is', 2: 'isis'}
+        _LY_LETTER = {0: "c", 2: "d", 4: "e", 5: "f", 7: "g", 9: "a", 11: "b"}
+        _LY_SUFFIX = {-2: "eses", -1: "es", 0: "", 1: "is", 2: "isis"}
 
         def _ly_octave_suffix(note, midi_pitch):
             oct_idx = midi_pitch // 12
-            diff    = oct_idx - 5      # 0 → C4 = c'
+            diff = oct_idx - 5  # 0 → C4 = c'
             if diff >= 0:
                 return note + "'" * (diff + 1)
             else:
@@ -3430,13 +3866,17 @@ class Song:
             # (always falls back to the key-based spelling below, so
             # every pre-existing call site that only ever had an int
             # keeps behaving exactly as before).
-            spelling = getattr(note_or_pitch, 'spelling', '') or ''
-            midi_pitch = note_or_pitch.pitch if hasattr(note_or_pitch, 'pitch') else note_or_pitch
+            spelling = getattr(note_or_pitch, "spelling", "") or ""
+            midi_pitch = (
+                note_or_pitch.pitch
+                if hasattr(note_or_pitch, "pitch")
+                else note_or_pitch
+            )
             acc = _SPELL_ACC_DELTA.get(spelling)
             if acc is not None:
                 natural_pitch = midi_pitch - acc
                 letter = _LY_LETTER.get(natural_pitch % 12)
-                if letter is not None:   # sanity check — should always hold
+                if letter is not None:  # sanity check — should always hold
                     return _ly_octave_suffix(letter + _LY_SUFFIX[acc], midi_pitch)
             names = _FLAT_NAMES if _use_flats else _SHARP_NAMES
             return _ly_octave_suffix(names[midi_pitch % 12], midi_pitch)
@@ -3465,7 +3905,8 @@ class Song:
         # construction now, not by coincidence.
         def find_split_pitch(notes):
             return _find_split_pitch_for_track(
-                notes, prefer_lh_octaves=getattr(self, 'prefer_lh_octaves', True))
+                notes, prefer_lh_octaves=getattr(self, "prefer_lh_octaves", True)
+            )
 
         def build_measure_str(notes_in_meas, cursor_start, measure_tpm):
             """Grid-based measure builder — guarantees clean standard note values.
@@ -3480,15 +3921,14 @@ class Song:
             Because every tick is on the grid, rest_seq always produces clean output.
             """
 
-
-            grid   = max(1, tpb // NOTATION_DIVISION)   # user-selectable notation grid
+            grid = max(1, tpb // NOTATION_DIVISION)  # user-selectable notation grid
             budget = int(measure_tpm)
 
             # ── Step 1: snap note positions to grid ───────────────────────────
             snapped_notes = []
             for n in notes_in_meas:
-                rel = int(n.tick) - cursor_start          # offset within measure
-                qraw = round(rel / grid) * grid            # nearest grid point
+                rel = int(n.tick) - cursor_start  # offset within measure
+                qraw = round(rel / grid) * grid  # nearest grid point
 
                 # v22ze: this used to be an if/else on
                 # `abs(rel - qraw) <= grace_ticks(tpb)` ("grace timing
@@ -3502,13 +3942,13 @@ class Song:
                 # deliberately, not left as dead code.
                 q = qraw
 
-                q   = max(0, min(budget - grid, q))        # clamp inside measure
+                q = max(0, min(budget - grid, q))  # clamp inside measure
                 snapped_notes.append((q, n))
 
             snapped_notes.sort(key=lambda x: x[0])
 
             # ── Step 2: group same-tick notes into chords ─────────────────────
-            groups = []   # [(grid_tick, [notes...])]
+            groups = []  # [(grid_tick, [notes...])]
             for q, n in snapped_notes:
                 if groups and groups[-1][0] == q:
                     groups[-1][1].append(n)
@@ -3516,14 +3956,14 @@ class Song:
                     groups.append((q, [n]))
 
             # ── Step 3 & 4: build token list ──────────────────────────────────
-            mstr   = []
+            mstr = []
             # v22ze: parallel list, same length as mstr, classifying each
             # token as 'staccato' / 'note' / 'rest' -- used below to find
             # runs of 2+ consecutive staccato notes with no intervening
             # rest, for the portato slur heuristic (staccato dot AND a
             # phrase slur together, as seen in the published score).
             mstr_kind = []
-            cursor = 0   # ticks consumed in this measure
+            cursor = 0  # ticks consumed in this measure
 
             for i, (tick, chord) in enumerate(groups):
                 next_tick = groups[i + 1][0] if i + 1 < len(groups) else budget
@@ -3533,7 +3973,7 @@ class Song:
                     gap = tick - cursor
                     for rs in rest_seq(gap)[0]:
                         mstr.append(rs)
-                        mstr_kind.append('rest')
+                        mstr_kind.append("rest")
                     cursor = tick
                 elif tick < cursor:
                     # Overlap: this chord's snapped tick falls inside the previous
@@ -3546,8 +3986,8 @@ class Song:
                 available = next_tick - tick
                 if available <= 0:
                     continue
-                raw_dur   = max(n.duration for n in chord)
-                chosen    = snap_note(raw_dur, available)
+                raw_dur = max(n.duration for n in chord)
+                chosen = snap_note(raw_dur, available)
                 if chosen <= 0:
                     # v22zd: fall back to `available` itself, not a fixed
                     # `grid` unit.  best_dur_le(available) can now return 0
@@ -3597,17 +4037,21 @@ class Song:
                 # Staccato: note is marked staccato by bake_to_score(), OR
                 # the raw performed duration is < 75% of the snapped value
                 # (catches notes not yet baked but clearly short).
-                stac_count  = sum(1 for n in chord_notes
-                                  if (getattr(n, 'articulation', '') == 'staccato'
-                                      or (n.duration < chosen * 0.75
-                                          and chosen <= tpb // 2)))
-                stac_sfx    = '-.' if stac_count > len(chord_notes) / 2 else ''
+                stac_count = sum(
+                    1
+                    for n in chord_notes
+                    if (
+                        getattr(n, "articulation", "") == "staccato"
+                        or (n.duration < chosen * 0.75 and chosen <= tpb // 2)
+                    )
+                )
+                stac_sfx = "-." if stac_count > len(chord_notes) / 2 else ""
                 if len(chord_notes) == 1:
                     mstr.append(pitch_ly(chord_notes[0]) + ds + stac_sfx)
                 else:
                     pitches = " ".join(pitch_ly(n) for n in chord_notes)
                     mstr.append("<" + pitches + ">" + ds + stac_sfx)
-                mstr_kind.append('staccato' if stac_sfx else 'note')
+                mstr_kind.append("staccato" if stac_sfx else "note")
 
                 cursor = tick + chosen
 
@@ -3628,7 +4072,7 @@ class Song:
                 _tail_rests, _tail_consumed = rest_seq(budget - cursor)
                 for rs in _tail_rests:
                     mstr.append(rs)
-                    mstr_kind.append('rest')
+                    mstr_kind.append("rest")
                 # v22ze fix: advance cursor by what rest_seq actually wrote,
                 # not just leave it where the last note ended. Previously
                 # `cursor` was never updated here, so the diagnostic below
@@ -3652,7 +4096,9 @@ class Song:
                     actual_ticks = cursor
                     delta = actual_ticks - budget
 
-                    print(f"[measure] #{self._measure_diag_count+1} actual={actual_ticks} expected={budget} delta={delta}")
+                    print(
+                        f"[measure] #{self._measure_diag_count+1} actual={actual_ticks} expected={budget} delta={delta}"
+                    )
 
                     if delta != 0:
                         self._measure_diag_errors += 1
@@ -3660,7 +4106,9 @@ class Song:
                     self._measure_diag_count += 1
 
                     if self._measure_diag_count == 12:
-                        print(f"[measure-check] checked first 12 measures, {self._measure_diag_errors} mismatches")
+                        print(
+                            f"[measure-check] checked first 12 measures, {self._measure_diag_errors} mismatches"
+                        )
             except Exception as e:
                 print(f"[measure-check] diagnostic error: {e}")
 
@@ -3678,23 +4126,24 @@ class Song:
             # threaded between calls to this function, which is a bigger
             # change than this heuristic's intended scope.
             run_start = None
-            for i, kind in enumerate(mstr_kind + ['__end__']):
-                if kind == 'staccato':
+            for i, kind in enumerate(mstr_kind + ["__end__"]):
+                if kind == "staccato":
                     if run_start is None:
                         run_start = i
                 else:
                     if run_start is not None and i - run_start >= 2:
-                        mstr[run_start] += r'\('
-                        mstr[i - 1]     += r'\)'
+                        mstr[run_start] += r"\("
+                        mstr[i - 1] += r"\)"
                     run_start = None
 
             return " ".join(mstr) if mstr else "r1"
 
         def clef_for_median(notes):
             # Choose treble or bass clef based on median pitch.
-            if not notes: return "treble"
+            if not notes:
+                return "treble"
             pitches = sorted(n.pitch for n in notes)
-            median  = pitches[len(pitches)//2]
+            median = pitches[len(pitches) // 2]
             return "bass" if median < 57 else "treble"
 
         def is_piano(tr):
@@ -3720,7 +4169,8 @@ class Song:
                 m_idx = 0
                 for idx, ms, me, _n, _d, _t in mmap:
                     if ms <= n.tick < me:
-                        m_idx = idx; break
+                        m_idx = idx
+                        break
                 if m_idx not in vel_by_meas:
                     vel_by_meas[m_idx] = []
                 if n.velocity > 0:
@@ -3736,21 +4186,21 @@ class Song:
             """Map MIDI velocity (0–127) to LilyPond dynamic marking.
             ppp=17, pp=33, p=49, mp=65, mf=81, f=97, ff=113, fff=127."""
             dynamics = [
-                (17,  r'\ppp'),
-                (33,  r'\pp'),
-                (49,  r'\p'),
-                (65,  r'\mp'),
-                (81,  r'\mf'),
-                (97,  r'\f'),
-                (113, r'\ff'),
-                (127, r'\fff'),
+                (17, r"\ppp"),
+                (33, r"\pp"),
+                (49, r"\p"),
+                (65, r"\mp"),
+                (81, r"\mf"),
+                (97, r"\f"),
+                (113, r"\ff"),
+                (127, r"\fff"),
             ]
 
             # Clamp velocity to min/max range in this piece
             vel = max(min_vel, min(max_vel, velocity))
 
             # Find closest dynamic
-            best_dyn = r'\mf'
+            best_dyn = r"\mf"
             best_dist = 999
             for threshold, dyn in dynamics:
                 dist = abs(vel - threshold)
@@ -3805,7 +4255,9 @@ class Song:
             fixes this.
             """
             density = {}
-            grid = max(1, tpb // 4)   # 16th-note grid -- same attack granularity build_measure_str notates at
+            grid = max(
+                1, tpb // 4
+            )  # 16th-note grid -- same attack granularity build_measure_str notates at
             for m_idx, ms, me, num, den, tpm in mmap:
                 attack_ticks = set()
                 for n in notes:
@@ -3829,10 +4281,14 @@ class Song:
             crude overflow guard; without it, the very densest measures
             need spacing-increment alone to keep them from overflowing.
             """
-            if d <= 2:   return 1.2
-            if d <= 4:   return 2.0
-            if d <= 8:   return 3.2
-            if d <= 14:  return 4.5
+            if d <= 2:
+                return 1.2
+            if d <= 4:
+                return 2.0
+            if d <= 8:
+                return 3.2
+            if d <= 14:
+                return 4.5
             return 6.0
 
         def detect_clef_runs(notes, mmap, home_clef):
@@ -3895,13 +4351,11 @@ class Song:
                 if not mn:
                     continue
                 if home_clef == "bass":
-                    cluster = [n for n in mn
-                               if note_staff_pos(n, _use_flats)[0] < 2]
+                    cluster = [n for n in mn if note_staff_pos(n, _use_flats)[0] < 2]
                     if len(cluster) >= 2 and all(n.pitch > 64 for n in cluster):
                         opposite_measures.add(m_idx)
                 elif home_clef == "treble":
-                    cluster = [n for n in mn
-                               if note_staff_pos(n, _use_flats)[0] >= -2]
+                    cluster = [n for n in mn if note_staff_pos(n, _use_flats)[0] >= -2]
                     if len(cluster) >= 2 and all(n.pitch < 60 for n in cluster):
                         opposite_measures.add(m_idx)
 
@@ -3917,13 +4371,14 @@ class Song:
                         runs.append((run_start, run_end))
                         run_start = run_end = m
                 runs.append((run_start, run_end))
-                for (rs, re) in runs:
+                for rs, re in runs:
                     enter_at.add(rs)
                     revert_at.add(re + 1)
             return enter_at, revert_at
 
-        def write_voice(f, vn, notes, clef_name, mmap,
-                        density_map=None, emit_spacing=False):
+        def write_voice(
+            f, vn, notes, clef_name, mmap, density_map=None, emit_spacing=False
+        ):
             """Write a single \\absolute voice variable with per-measure time sigs.
 
             density_map / emit_spacing (v22z): when emit_spacing is True and
@@ -3967,7 +4422,7 @@ class Song:
             min_vel, max_vel, mean_vel, vel_by_meas = analyze_velocity(notes)
             use_dynamics = (max_vel - min_vel) > 20
             prev_dyn = None
-            prev_num, prev_den = None, None   # force \time on first measure
+            prev_num, prev_den = None, None  # force \time on first measure
 
             for m_idx, ms, me, num, den, tpm in mmap:
                 if m_idx in clef_enter_at:
@@ -3977,7 +4432,10 @@ class Song:
 
                 if emit_spacing and density_map is not None:
                     _incr = spacing_increment_for_density(density_map.get(m_idx, 0))
-                    W(f, f"  \\once \\override Score.SpacingSpanner.spacing-increment = #{_incr}")
+                    W(
+                        f,
+                        f"  \\once \\override Score.SpacingSpanner.spacing-increment = #{_incr}",
+                    )
 
                 # Emit \time directive when time signature changes
                 if num != prev_num or den != prev_den:
@@ -3987,30 +4445,38 @@ class Song:
                 mstr = build_measure_str(mn, ms, tpm)
 
                 if use_dynamics and mn and m_idx in vel_by_meas:
-                    cur_vel  = vel_by_meas[m_idx]
-                    dyn      = velocity_to_dynamic(cur_vel, min_vel, max_vel)
+                    cur_vel = vel_by_meas[m_idx]
+                    dyn = velocity_to_dynamic(cur_vel, min_vel, max_vel)
                     # Detect crescendo / diminuendo trends across measures
                     next_vel = vel_by_meas.get(m_idx + 1)
                     prev_vel = vel_by_meas.get(m_idx - 1)
-                    trend_sfx = ''
+                    trend_sfx = ""
                     if next_vel is not None and prev_vel is not None:
                         if next_vel - cur_vel > 8 and cur_vel - prev_vel > 8:
-                            trend_sfx = r'\<'   # clear crescendo
+                            trend_sfx = r"\<"  # clear crescendo
                         elif cur_vel - next_vel > 8 and prev_vel - cur_vel > 8:
-                            trend_sfx = r'\>'   # clear diminuendo
+                            trend_sfx = r"\>"  # clear diminuendo
                     if dyn != prev_dyn or trend_sfx:
                         tokens = mstr.split()
                         first_note_idx = next(
-                            (i for i, t in enumerate(tokens)
-                             if t and not t.startswith("r") and not t.startswith("<")), None
+                            (
+                                i
+                                for i, t in enumerate(tokens)
+                                if t and not t.startswith("r") and not t.startswith("<")
+                            ),
+                            None,
                         )
                         if first_note_idx is None:
                             first_note_idx = next(
-                                (i for i, t in enumerate(tokens)
-                                 if t and t.startswith("<")), None
+                                (
+                                    i
+                                    for i, t in enumerate(tokens)
+                                    if t and t.startswith("<")
+                                ),
+                                None,
                             )
                         if first_note_idx is not None:
-                            mark = ''
+                            mark = ""
                             if dyn != prev_dyn:
                                 mark += dyn
                                 prev_dyn = dyn
@@ -4023,7 +4489,8 @@ class Song:
             W(f, "}\n")
             W(f)
 
-                # ── Write file ────────────────────────────────────────────────────────
+            # ── Write file ────────────────────────────────────────────────────────
+
         with open(path, "w") as f:
             print(f"[LY] Writing: {path}")
             W(f, r'\version "2.26.0"')
@@ -4031,13 +4498,13 @@ class Song:
             # ── Global staff size — smaller than default (20) packs more
             # systems per page.  16 pt is readable on US Letter at full size;
             # go to 14 for very dense scores.
-            W(f, f'#(set-global-staff-size {staff_size})')
+            W(f, f"#(set-global-staff-size {staff_size})")
             W(f)
-            W(f, r'\header {')
+            W(f, r"\header {")
             W(f, r'  title = "' + title + r'"')
             W(f, r'  composer = ""')
-            W(f, r'  tagline = ##f')          # suppress "Music engraving by LilyPond" footer
-            W(f, r'}')
+            W(f, r"  tagline = ##f")  # suppress "Music engraving by LilyPond" footer
+            W(f, r"}")
             W(f)
             # ── Paper block ────────────────────────────────────────────────
             # US Letter 8.5 × 11 in.
@@ -4052,15 +4519,15 @@ class Song:
             # page-breaking = ly:optimal-breaking  → LilyPond decides how many
             #                       systems fit per page rather than us forcing it
             # system-system-spacing controls whitespace between systems on a page
-            W(f, r'\paper {')
+            W(f, r"\paper {")
             W(f, r'  #(set-paper-size "letter")')
-            W(f, f'  indent           = {_dynamic_indent_in:.2f}\\in')
-            W(f, r'  short-indent     = 0\in')
-            W(f, r'  left-margin      = 0.75\in')
-            W(f, r'  right-margin     = 0.75\in')
-            W(f, r'  top-margin       = 0.5\in')
-            W(f, r'  bottom-margin    = 0.5\in')
-            W(f, r'  line-width       = 7.0\in')
+            W(f, f"  indent           = {_dynamic_indent_in:.2f}\\in")
+            W(f, r"  short-indent     = 0\in")
+            W(f, r"  left-margin      = 0.75\in")
+            W(f, r"  right-margin     = 0.75\in")
+            W(f, r"  top-margin       = 0.5\in")
+            W(f, r"  bottom-margin    = 0.5\in")
+            W(f, r"  line-width       = 7.0\in")
             # v22w: ragged-right stays ##f — a PRIOR fix (see comment above
             # this \paper block) deliberately chose ##f to avoid a "2
             # measures crammed onto one line with huge gaps" problem caused
@@ -4071,22 +4538,22 @@ class Song:
             # FEWER measures per line on dense material — meaning less
             # stretching is needed to fill the line, without touching
             # ragged-right at all.
-            W(f, r'  ragged-right     = ##f')
-            W(f, r'  ragged-last      = ##t')
-            W(f, r'  page-breaking    = #ly:optimal-breaking')
+            W(f, r"  ragged-right     = ##f")
+            W(f, r"  ragged-last      = ##t")
+            W(f, r"  page-breaking    = #ly:optimal-breaking")
             # Tighten the gaps between systems so more fit per page.
             # Dot-notation sets individual spacing properties without
             # the multi-line alist syntax that LilyPond rejects.
-            W(f, r'  system-system-spacing.basic-distance   = #12')
-            W(f, r'  system-system-spacing.minimum-distance = #8')
-            W(f, r'  system-system-spacing.padding          = #1')
-            W(f, r'  score-system-spacing.basic-distance    = #12')
-            W(f, r'  score-system-spacing.minimum-distance  = #8')
-            W(f, r'  score-system-spacing.padding           = #1')
-            W(f, r'}')
+            W(f, r"  system-system-spacing.basic-distance   = #12")
+            W(f, r"  system-system-spacing.minimum-distance = #8")
+            W(f, r"  system-system-spacing.padding          = #1")
+            W(f, r"  score-system-spacing.basic-distance    = #12")
+            W(f, r"  score-system-spacing.minimum-distance  = #8")
+            W(f, r"  score-system-spacing.padding           = #1")
+            W(f, r"}")
 
             W(f)
-            W(f, r'globalSettings = {')
+            W(f, r"globalSettings = {")
             # v22ze fix: this never emitted \key at all, so LilyPond
             # silently defaulted to C major/no-accidentals regardless of
             # the piece's actual key -- e.g. a G minor piece (2 flats)
@@ -4096,14 +4563,15 @@ class Song:
             # accidentals automatically once \key is correct, so this
             # doesn't require changing how individual notes are spelled
             # elsewhere -- it was purely a missing declaration.
-            _key_tonic, _key_mode = key_sig_to_ly(getattr(self, 'key_sig', 'C'))
-            W(f, r'  \key ' + _key_tonic + ' \\' + _key_mode)
-            W(f, r'  \tempo 4 = ' + str(self.bpm))
-            W(f, r'}')
+            _key_tonic, _key_mode = key_sig_to_ly(getattr(self, "key_sig", "C"))
+            W(f, r"  \key " + _key_tonic + " \\" + _key_mode)
+            W(f, r"  \tempo 4 = " + str(self.bpm))
+            W(f, r"}")
             W(f)
 
             # ── Generate voice variables ───────────────────────────────────
             import re
+
             # Helper: detect a pre-split RH/LH pair — either produced by
             # rationalize() ('X (RH)'/'X (LH)' suffix) or already present in
             # the source file under common hand-naming conventions ('Piano
@@ -4113,11 +4581,13 @@ class Song:
             # correct, whether it came from our own DP or from the file
             # itself, and re-splitting by pitch would silently discard that.
             def _is_rh_lh_pair(ta, tb):
-                if (ta.name.endswith(" (RH)") and tb.name.endswith(" (LH)") and
-                        ta.name[:-5] == tb.name[:-5]):
+                if (
+                    ta.name.endswith(" (RH)")
+                    and tb.name.endswith(" (LH)")
+                    and ta.name[:-5] == tb.name[:-5]
+                ):
                     return True
-                if (_ly_hand_hint(ta.name) == 'R' and
-                        _ly_hand_hint(tb.name) == 'L'):
+                if _ly_hand_hint(ta.name) == "R" and _ly_hand_hint(tb.name) == "L":
                     return True
                 # v22ze-29 fix (housekeeping item 8 regression, part 2):
                 # ScoreView's pair-detector (_sv_rh_lh) has always had a
@@ -4138,17 +4608,18 @@ class Song:
 
             def _ly_hand_hint(name):
                 n = name.lower()
-                if re.search(r'\bright\b|\brh\b', n):
-                    return 'R'
-                if re.search(r'\bleft\b|\blh\b', n):
-                    return 'L'
+                if re.search(r"\bright\b|\brh\b", n):
+                    return "R"
+                if re.search(r"\bleft\b|\blh\b", n):
+                    return "L"
                 return None
 
             def _ly_pair_base_name(name):
                 if name.endswith(" (RH)"):
                     return name[:-5]
-                stripped = re.sub(r'\s*\b(right|rh)\b\s*', ' ', name,
-                                  flags=re.IGNORECASE).strip()
+                stripped = re.sub(
+                    r"\s*\b(right|rh)\b\s*", " ", name, flags=re.IGNORECASE
+                ).strip()
                 return stripped if stripped else name
 
             score_entries = []
@@ -4166,72 +4637,89 @@ class Song:
             # and mid-piece staff-collapse symptoms.
             # The on-screen ScoreView has filtered empty tracks since v22a;
             # this brings the LilyPond exporter to the same standard.
-            track_list = _ly_track_list_preview   # already computed above,
-                                                    # before the \paper block,
-                                                    # so indent and the actual
-                                                    # rendered tracks always agree
+            track_list = _ly_track_list_preview  # already computed above,
+            # before the \paper block,
+            # so indent and the actual
+            # rendered tracks always agree
             ti = 0
             while ti < len(track_list):
-                tr    = track_list[ti]
-                vbase = "trk" + chr(ord('a') + min(ti, 25))
+                tr = track_list[ti]
+                vbase = "trk" + chr(ord("a") + min(ti, 25))
 
-                if (ti + 1 < len(track_list) and
-                        _is_rh_lh_pair(tr, track_list[ti + 1])):
+                if ti + 1 < len(track_list) and _is_rh_lh_pair(tr, track_list[ti + 1]):
                     # ── Pre-split RH/LH pair from rationalize() ──────────────
                     # RH track → treble staff, LH track → bass staff.
                     # No pitch re-splitting: DP hand separation already ran.
-                    tr_rh    = tr
-                    tr_lh    = track_list[ti + 1]
+                    tr_rh = tr
+                    tr_lh = track_list[ti + 1]
                     notes_rh = sorted(tr_rh.notes, key=lambda n: n.tick)
                     notes_lh = sorted(tr_lh.notes, key=lambda n: n.tick)
                     v_treble = vbase + "R"
-                    v_bass   = vbase + "L"
+                    v_bass = vbase + "L"
                     base_name = _ly_pair_base_name(tr_rh.name)
                     print(f"[LY] RH/LH pair → single PianoStaff: {base_name!r}")
                     _density_map = compute_measure_density(notes_rh + notes_lh, mmap)
-                    write_voice(f, v_treble, notes_rh, "treble", mmap,
-                               _density_map, emit_spacing=True)
-                    write_voice(f, v_bass,   notes_lh, "bass",   mmap)
+                    write_voice(
+                        f,
+                        v_treble,
+                        notes_rh,
+                        "treble",
+                        mmap,
+                        _density_map,
+                        emit_spacing=True,
+                    )
+                    write_voice(f, v_bass, notes_lh, "bass", mmap)
                     entry = (
                         "    \\new PianoStaff <<\n"
-                        "      \\set PianoStaff.instrumentName = #\"" + base_name + "\"\n"
+                        '      \\set PianoStaff.instrumentName = #"' + base_name + '"\n'
                         "      \\new Staff { \\" + v_treble + " }\n"
-                        "      \\new Staff { \\" + v_bass   + " }\n"
+                        "      \\new Staff { \\" + v_bass + " }\n"
                         "    >>"
                     )
                     score_entries.append(entry)
-                    ti += 2   # consume both RH and LH tracks
+                    ti += 2  # consume both RH and LH tracks
 
                 elif is_piano(tr):
                     # ── Piano track(s): always ONE grand staff ────────────────
                     # Merge consecutive piano channel-tracks (e.g. Format 0 MIDI
                     # split by channel) so we never produce 4 staves.
-                    if (ti + 1 < len(track_list) and
-                            is_piano(track_list[ti + 1]) and
-                            not _is_rh_lh_pair(tr, track_list[ti + 1])):
-                        merge_notes = sorted(tr.notes + track_list[ti + 1].notes,
-                                             key=lambda n: n.tick)
-                        base_name = (tr.name.split(' - ')[-1]
-                                     if ' - ' in tr.name else tr.name)
+                    if (
+                        ti + 1 < len(track_list)
+                        and is_piano(track_list[ti + 1])
+                        and not _is_rh_lh_pair(tr, track_list[ti + 1])
+                    ):
+                        merge_notes = sorted(
+                            tr.notes + track_list[ti + 1].notes, key=lambda n: n.tick
+                        )
+                        base_name = (
+                            tr.name.split(" - ")[-1] if " - " in tr.name else tr.name
+                        )
                         ti_step = 2
                     else:
                         merge_notes = sorted(tr.notes, key=lambda n: n.tick)
-                        base_name   = tr.name
-                        ti_step     = 1
-                    split    = find_split_pitch(merge_notes)
+                        base_name = tr.name
+                        ti_step = 1
+                    split = find_split_pitch(merge_notes)
                     v_treble = vbase + "R"
-                    v_bass   = vbase + "L"
-                    t_notes  = [n for n in merge_notes if n.pitch >= split]
-                    b_notes  = [n for n in merge_notes if n.pitch <  split]
+                    v_bass = vbase + "L"
+                    t_notes = [n for n in merge_notes if n.pitch >= split]
+                    b_notes = [n for n in merge_notes if n.pitch < split]
                     _density_map = compute_measure_density(merge_notes, mmap)
-                    write_voice(f, v_treble, t_notes, "treble", mmap,
-                               _density_map, emit_spacing=True)
-                    write_voice(f, v_bass,   b_notes, "bass",   mmap)
+                    write_voice(
+                        f,
+                        v_treble,
+                        t_notes,
+                        "treble",
+                        mmap,
+                        _density_map,
+                        emit_spacing=True,
+                    )
+                    write_voice(f, v_bass, b_notes, "bass", mmap)
                     entry = (
                         "    \\new PianoStaff <<\n"
-                        "      \\set PianoStaff.instrumentName = #\"" + base_name + "\"\n"
+                        '      \\set PianoStaff.instrumentName = #"' + base_name + '"\n'
                         "      \\new Staff { \\" + v_treble + " }\n"
-                        "      \\new Staff { \\" + v_bass   + " }\n"
+                        "      \\new Staff { \\" + v_bass + " }\n"
                         "    >>"
                     )
                     score_entries.append(entry)
@@ -4240,29 +4728,30 @@ class Song:
                 else:
                     # ── Non-piano: single staff, clef by median pitch ─────────
                     notes = sorted(tr.notes, key=lambda n: n.tick)
-                    clef  = clef_for_median(notes)
+                    clef = clef_for_median(notes)
                     print("[LY] Writing single staff")
                     _density_map = compute_measure_density(notes, mmap)
-                    write_voice(f, vbase, notes, clef, mmap,
-                               _density_map, emit_spacing=True)
+                    write_voice(
+                        f, vbase, notes, clef, mmap, _density_map, emit_spacing=True
+                    )
                     entry = (
                         "    \\new Staff \\with {\n"
-                        "      instrumentName = #\"" + tr.name + "\"\n"
-                        "      shortInstrumentName = #\"" + tr.name[:4] + ".\"\n"
+                        '      instrumentName = #"' + tr.name + '"\n'
+                        '      shortInstrumentName = #"' + tr.name[:4] + '."\n'
                         "    } { \\" + vbase + " }"
                     )
                     score_entries.append(entry)
                     ti += 1
 
             # ── Score block ───────────────────────────────────────────────
-            W(f, r'\score {')
-            W(f, r'  \new StaffGroup <<')
+            W(f, r"\score {")
+            W(f, r"  \new StaffGroup <<")
             for entry in score_entries:
                 W(f, entry)
-            W(f, r'  >>')
-            W(f, r'  \layout {')
-            W(f, r'    \context {')
-            W(f, r'      \Score')
+            W(f, r"  >>")
+            W(f, r"  \layout {")
+            W(f, r"    \context {")
+            W(f, r"      \Score")
             # v22z: this is now only a FALLBACK baseline — actual spacing is
             # driven per-measure by \once overrides in write_voice(), sized
             # to that measure's real note density (see
@@ -4271,7 +4760,7 @@ class Song:
             # too tight for genuinely dense passages and needlessly loose
             # for sparse ones.  Kept modest since per-measure values should
             # cover virtually every measure in practice.
-            W(f, r'      \override SpacingSpanner.spacing-increment = #1.4')
+            W(f, r"      \override SpacingSpanner.spacing-increment = #1.4")
             # v22z(2): show EVERY bar number, not just system starts.
             # Previously only the first measure of each system was numbered
             # — correct, standard engraving practice, but combined with
@@ -4282,26 +4771,35 @@ class Song:
             # every measure removes that ambiguity entirely.
             if show_bar_numbers:
                 W(f, r"      \override BarNumber.break-visibility = #all-visible")
-                W(f, r'      barNumberVisibility = #all-bar-numbers-visible')
+                W(f, r"      barNumberVisibility = #all-bar-numbers-visible")
             else:
                 W(f, r'      \remove "Bar_number_engraver"')
-            W(f, r'    }')
-            W(f, r'    \context {')
-            W(f, r'      \StaffGroup')
+            W(f, r"    }")
+            W(f, r"    \context {")
+            W(f, r"      \StaffGroup")
             # Tighten spacing between staves within a system
-            W(f, r"      \override StaffGrouper.staff-staff-spacing.basic-distance = #8")
-            W(f, r"      \override StaffGrouper.staffgroup-staff-spacing.basic-distance = #10")
-            W(f, r'    }')
-            W(f, r'  }')
+            W(
+                f,
+                r"      \override StaffGrouper.staff-staff-spacing.basic-distance = #8",
+            )
+            W(
+                f,
+                r"      \override StaffGrouper.staffgroup-staff-spacing.basic-distance = #10",
+            )
+            W(f, r"    }")
+            W(f, r"  }")
             # ── MIDI block (fixed: properly closed braces) ─────────────────
-            W(f, r'  \midi {')
-            W(f, r'    \context {')
-            W(f, r'      \Score')
-            W(f, r'      % Map dynamics to MIDI velocity (0-127)')
-            W(f, r'      dynamicAbsoluteVolumeFunction = #default-dynamic-absolute-volume')
-            W(f, r'    }')
-            W(f, r'  }')
-            W(f, r'}')
+            W(f, r"  \midi {")
+            W(f, r"    \context {")
+            W(f, r"      \Score")
+            W(f, r"      % Map dynamics to MIDI velocity (0-127)")
+            W(
+                f,
+                r"      dynamicAbsoluteVolumeFunction = #default-dynamic-absolute-volume",
+            )
+            W(f, r"    }")
+            W(f, r"  }")
+            W(f, r"}")
 
 
 def _ticks_to_dtype_dots(ticks, tpb):
@@ -4309,19 +4807,20 @@ def _ticks_to_dtype_dots(ticks, tpb):
     Supports dotted values (dots=1). Snaps to nearest standard value.
     Module-level so it can be called from Song.to_mscx() without self."""
     durations = [
-        ("whole",   tpb * 4),
-        ("half",    tpb * 2),
+        ("whole", tpb * 4),
+        ("half", tpb * 2),
         ("quarter", tpb),
-        ("eighth",  tpb // 2),
-        ("16th",    tpb // 4),
-        ("32nd",    tpb // 8),
-        ("64th",    tpb // 16),
+        ("eighth", tpb // 2),
+        ("16th", tpb // 4),
+        ("32nd", tpb // 8),
+        ("64th", tpb // 16),
     ]
     best_name, best_dots, best_diff = "quarter", 0, tpb * 999
     for name, base in durations:
-        if base <= 0: continue
+        if base <= 0:
+            continue
         dotted = base + base // 2
-        for (val, dots) in [(base, 0), (dotted, 1)]:
+        for val, dots in [(base, 0), (dotted, 1)]:
             diff = abs(ticks - val)
             if diff < best_diff:
                 best_name, best_dots, best_diff = name, dots, diff
@@ -4331,13 +4830,13 @@ def _ticks_to_dtype_dots(ticks, tpb):
 def _write_rest_sequence(voice_el, ticks, tpb):
     # Write one or more Rest elements to fill the given tick gap.
     durations = [
-        ("whole",   tpb * 4),
-        ("half",    tpb * 2),
+        ("whole", tpb * 4),
+        ("half", tpb * 2),
         ("quarter", tpb),
-        ("eighth",  tpb // 2),
-        ("16th",    tpb // 4),
-        ("32nd",    tpb // 8),
-        ("64th",    tpb // 16),
+        ("eighth", tpb // 2),
+        ("16th", tpb // 4),
+        ("32nd", tpb // 8),
+        ("64th", tpb // 16),
     ]
     remaining = ticks
     safety = 0
@@ -4345,9 +4844,10 @@ def _write_rest_sequence(voice_el, ticks, tpb):
         safety += 1
         placed = False
         for name, base in durations:
-            if base <= 0: continue
+            if base <= 0:
+                continue
             dotted = base + base // 2
-            for (val, dots) in [(dotted, 1), (base, 0)]:
+            for val, dots in [(dotted, 1), (base, 0)]:
                 if remaining >= val:
                     rest = ET.SubElement(voice_el, "Rest")
                     ET.SubElement(rest, "durationType").text = name
@@ -4356,94 +4856,136 @@ def _write_rest_sequence(voice_el, ticks, tpb):
                     remaining -= val
                     placed = True
                     break
-            if placed: break
-        if not placed: break
+            if placed:
+                break
+        if not placed:
+            break
 
 
 def _program_to_instrument_id(program):
-# Map GM program number to a MuseScore instrument id string.
-# Covers the most common families; defaults to strings for unknown
-    if program < 8:   return "keyboard.piano"
-    if program < 16:  return "keyboard.piano"
-    if program < 24:  return "keyboard.organ"
-    if program < 32:  return "guitar.classical"
-    if program < 40:  return "plucked.bass-guitar"
-    if program < 48:  return "strings.violin"
-    if program < 56:  return "strings.cello"
-    if program < 64:  return "brass.trumpet"
-    if program < 72:  return "brass.saxophone.alto"
-    if program < 80:  return "wind.flutes.flute"
+    # Map GM program number to a MuseScore instrument id string.
+    # Covers the most common families; defaults to strings for unknown
+    if program < 8:
+        return "keyboard.piano"
+    if program < 16:
+        return "keyboard.piano"
+    if program < 24:
+        return "keyboard.organ"
+    if program < 32:
+        return "guitar.classical"
+    if program < 40:
+        return "plucked.bass-guitar"
+    if program < 48:
+        return "strings.violin"
+    if program < 56:
+        return "strings.cello"
+    if program < 64:
+        return "brass.trumpet"
+    if program < 72:
+        return "brass.saxophone.alto"
+    if program < 80:
+        return "wind.flutes.flute"
     return "strings.violin"
 
 
 def _ticks_to_dtype(ticks, tpb):
-    b=ticks/tpb
-    if b>=4: return "whole"
-    if b>=2: return "half"
-    if b>=1: return "quarter"
-    if b>=0.5: return "eighth"
-    if b>=0.25: return "16th"
+    b = ticks / tpb
+    if b >= 4:
+        return "whole"
+    if b >= 2:
+        return "half"
+    if b >= 1:
+        return "quarter"
+    if b >= 0.5:
+        return "eighth"
+    if b >= 0.25:
+        return "16th"
     return "32nd"
 
+
 def _midi_to_tpc(pitch):
-    return [14,21,16,23,18,13,20,15,22,17,24,19][pitch%12]
+    return [14, 21, 16, 23, 18, 13, 20, 15, 22, 17, 24, 19][pitch % 12]
+
 
 def _ticks_to_ly_snap(ticks, tpb):
     # Snap raw tick duration to nearest standard value.
-    table = [tpb*4, tpb*3, tpb*2, tpb*3//2, tpb,
-             tpb*3//4, tpb//2, tpb//4, tpb//8, tpb//16]
+    table = [
+        tpb * 4,
+        tpb * 3,
+        tpb * 2,
+        tpb * 3 // 2,
+        tpb,
+        tpb * 3 // 4,
+        tpb // 2,
+        tpb // 4,
+        tpb // 8,
+        tpb // 16,
+    ]
     return min(table, key=lambda v: abs(v - ticks)) if table else tpb
+
 
 def _ticks_to_ly_rest_seq(ticks, tpb):
     # Return list of LilyPond rest strings that sum exactly to ticks.
     table = [
-        (tpb*4,   "r1"),
-        (tpb*3,   "r2."),
-        (tpb*2,   "r2"),
-        (tpb*3//2,"r4."),
-        (tpb,     "r4"),
-        (tpb*3//4,"r8."),
-        (tpb//2,  "r8"),
-        (tpb//4,  "r16"),
-        (tpb//8,  "r32"),
-        (tpb//16, "r64"),
+        (tpb * 4, "r1"),
+        (tpb * 3, "r2."),
+        (tpb * 2, "r2"),
+        (tpb * 3 // 2, "r4."),
+        (tpb, "r4"),
+        (tpb * 3 // 4, "r8."),
+        (tpb // 2, "r8"),
+        (tpb // 4, "r16"),
+        (tpb // 8, "r32"),
+        (tpb // 16, "r64"),
     ]
-    result = []; rem = int(ticks)
+    result = []
+    rem = int(ticks)
     for val, sym in table:
-        if val <= 0: continue
+        if val <= 0:
+            continue
         while rem >= val:
             result.append(sym)
             rem -= val
     return result if result else ["r4"]
 
+
 def _ticks_to_ly_dur(ticks, tpb):
-    b=ticks/tpb
-    if b>=4: return "1"
-    if b>=2: return "2"
-    if b>=1.5: return "2."
-    if b>=1: return "4"
-    if b>=0.75: return "4."
-    if b>=0.5: return "8"
-    if b>=0.25: return "16"
+    b = ticks / tpb
+    if b >= 4:
+        return "1"
+    if b >= 2:
+        return "2"
+    if b >= 1.5:
+        return "2."
+    if b >= 1:
+        return "4"
+    if b >= 0.75:
+        return "4."
+    if b >= 0.5:
+        return "8"
+    if b >= 0.25:
+        return "16"
     return "32"
+
 
 def _pitch_to_ly(pitch):
     """Convert MIDI pitch to LilyPond note name with correct octave marks.
     LilyPond middle C (C4, MIDI 60) = c' in \\relative c' context.
     We output absolute pitches using octave tick/comma notation from C4."""
-    names=["c","cis","d","dis","e","f","fis","g","gis","a","ais","b"]
-    oct_ = pitch // 12   # MIDI octave: C4=oct 5, C3=oct 4, C5=oct 6
+    names = ["c", "cis", "d", "dis", "e", "f", "fis", "g", "gis", "a", "ais", "b"]
+    oct_ = pitch // 12  # MIDI octave: C4=oct 5, C3=oct 4, C5=oct 6
     note = names[pitch % 12]
     # In LilyPond absolute: c = C3 (MIDI oct 4), c' = C4 (oct 5), c,=C2 (oct 3)
     # ticks above C3: each octave above adds one '
     # commas below C3: each octave below adds one ,
-    diff = oct_ - 4   # 0 → c (C3), +1 → c' (C4), -1 → c, (C2)
+    diff = oct_ - 4  # 0 → c (C3), +1 → c' (C4), -1 → c, (C2)
     if diff > 0:
         return note + "'" * diff
     elif diff < 0:
         return note + "," * (-diff)
     else:
         return note
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Transport (play / stop / record / seek)
@@ -4452,6 +4994,7 @@ def _pitch_to_ly(pitch):
 # ─────────────────────────────────────────────────────────────────────────────
 # Metrical duration analysis  (MuseScore importmidi_meter.cpp approach)
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 def _metric_beat_strengths(m_start, tpm, tpb, num, den):
     """Return a sorted list of (tick, strength) for every grid position in
@@ -4478,21 +5021,21 @@ def _metric_beat_strengths(m_start, tpm, tpb, num, den):
     The downbeat (offset 0) always gets the maximum strength so a note
     at the very start of a measure can legally fill the whole measure.
     """
-    min_unit = max(1, tpb // 16)   # 64th note is our finest grid
-    positions = {}   # offset → strength
+    min_unit = max(1, tpb // 16)  # 64th note is our finest grid
+    positions = {}  # offset → strength
 
-    is_compound = (num in (6, 9, 12) and den in (8, 16))
-    is_triple   = (num == 3 and not is_compound)
+    is_compound = num in (6, 9, 12) and den in (8, 16)
+    is_triple = num == 3 and not is_compound
 
     if is_compound:
         # Group size = 3 eighth-notes
         eighth = tpb // 2
-        group  = 3 * eighth          # one beat = dotted quarter
+        group = 3 * eighth  # one beat = dotted quarter
         n_groups = num // 3
         for g in range(n_groups):
             g_start = g * group
             # Downbeat of the group
-            positions[g_start] = (n_groups - g) + 1   # beat 1 stronger
+            positions[g_start] = (n_groups - g) + 1  # beat 1 stronger
             # Within the group: 3 eighths, sub-divide each dyadically
             for e in range(3):
                 e_off = g_start + e * eighth
@@ -4506,13 +5049,13 @@ def _metric_beat_strengths(m_start, tpm, tpb, num, den):
 
     elif is_triple:
         # 3 equal quarter-note beats
-        beat = tpb * 4 // den        # ticks per beat
+        beat = tpb * 4 // den  # ticks per beat
         for b in range(num):
             b_start = b * beat
             positions[b_start] = 2 if b == 0 else 1
             # Dyadic sub-divisions within each beat
             unit = beat
-            s    = 1
+            s = 1
             while unit > min_unit:
                 unit //= 2
                 for k in range(0, beat // unit):
@@ -4526,6 +5069,7 @@ def _metric_beat_strengths(m_start, tpm, tpb, num, den):
         # Simple duple / quadruple: fully dyadic
         # Compute the number of dyadic levels: log2(tpm / min_unit)
         import math as _math
+
         n_levels = int(_math.log2(max(1, tpm // min_unit)))
         unit = tpm
         for level in range(n_levels + 1):
@@ -4542,8 +5086,7 @@ def _metric_beat_strengths(m_start, tpm, tpb, num, den):
     # Downbeat is always the strongest
     positions[0] = max(positions.get(0, 0), 255)
 
-    return sorted((m_start + off, s) for off, s in positions.items()
-                  if 0 <= off < tpm)
+    return sorted((m_start + off, s) for off, s in positions.items() if 0 <= off < tpm)
 
 
 def metrically_subdivide_duration(onset_tick, duration, tpb, mmap):
@@ -4571,7 +5114,19 @@ def metrically_subdivide_duration(onset_tick, duration, tpb, mmap):
     # Standard note values (ticks), largest first, including dotted
     def _std_values(tpb_):
         vals = []
-        for mult_n, mult_d in [(4,1),(3,1),(2,1),(3,2),(1,1),(3,4),(1,2),(3,8),(1,4),(3,16),(1,8)]:
+        for mult_n, mult_d in [
+            (4, 1),
+            (3, 1),
+            (2, 1),
+            (3, 2),
+            (1, 1),
+            (3, 4),
+            (1, 2),
+            (3, 8),
+            (1, 4),
+            (3, 16),
+            (1, 8),
+        ]:
             v = tpb_ * mult_n // mult_d
             if v > 0:
                 vals.append(v)
@@ -4587,10 +5142,10 @@ def metrically_subdivide_duration(onset_tick, duration, tpb, mmap):
                 return ms, me, num, den, tpm
         return None, None, None, None, None
 
-    result   = []
+    result = []
     cur_tick = onset_tick
-    cur_dur  = duration
-    guard    = 0
+    cur_dur = duration
+    guard = 0
 
     while cur_dur > 0 and guard < 64:
         guard += 1
@@ -4608,7 +5163,7 @@ def metrically_subdivide_duration(onset_tick, duration, tpb, mmap):
         cur_strength = next((s for t, s in strengths if t == cur_tick), 0)
 
         # Find next tick with strength >= cur_strength (exclusive of cur_tick)
-        next_boundary = me   # default: barline
+        next_boundary = me  # default: barline
         for t, s in strengths:
             if t > cur_tick and s >= cur_strength:
                 next_boundary = t
@@ -4628,7 +5183,7 @@ def metrically_subdivide_duration(onset_tick, duration, tpb, mmap):
 
         result.append((cur_tick, chosen))
         cur_tick += chosen
-        cur_dur  -= chosen
+        cur_dur -= chosen
 
     return result
 
@@ -4636,9 +5191,15 @@ def metrically_subdivide_duration(onset_tick, duration, tpb, mmap):
 # ─────────────────────────────────────────────────────────────────────────────
 # Quantization: snap recorded note durations to standard musical values
 # ─────────────────────────────────────────────────────────────────────────────
-def quantize_notes_per_measure(track, song, div=8, strength=1.0,
-                               measure_start=None, measure_end=None,
-                               grace_ticks=0):
+def quantize_notes_per_measure(
+    track,
+    song,
+    div=8,
+    strength=1.0,
+    measure_start=None,
+    measure_end=None,
+    grace_ticks=0,
+):
     """
     Per-measure quantization (v19g).
 
@@ -4660,7 +5221,7 @@ def quantize_notes_per_measure(track, song, div=8, strength=1.0,
     if not track or not track.notes:
         return 0, 0
 
-    tpb  = song.ticks_per_beat
+    tpb = song.ticks_per_beat
     mmap = song.get_measure_map()
 
     # ── 1. Grace-note cleanup ────────────────────────────────────────────────
@@ -4672,27 +5233,29 @@ def quantize_notes_per_measure(track, song, div=8, strength=1.0,
 
     # ── 2. Measure range (convert 1-based UI values to 0-based mmap indices) ─
     m_start_idx = (measure_start - 1) if measure_start is not None else 0
-    m_end_idx   = (measure_end   - 1) if measure_end   is not None else len(mmap) - 1
+    m_end_idx = (measure_end - 1) if measure_end is not None else len(mmap) - 1
     m_start_idx = max(0, m_start_idx)
-    m_end_idx   = min(len(mmap) - 1, m_end_idx)
+    m_end_idx = min(len(mmap) - 1, m_end_idx)
 
     # Build a set of (ms, me) pairs for fast lookup
-    active_measures = {(ms, me)
-                       for m_idx, ms, me, _n, _d, _t in mmap
-                       if m_start_idx <= m_idx <= m_end_idx}
+    active_measures = {
+        (ms, me)
+        for m_idx, ms, me, _n, _d, _t in mmap
+        if m_start_idx <= m_idx <= m_end_idx
+    }
 
     # ── 3. Per-measure snap ──────────────────────────────────────────────────
     notes_quantized = 0
     for ms, me in active_measures:
-        grid = max(1, tpb // div)   # consistent grid across measures
+        grid = max(1, tpb // div)  # consistent grid across measures
 
         for n in track.notes:
             if not (ms <= n.tick < me):
                 continue
 
             # Snap onset to grid (within-measure relative)
-            rel    = n.tick - ms
-            q_rel  = round(rel / grid) * grid
+            rel = n.tick - ms
+            q_rel = round(rel / grid) * grid
             n.tick = ms + int(rel + strength * (q_rel - rel))
 
             # Snap duration to nearest grid multiple.
@@ -4710,10 +5273,13 @@ def quantize_notes_per_measure(track, song, div=8, strength=1.0,
 
             notes_quantized += 1
 
-    print(f"[quantize] '{track.name}': "
-          f"{notes_quantized} notes quantized, {grace_removed} grace notes removed "
-          f"(div={div}, strength={strength}, "
-          f"measures {m_start_idx+1}–{m_end_idx+1})", file=sys.stderr)
+    print(
+        f"[quantize] '{track.name}': "
+        f"{notes_quantized} notes quantized, {grace_removed} grace notes removed "
+        f"(div={div}, strength={strength}, "
+        f"measures {m_start_idx+1}–{m_end_idx+1})",
+        file=sys.stderr,
+    )
 
     return notes_quantized, grace_removed
 
@@ -4732,39 +5298,49 @@ def quantize_notes(track, tpb, div=4, strength=1.0, threshold=0):
         if q_dur > 0 and abs(q_dur - n.duration) >= threshold:
             n.duration = int(n.duration + strength * (q_dur - n.duration))
         n.duration = max(1, n.duration)
-    print(f"[quantize-legacy] '{track.name}': {len(track.notes)} notes "
-          f"grid-snapped (div={div})", file=sys.stderr)
+    print(
+        f"[quantize-legacy] '{track.name}': {len(track.notes)} notes "
+        f"grid-snapped (div={div})",
+        file=sys.stderr,
+    )
+
 
 class Transport:
     def __init__(self, song: Song):
-        self.song=song
-        self.position_ticks=0; self.position_sec=0.0
-        self._playing=False; self._recording=False
-        self._stop_evt=threading.Event()
-        self._thread=None
-        self._rec_track_idx=None; self._rec_open={}
-        self._rec_lock=threading.Lock()   # guards _rec_open and song.modified in _rec_cb
-        self._metronome=False
-        self._on_tick_cb=None
-        self._play_until_tick=None  # if set, stop playback at this tick
+        self.song = song
+        self.position_ticks = 0
+        self.position_sec = 0.0
+        self._playing = False
+        self._recording = False
+        self._stop_evt = threading.Event()
+        self._thread = None
+        self._rec_track_idx = None
+        self._rec_open = {}
+        self._rec_lock = (
+            threading.Lock()
+        )  # guards _rec_open and song.modified in _rec_cb
+        self._metronome = False
+        self._on_tick_cb = None
+        self._play_until_tick = None  # if set, stop playback at this tick
 
     def _all_sounds_off(self):
         """Send all-sounds-off (CC 120) + all-notes-off (CC 123) + sustain release
         on every channel.  Call before starting playback and after stopping to
         prevent notes accumulating in TiMidity across play/stop cycles."""
         for ch in range(16):
-            _send_raw(0xB0 | ch, 120, 0)   # all sounds off  — immediate silence
-            _send_raw(0xB0 | ch, 123, 0)   # all notes off   — respects release
-            _send_raw(0xB0 | ch,  64, 0)   # sustain pedal off
+            _send_raw(0xB0 | ch, 120, 0)  # all sounds off  — immediate silence
+            _send_raw(0xB0 | ch, 123, 0)  # all notes off   — respects release
+            _send_raw(0xB0 | ch, 64, 0)  # sustain pedal off
 
     def play(self, on_tick=None):
-        if self._playing: return
+        if self._playing:
+            return
         # Wait for any previous thread to exit before clearing the stop event.
         # Without this, a rapid Stop→Play causes the old thread to see a cleared
         # event and keep firing note_ons alongside the new thread → buzz + pops.
         if self._thread and self._thread.is_alive():
             self._thread.join(timeout=0.5)
-        self._all_sounds_off()             # clear any residue from previous pass
+        self._all_sounds_off()  # clear any residue from previous pass
         self._on_tick_cb = on_tick
         self._stop_evt.clear()
         self._playing = True
@@ -4772,21 +5348,25 @@ class Transport:
         self._thread.start()
 
     def record(self, track_idx, on_tick=None):
-        if self._playing or self._recording: return
+        if self._playing or self._recording:
+            return
         if self._thread and self._thread.is_alive():
             self._thread.join(timeout=0.5)
         self._all_sounds_off()
-        self._rec_track_idx = track_idx; self._rec_open = {}
+        self._rec_track_idx = track_idx
+        self._rec_open = {}
         self._on_tick_cb = on_tick
         self._stop_evt.clear()
-        self._playing = True; self._recording = True
+        self._playing = True
+        self._recording = True
         self._thread = threading.Thread(target=self._run, daemon=True)
         self._thread.start()
 
     def stop(self):
         # Stop at current position — does NOT reset position.
         self._stop_evt.set()
-        self._playing = False; self._recording = False
+        self._playing = False
+        self._recording = False
         # Block until the playback thread exits (v22q: was 0.3s timeout).
         # A short timeout meant the thread could still be sending note events
         # when the caller replaced self.song, causing old-song audio to play
@@ -4796,36 +5376,51 @@ class Transport:
             self._thread.join(timeout=2.0)
             if self._thread.is_alive():
                 import sys
-                print("[transport] WARNING: playback thread did not exit within 2s",
-                      file=sys.stderr)
+
+                print(
+                    "[transport] WARNING: playback thread did not exit within 2s",
+                    file=sys.stderr,
+                )
         self._all_sounds_off()
 
     def rewind(self):
-        self.stop(); time.sleep(0.06)
-        self.position_ticks=0; self.position_sec=0.0
+        self.stop()
+        time.sleep(0.06)
+        self.position_ticks = 0
+        self.position_sec = 0.0
 
     def seek_measures(self, delta):
-        was=self._playing; self.stop(); time.sleep(0.06)
+        was = self._playing
+        self.stop()
+        time.sleep(0.06)
         mmap = self.song.get_measure_map()
         # Find which measure the current position is in
         cur_idx = 0
         for m_idx, ms, me, _n, _d, _t in mmap:
             if ms <= self.position_ticks < me:
-                cur_idx = m_idx; break
+                cur_idx = m_idx
+                break
         # Jump to target measure
         target = max(0, min(len(mmap) - 1, cur_idx + delta))
-        self.position_ticks = mmap[target][1]   # start_tick of target measure
-        self.position_sec=self._t2s(self.position_ticks)
-        if was: self.play(self._on_tick_cb)
+        self.position_ticks = mmap[target][1]  # start_tick of target measure
+        self.position_sec = self._t2s(self.position_ticks)
+        if was:
+            self.play(self._on_tick_cb)
 
-    def is_playing(self):   return self._playing
-    def is_recording(self): return self._recording
-    def set_metronome(self, on): self._metronome=on
+    def is_playing(self):
+        return self._playing
+
+    def is_recording(self):
+        return self._recording
+
+    def set_metronome(self, on):
+        self._metronome = on
 
     def _t2s(self, ticks):
-        return (ticks/self.song.ticks_per_beat)*(self.song.tempo/1_000_000)
+        return (ticks / self.song.ticks_per_beat) * (self.song.tempo / 1_000_000)
+
     def _s2t(self, sec):
-        return sec*self.song.ticks_per_beat/(self.song.tempo/1_000_000)
+        return sec * self.song.ticks_per_beat / (self.song.tempo / 1_000_000)
 
     # ── Tempo map helpers ────────────────────────────────────────────────────
     def _build_tempo_map(self):
@@ -4881,7 +5476,7 @@ class Transport:
             if t <= start_tick:
                 continue
             seg_ticks = t - prev_tick
-            seg_sec   = (seg_ticks / self.song.ticks_per_beat) * (prev_tempo / 1_000_000)
+            seg_sec = (seg_ticks / self.song.ticks_per_beat) * (prev_tempo / 1_000_000)
             if remaining <= seg_sec:
                 break
             remaining -= seg_sec
@@ -4895,65 +5490,89 @@ class Transport:
             self._run_body()
         except Exception as _run_exc:
             import traceback
+
             print(f"[Transport._run] CRASHED: {_run_exc}")
             traceback.print_exc()
         finally:
-            self._playing = False; self._recording = False
+            self._playing = False
+            self._recording = False
 
     def _run_body(self):
-        song=self.song; tpb=song.ticks_per_beat
-        start_t=self.position_ticks; wall0=time.perf_counter()
+        song = self.song
+        tpb = song.ticks_per_beat
+        start_t = self.position_ticks
+        wall0 = time.perf_counter()
         tempo_map = self._build_tempo_map()
 
         def t2s(tick):
             return self._tmap_tick_to_sec(tick, tempo_map, start_t)
 
-        timeline=[]
-        has_solo=any(t.solo for t in song.tracks)
+        timeline = []
+        has_solo = any(t.solo for t in song.tracks)
         for tr in song.tracks:
-            if tr.mute: continue
-            if has_solo and not tr.solo: continue
-            ch=tr.channel
-            timeline.append((0.0, lambda c=ch,pg=tr.program: _send_raw(0xC0|c,pg)))
-            timeline.append((0.0, lambda c=ch,v=tr.volume:   _send_raw(0xB0|c,7,v)))
+            if tr.mute:
+                continue
+            if has_solo and not tr.solo:
+                continue
+            ch = tr.channel
+            timeline.append((0.0, lambda c=ch, pg=tr.program: _send_raw(0xC0 | c, pg)))
+            timeline.append((0.0, lambda c=ch, v=tr.volume: _send_raw(0xB0 | c, 7, v)))
             for note in tr.notes:
-                if note.tick < start_t: continue
-                is_tie = getattr(note, 'articulation', '') == 'tie_continuation'
-                ton  = t2s(note.tick)
+                if note.tick < start_t:
+                    continue
+                is_tie = getattr(note, "articulation", "") == "tie_continuation"
+                ton = t2s(note.tick)
                 toff = t2s(note.tick + note.duration)
                 # Tie continuations: suppress the re-attack so the note sounds
                 # as one unbroken sustain across the barline.  The note_off at
                 # toff is still needed to release the pitch at the tied duration end.
                 if not is_tie:
-                    timeline.append((ton,  lambda c=ch,n=note.pitch,v=note.velocity: _send_raw(0x90|c,n,v)))
-                timeline.append((toff, lambda c=ch,n=note.pitch: _send_raw(0x80|c,n,0)))
+                    timeline.append(
+                        (
+                            ton,
+                            lambda c=ch, n=note.pitch, v=note.velocity: _send_raw(
+                                0x90 | c, n, v
+                            ),
+                        )
+                    )
+                timeline.append(
+                    (toff, lambda c=ch, n=note.pitch: _send_raw(0x80 | c, n, 0))
+                )
             for ev in tr.events:
-                if ev.tick < start_t: continue
+                if ev.tick < start_t:
+                    continue
                 if ev.msg.type == "control_change" and ev.msg.control == 64:
-                    te = t2s(ev.tick); val = ev.msg.value
-                    timeline.append((te, lambda c=ch,v=val: _send_raw(0xB0|c,64,v)))
+                    te = t2s(ev.tick)
+                    val = ev.msg.value
+                    timeline.append(
+                        (te, lambda c=ch, v=val: _send_raw(0xB0 | c, 64, v))
+                    )
         # Metronome — use base tempo; sufficient for live use
         if self._metronome:
             base_tempo = song.tempo
-            beat_sec = base_tempo / 1_000_000; bi = 0; t = 0.0
+            beat_sec = base_tempo / 1_000_000
+            bi = 0
+            t = 0.0
             if self._recording:
                 # During recording: extend metronome far enough that it never
                 # runs out before the user presses Stop (~2 hours @ any tempo)
                 total_sec = 7200.0
             else:
-                min_sec  = beat_sec * song.time_sig_num * 4
+                min_sec = beat_sec * song.time_sig_num * 4
                 total_sec = max(min_sec, t2s(song.total_ticks()))
             while t <= total_sec + beat_sec:
-                p=76 if bi==0 else 77; tc=t
-                timeline.append((tc,      lambda pp=p: _send_raw(0x99,pp,90)))
-                timeline.append((tc+0.05, lambda pp=p: _send_raw(0x89,pp,0)))
-                t += beat_sec; bi = (bi+1) % song.time_sig_num
+                p = 76 if bi == 0 else 77
+                tc = t
+                timeline.append((tc, lambda pp=p: _send_raw(0x99, pp, 90)))
+                timeline.append((tc + 0.05, lambda pp=p: _send_raw(0x89, pp, 0)))
+                t += beat_sec
+                bi = (bi + 1) % song.time_sig_num
 
         # During recording with no existing notes the song is empty, so total_ticks
         # is tiny — add a sentinel event far in the future so the loop doesn't
         # exit after a few beats of silence.
         if self._recording:
-            timeline.append((7200.0, lambda: None))   # 2-hour sentinel
+            timeline.append((7200.0, lambda: None))  # 2-hour sentinel
         timeline.sort(key=lambda x: x[0])
         # ── Subscribe to MIDI input for recording ──────────────────────────
         rec_token = None
@@ -4962,13 +5581,18 @@ class Transport:
             _send_raw(0xC0 | tr_rec.channel, tr_rec.program)
             rec_open = self._rec_open
 
-            _rec_lock = self._rec_lock   # local alias for closure
+            _rec_lock = self._rec_lock  # local alias for closure
+
             def _rec_cb(msg, _tr=tr_rec, _tpb=tpb, _start=start_t, _w0=wall0):
                 # Echo immediately — this runs in the dispatcher thread, so
                 # latency is just the 1 ms dispatcher poll + OS audio path.
                 # NOTE: echo happens BEFORE the lock so we don't block audio output.
                 try:
-                    echoed = msg.copy(channel=_tr.channel) if hasattr(msg,'channel') else msg
+                    echoed = (
+                        msg.copy(channel=_tr.channel)
+                        if hasattr(msg, "channel")
+                        else msg
+                    )
                     _send(echoed)
                 except Exception:
                     _send(msg)
@@ -4982,7 +5606,9 @@ class Transport:
                 with _rec_lock:
                     if msg.type == "note_on" and msg.velocity > 0:
                         rec_open[(msg.channel, msg.note)] = (ctick, msg.velocity)
-                    elif msg.type in ("note_off",) or (msg.type == "note_on" and msg.velocity == 0):
+                    elif msg.type in ("note_off",) or (
+                        msg.type == "note_on" and msg.velocity == 0
+                    ):
                         k = (msg.channel, msg.note)
                         if k in rec_open:
                             s, v = rec_open.pop(k)
@@ -5001,19 +5627,24 @@ class Transport:
         # ── Main playback loop ─────────────────────────────────────────────
         end_tick = self._play_until_tick
         for t_sec, action in timeline:
-            if self._stop_evt.is_set(): break
-            if end_tick is not None and self.position_ticks >= end_tick: break
+            if self._stop_evt.is_set():
+                break
+            if end_tick is not None and self.position_ticks >= end_tick:
+                break
             wait = t_sec - (time.perf_counter() - wall0)
             if wait > 0:
                 self._stop_evt.wait(timeout=wait)
-                if self._stop_evt.is_set(): break   # check BEFORE firing action
+                if self._stop_evt.is_set():
+                    break  # check BEFORE firing action
             # Update position from wall clock — avoids float drift
             el = time.perf_counter() - wall0
             self.position_sec = el
             self.position_ticks = self._tmap_sec_to_tick(el, tempo_map, start_t)
             if self._on_tick_cb:
-                try: self._on_tick_cb(self.position_ticks)
-                except: pass
+                try:
+                    self._on_tick_cb(self.position_ticks)
+                except:
+                    pass
             action()
 
         if rec_token is not None:
@@ -5029,79 +5660,112 @@ class Transport:
 
         if not self._stop_evt.is_set():
             self.position_ticks = song.total_ticks()
-        self._playing = False; self._recording = False
+        self._playing = False
+        self._recording = False
 
     def close(self):
         self.stop()
         if _midi_out:
-            try: _midi_out.close()
-            except: pass
+            try:
+                _midi_out.close()
+            except:
+                pass
         if _midi_in:
-            try: _midi_in.close()
-            except: pass
+            try:
+                _midi_in.close()
+            except:
+                pass
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Piano Roll
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 class PianoRollView(tk.Toplevel):
-    CELL_W=2; CELL_H=10; KEY_W=64; HEADER_H=24
+    CELL_W = 2
+    CELL_H = 10
+    KEY_W = 64
+    HEADER_H = 24
 
     def __init__(self, parent, app, track_idx):
         super().__init__(parent)
-        self.app=app; self.track_idx=track_idx; self._zoom=1.0; self._sel=set()
-        tr=app.song.tracks[track_idx]
-        self.title(f"Piano Roll — {tr.name}"); self.geometry("900x500")
-        self._build_ui(); self._draw()
+        self.app = app
+        self.track_idx = track_idx
+        self._zoom = 1.0
+        self._sel = set()
+        tr = app.song.tracks[track_idx]
+        self.title(f"Piano Roll — {tr.name}")
+        self.geometry("900x500")
+        self._build_ui()
+        self._draw()
 
     def _build_ui(self):
-        tb=tk.Frame(self,bd=1,relief=tk.RAISED); tb.pack(fill=tk.X)
-        for lbl,cmd in [("Zoom +",self._zoom_in),("Zoom −",self._zoom_out),
-                         ("Select All",self._select_all),("Delete",self._delete_sel),
-                         ("Quantize…",self._quantize_dlg),("Transpose…",self._transpose_dlg)]:
-            tk.Button(tb,text=lbl,command=cmd).pack(side=tk.LEFT,padx=2,pady=2)
+        tb = tk.Frame(self, bd=1, relief=tk.RAISED)
+        tb.pack(fill=tk.X)
+        for lbl, cmd in [
+            ("Zoom +", self._zoom_in),
+            ("Zoom −", self._zoom_out),
+            ("Select All", self._select_all),
+            ("Delete", self._delete_sel),
+            ("Quantize…", self._quantize_dlg),
+            ("Transpose…", self._transpose_dlg),
+        ]:
+            tk.Button(tb, text=lbl, command=cmd).pack(side=tk.LEFT, padx=2, pady=2)
 
-        fr=tk.Frame(self); fr.pack(fill=tk.BOTH,expand=True)
+        fr = tk.Frame(self)
+        fr.pack(fill=tk.BOTH, expand=True)
 
         # Shared scrollbars
-        hb=ttk.Scrollbar(fr,orient=tk.HORIZONTAL)
-        vb=ttk.Scrollbar(fr,orient=tk.VERTICAL)
-        hb.pack(side=tk.BOTTOM,fill=tk.X)
-        vb.pack(side=tk.RIGHT,fill=tk.Y)
+        hb = ttk.Scrollbar(fr, orient=tk.HORIZONTAL)
+        vb = ttk.Scrollbar(fr, orient=tk.VERTICAL)
+        hb.pack(side=tk.BOTTOM, fill=tk.X)
+        vb.pack(side=tk.RIGHT, fill=tk.Y)
 
         # Fixed keyboard canvas (left strip — does NOT scroll horizontally)
-        self.key_canvas=tk.Canvas(fr,bg="#222",width=self.KEY_W,
-                                  yscrollcommand=vb.set)
-        self.key_canvas.pack(side=tk.LEFT,fill=tk.Y)
+        self.key_canvas = tk.Canvas(
+            fr, bg="#222", width=self.KEY_W, yscrollcommand=vb.set
+        )
+        self.key_canvas.pack(side=tk.LEFT, fill=tk.Y)
 
         # Scrolling roll canvas (right — scrolls both axes)
-        self.canvas=tk.Canvas(fr,bg="#1a1a2e",cursor="crosshair",
-                              xscrollcommand=hb.set,yscrollcommand=vb.set)
-        self.canvas.pack(side=tk.LEFT,fill=tk.BOTH,expand=True)
+        self.canvas = tk.Canvas(
+            fr,
+            bg="#1a1a2e",
+            cursor="crosshair",
+            xscrollcommand=hb.set,
+            yscrollcommand=vb.set,
+        )
+        self.canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
         # Wire scrollbars to BOTH canvases for y, roll only for x
         def _yscroll(*args):
             self.canvas.yview(*args)
             self.key_canvas.yview(*args)
+
         vb.configure(command=_yscroll)
         hb.configure(command=self.canvas.xview)
 
         # Sync key_canvas y when roll scrolls (mousewheel)
         def _on_roll_scroll(event):
             delta = -1 if event.delta > 0 else 1
-            self.canvas.yview_scroll(delta,"units")
-            self.key_canvas.yview_scroll(delta,"units")
+            self.canvas.yview_scroll(delta, "units")
+            self.key_canvas.yview_scroll(delta, "units")
+
         self.canvas.bind("<MouseWheel>", _on_roll_scroll)
         self.key_canvas.bind("<MouseWheel>", _on_roll_scroll)
 
-        self.canvas.bind("<Button-1>",self._on_click)
-        self.canvas.bind("<Button-3>",self._on_right)
+        self.canvas.bind("<Button-1>", self._on_click)
+        self.canvas.bind("<Button-3>", self._on_right)
 
     def _zoom_in(self):
-        self._zoom=min(8.0,self._zoom*1.5); self._draw()
+        self._zoom = min(8.0, self._zoom * 1.5)
+        self._draw()
         self._restore_playhead()
+
     def _zoom_out(self):
-        self._zoom=max(0.25,self._zoom/1.5); self._draw()
+        self._zoom = max(0.25, self._zoom / 1.5)
+        self._draw()
         self._restore_playhead()
 
     def _restore_playhead(self):
@@ -5121,184 +5785,291 @@ class PianoRollView(tk.Toplevel):
         except Exception:
             return
         self.update_playhead(tick)
+
     def _select_all(self):
-        self._sel=set(range(len(self.app.song.tracks[self.track_idx].notes))); self._draw()
+        self._sel = set(range(len(self.app.song.tracks[self.track_idx].notes)))
+        self._draw()
 
     def _delete_sel(self):
-        tr=self.app.song.tracks[self.track_idx]
-        tr.notes=[n for i,n in enumerate(tr.notes) if i not in self._sel]
-        self._sel.clear(); self.app.song.modified=True; self.app._update_title(); self._draw()
+        tr = self.app.song.tracks[self.track_idx]
+        tr.notes = [n for i, n in enumerate(tr.notes) if i not in self._sel]
+        self._sel.clear()
+        self.app.song.modified = True
+        self.app._update_title()
+        self._draw()
 
     def _quantize_dlg(self):
-        v=simpledialog.askinteger("Quantize","Ticks (120=16th@480tpb):",parent=self,initialvalue=120,minvalue=1)
-        if not v: return
-        tr=self.app.song.tracks[self.track_idx]
+        v = simpledialog.askinteger(
+            "Quantize",
+            "Ticks (120=16th@480tpb):",
+            parent=self,
+            initialvalue=120,
+            minvalue=1,
+        )
+        if not v:
+            return
+        tr = self.app.song.tracks[self.track_idx]
         for i in (self._sel if self._sel else range(len(tr.notes))):
-            n=tr.notes[i]; n.tick=round(n.tick/v)*v; n.duration=max(v,round(n.duration/v)*v)
-        self.app.song.modified=True; self._draw()
+            n = tr.notes[i]
+            n.tick = round(n.tick / v) * v
+            n.duration = max(v, round(n.duration / v) * v)
+        self.app.song.modified = True
+        self._draw()
 
     def _transpose_dlg(self):
-        v=simpledialog.askinteger("Transpose","Semitones:",parent=self,initialvalue=0,minvalue=-48,maxvalue=48)
-        if v is None: return
-        tr=self.app.song.tracks[self.track_idx]
+        v = simpledialog.askinteger(
+            "Transpose",
+            "Semitones:",
+            parent=self,
+            initialvalue=0,
+            minvalue=-48,
+            maxvalue=48,
+        )
+        if v is None:
+            return
+        tr = self.app.song.tracks[self.track_idx]
         for i in (self._sel if self._sel else range(len(tr.notes))):
-            tr.notes[i].pitch=max(0,min(127,tr.notes[i].pitch+v))
+            tr.notes[i].pitch = max(0, min(127, tr.notes[i].pitch + v))
             # v22ze-51 fix: a bulk pitch shift invalidates any explicit
             # accidental spelling set earlier via the Accidental tool --
             # left in place, a forced "sharp" from before the transpose
             # would misspell the note at its new pitch. Reset to the
             # default (key-signature-derived) spelling; the user can
             # re-apply an explicit accidental afterward if still needed.
-            tr.notes[i].spelling=""
-        self.app.song.modified=True; self._draw()
+            tr.notes[i].spelling = ""
+        self.app.song.modified = True
+        self._draw()
 
-    def _tx(self,t): return self.HEADER_H+int(t*self._zoom*self.CELL_W/10)
-    def _py(self,p): return self.HEADER_H+(127-p)*self.CELL_H
-    def _xt(self,x): return max(0,int((x-self.HEADER_H)*10/(self._zoom*self.CELL_W)))
-    def _yp(self,y): return max(0,min(127,127-(y-self.HEADER_H)//self.CELL_H))
+    def _tx(self, t):
+        return self.HEADER_H + int(t * self._zoom * self.CELL_W / 10)
+
+    def _py(self, p):
+        return self.HEADER_H + (127 - p) * self.CELL_H
+
+    def _xt(self, x):
+        return max(0, int((x - self.HEADER_H) * 10 / (self._zoom * self.CELL_W)))
+
+    def _yp(self, y):
+        return max(0, min(127, 127 - (y - self.HEADER_H) // self.CELL_H))
 
     def _draw(self):
-        c=self.canvas; kc=self.key_canvas
-        c.delete("all"); kc.delete("all")
-        tr=self.app.song.tracks[self.track_idx]
-        tpb=self.app.song.ticks_per_beat; tot=max(self.app.song.total_ticks(),tpb*4)
-        RW=self._tx(tot)+100; H=self.HEADER_H+128*self.CELL_H
-        c.configure(scrollregion=(0,0,RW,H))
-        kc.configure(scrollregion=(0,0,self.KEY_W,H))
+        c = self.canvas
+        kc = self.key_canvas
+        c.delete("all")
+        kc.delete("all")
+        tr = self.app.song.tracks[self.track_idx]
+        tpb = self.app.song.ticks_per_beat
+        tot = max(self.app.song.total_ticks(), tpb * 4)
+        RW = self._tx(tot) + 100
+        H = self.HEADER_H + 128 * self.CELL_H
+        c.configure(scrollregion=(0, 0, RW, H))
+        kc.configure(scrollregion=(0, 0, self.KEY_W, H))
 
         # Auto-scroll to note range on first draw
         if tr.notes:
-            pitches=[n.pitch for n in tr.notes]
-            mid_p=(max(pitches)+min(pitches))//2
+            pitches = [n.pitch for n in tr.notes]
+            mid_p = (max(pitches) + min(pitches)) // 2
         else:
-            mid_p=60
-        if not hasattr(self,'_scrolled_once'):
-            self._scrolled_once=True
-            mid_y=self._py(mid_p)
-            c.after(10, lambda: [c.yview_moveto(max(0,(mid_y-200)/H)),
-                                  kc.yview_moveto(max(0,(mid_y-200)/H))])
+            mid_p = 60
+        if not hasattr(self, "_scrolled_once"):
+            self._scrolled_once = True
+            mid_y = self._py(mid_p)
+            c.after(
+                10,
+                lambda: [
+                    c.yview_moveto(max(0, (mid_y - 200) / H)),
+                    kc.yview_moveto(max(0, (mid_y - 200) / H)),
+                ],
+            )
 
         # ── Roll background rows ──────────────────────────────────────────
         for p in range(128):
-            y=self._py(p)
-            bg="#16213e" if "#" in NOTE_NAMES[p%12] else "#0f3460"
-            c.create_rectangle(0,y,RW,y+self.CELL_H,fill=bg,outline="")
+            y = self._py(p)
+            bg = "#16213e" if "#" in NOTE_NAMES[p % 12] else "#0f3460"
+            c.create_rectangle(0, y, RW, y + self.CELL_H, fill=bg, outline="")
 
         # ── Beat/bar grid lines ───────────────────────────────────────────
-        for beat in range(int(tot/tpb)+2):
-            x=self._tx(beat*tpb); isbar=beat%self.app.song.time_sig_num==0
-            c.create_line(x,0,x,H,fill="#445566" if isbar else "#2a3a4a")
+        for beat in range(int(tot / tpb) + 2):
+            x = self._tx(beat * tpb)
+            isbar = beat % self.app.song.time_sig_num == 0
+            c.create_line(x, 0, x, H, fill="#445566" if isbar else "#2a3a4a")
             if isbar:
-                c.create_text(x+2,4,text=str(beat//self.app.song.time_sig_num+1),
-                              fill="#88aacc",font=("TkFixedFont",8),anchor="nw")
+                c.create_text(
+                    x + 2,
+                    4,
+                    text=str(beat // self.app.song.time_sig_num + 1),
+                    fill="#88aacc",
+                    font=("TkFixedFont", 8),
+                    anchor="nw",
+                )
 
         # ── Middle C dotted line ──────────────────────────────────────────
-        mc_y=self._py(60)
-        c.create_line(0,mc_y,RW,mc_y,fill="#ff6633",width=1,dash=(4,4))
-        c.create_text(2,mc_y-1,text="C4",fill="#ff6633",
-                      font=("TkFixedFont",7),anchor="sw")
+        mc_y = self._py(60)
+        c.create_line(0, mc_y, RW, mc_y, fill="#ff6633", width=1, dash=(4, 4))
+        c.create_text(
+            2, mc_y - 1, text="C4", fill="#ff6633", font=("TkFixedFont", 7), anchor="sw"
+        )
 
         # ── Notes with taper (last 30% narrows to point) ─────────────────
-        for i,note in enumerate(tr.notes):
-            if note.duration<=0: continue
-            x1=self._tx(note.tick); x2=self._tx(note.tick+note.duration)
-            y1=self._py(note.pitch); y2=y1+self.CELL_H-1
-            sel=i in self._sel
-            nw=max(3,x2-x1-1)
-            body_w=int(nw*0.70)   # full-width body (70%)
-            taper_w=nw-body_w     # taper zone (30%)
-            fill_c="#ffdd44" if sel else "#5bc8f5"
-            out_c ="#ffe"    if sel else "#1a7aad"
-            fade_c="#ffe8a0" if sel else "#a0ddf5"
+        for i, note in enumerate(tr.notes):
+            if note.duration <= 0:
+                continue
+            x1 = self._tx(note.tick)
+            x2 = self._tx(note.tick + note.duration)
+            y1 = self._py(note.pitch)
+            y2 = y1 + self.CELL_H - 1
+            sel = i in self._sel
+            nw = max(3, x2 - x1 - 1)
+            body_w = int(nw * 0.70)  # full-width body (70%)
+            taper_w = nw - body_w  # taper zone (30%)
+            fill_c = "#ffdd44" if sel else "#5bc8f5"
+            out_c = "#ffe" if sel else "#1a7aad"
+            fade_c = "#ffe8a0" if sel else "#a0ddf5"
             # Body rectangle
-            c.create_rectangle(x1,y1,x1+body_w,y2,
-                               fill=fill_c,outline=out_c,tags=f"note_{i}")
+            c.create_rectangle(
+                x1, y1, x1 + body_w, y2, fill=fill_c, outline=out_c, tags=f"note_{i}"
+            )
             # Taper: trapezoid narrowing to 1px at right end
-            ymid=(y1+y2)/2
-            if taper_w>1:
+            ymid = (y1 + y2) / 2
+            if taper_w > 1:
                 c.create_polygon(
-                    x1+body_w, y1,
-                    x1+body_w, y2,
-                    x1+nw,     ymid,
-                    fill=fade_c,outline="",tags=f"note_{i}")
+                    x1 + body_w,
+                    y1,
+                    x1 + body_w,
+                    y2,
+                    x1 + nw,
+                    ymid,
+                    fill=fade_c,
+                    outline="",
+                    tags=f"note_{i}",
+                )
             # Velocity bar inside body
-            if body_w>8:
-                vw=max(2,int(body_w*note.velocity/127))
-                vc="#ffee88" if sel else "#88ddff"
-                c.create_rectangle(x1+1,y1+1,x1+vw,y2-1,
-                                   fill=vc,outline="",tags=f"note_{i}")
+            if body_w > 8:
+                vw = max(2, int(body_w * note.velocity / 127))
+                vc = "#ffee88" if sel else "#88ddff"
+                c.create_rectangle(
+                    x1 + 1,
+                    y1 + 1,
+                    x1 + vw,
+                    y2 - 1,
+                    fill=vc,
+                    outline="",
+                    tags=f"note_{i}",
+                )
 
         # ── Piano keyboard (drawn on key_canvas — never scrolls x) ────────
         for p in range(128):
-            y=self._py(p); is_b="#" in NOTE_NAMES[p%12]
-            kc.create_rectangle(0,y,self.KEY_W,y+self.CELL_H,
-                                fill="#111" if is_b else "#eee",outline="#333")
-            nm=NOTE_NAMES[p%12]
-            if nm=="C":   # C octave label
-                oct_n=p//12-1
-                kc.create_text(self.KEY_W-3,y+self.CELL_H//2,
-                               text=f"C{oct_n}",anchor="e",
-                               fill="#f64" if p==60 else "#844",
-                               font=("TkFixedFont",7))
+            y = self._py(p)
+            is_b = "#" in NOTE_NAMES[p % 12]
+            kc.create_rectangle(
+                0,
+                y,
+                self.KEY_W,
+                y + self.CELL_H,
+                fill="#111" if is_b else "#eee",
+                outline="#333",
+            )
+            nm = NOTE_NAMES[p % 12]
+            if nm == "C":  # C octave label
+                oct_n = p // 12 - 1
+                kc.create_text(
+                    self.KEY_W - 3,
+                    y + self.CELL_H // 2,
+                    text=f"C{oct_n}",
+                    anchor="e",
+                    fill="#f64" if p == 60 else "#844",
+                    font=("TkFixedFont", 7),
+                )
 
     def update_playhead(self, tick):
-        if not self.winfo_exists(): return
+        if not self.winfo_exists():
+            return
         c = self.canvas
-        c.delete('playhead')
+        c.delete("playhead")
         x = self._tx(tick)
         W = c.winfo_width()
-        sr = c.cget('scrollregion')
+        sr = c.cget("scrollregion")
         if sr:
             try:
                 total_w = float(sr.split()[2])
                 if total_w > 0:
-                    frac = max(0.0, (x - W*0.4) / total_w)
+                    frac = max(0.0, (x - W * 0.4) / total_w)
                     c.xview_moveto(frac)
-            except: pass
-        H = self.HEADER_H + 128*self.CELL_H
-        c.create_line(x, 0, x, H, fill='#ff3333', width=2,
-                      dash=(4,3), tags='playhead')
+            except:
+                pass
+        H = self.HEADER_H + 128 * self.CELL_H
+        c.create_line(x, 0, x, H, fill="#ff3333", width=2, dash=(4, 3), tags="playhead")
 
     def update_active_notes(self, active_pitches):
-        if not self.winfo_exists(): return
-        c = self.key_canvas   # draw on fixed keyboard canvas
-        c.delete('active_key')
+        if not self.winfo_exists():
+            return
+        c = self.key_canvas  # draw on fixed keyboard canvas
+        c.delete("active_key")
         for p in active_pitches:
-            y  = self._py(p)
+            y = self._py(p)
             is_b = "#" in NOTE_NAMES[p % 12]
-            c.create_rectangle(0, y, self.KEY_W, y+self.CELL_H-1,
-                               fill='#f5a623' if is_b else '#ffcc44',
-                               outline='#333', tags='active_key')
-            c.create_text(self.KEY_W-3, y+self.CELL_H//2,
-                         text=NOTE_NAMES[p%12], fill='#000',
-                         font=('TkFixedFont',7), anchor='e',
-                         tags='active_key')
+            c.create_rectangle(
+                0,
+                y,
+                self.KEY_W,
+                y + self.CELL_H - 1,
+                fill="#f5a623" if is_b else "#ffcc44",
+                outline="#333",
+                tags="active_key",
+            )
+            c.create_text(
+                self.KEY_W - 3,
+                y + self.CELL_H // 2,
+                text=NOTE_NAMES[p % 12],
+                fill="#000",
+                font=("TkFixedFont", 7),
+                anchor="e",
+                tags="active_key",
+            )
 
-    def _cxy(self,e): return self.canvas.canvasx(e.x),self.canvas.canvasy(e.y)
+    def _cxy(self, e):
+        return self.canvas.canvasx(e.x), self.canvas.canvasy(e.y)
 
-    def _on_click(self,event):
-        cx,cy=self._cxy(event)
-        for it in self.canvas.find_overlapping(cx-2,cy-2,cx+2,cy+2):
+    def _on_click(self, event):
+        cx, cy = self._cxy(event)
+        for it in self.canvas.find_overlapping(cx - 2, cy - 2, cx + 2, cy + 2):
             for tag in self.canvas.gettags(it):
                 if tag.startswith("note_"):
-                    self._sel={int(tag.split("_")[1])}; self._draw(); return
-        tr=self.app.song.tracks[self.track_idx]
-        tr.notes.append(MidiNote(self._xt(cx),self._yp(cy),80,self.app.song.ticks_per_beat//4,tr.channel))
-        tr.notes.sort(key=lambda n:n.tick)
-        self.app.song.modified=True; self.app._update_title(); self._draw()
+                    self._sel = {int(tag.split("_")[1])}
+                    self._draw()
+                    return
+        tr = self.app.song.tracks[self.track_idx]
+        tr.notes.append(
+            MidiNote(
+                self._xt(cx),
+                self._yp(cy),
+                80,
+                self.app.song.ticks_per_beat // 4,
+                tr.channel,
+            )
+        )
+        tr.notes.sort(key=lambda n: n.tick)
+        self.app.song.modified = True
+        self.app._update_title()
+        self._draw()
 
-    def _on_right(self,event):
-        cx,cy=self._cxy(event)
-        tr=self.app.song.tracks[self.track_idx]
-        for it in self.canvas.find_overlapping(cx-2,cy-2,cx+2,cy+2):
+    def _on_right(self, event):
+        cx, cy = self._cxy(event)
+        tr = self.app.song.tracks[self.track_idx]
+        for it in self.canvas.find_overlapping(cx - 2, cy - 2, cx + 2, cy + 2):
             for tag in self.canvas.gettags(it):
                 if tag.startswith("note_"):
                     tr.notes.pop(int(tag.split("_")[1]))
-                    self.app.song.modified=True; self.app._update_title(); self._draw(); return
+                    self.app.song.modified = True
+                    self.app._update_title()
+                    self._draw()
+                    return
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # MIDI List View
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 class MidiListView(tk.Toplevel):
     """Two-tab MIDI data viewer with a track selector.
@@ -5320,7 +6091,7 @@ class MidiListView(tk.Toplevel):
         Sortable by column.  Read-only.
     """
 
-    COLS    = ("Tick", "Pitch", "Note", "Velocity", "Duration", "Channel")
+    COLS = ("Tick", "Pitch", "Note", "Velocity", "Duration", "Channel")
     EV_COLS = ("Tick", "Type", "Channel", "Detail")
 
     def __init__(self, parent, app, track_idx):
@@ -5342,16 +6113,16 @@ class MidiListView(tk.Toplevel):
         tk.Label(tb, text="Track:").pack(side=tk.LEFT)
 
         self._track_var = tk.StringVar()
-        self._track_cb  = ttk.Combobox(
-            tb, textvariable=self._track_var,
-            state="readonly", width=32)
+        self._track_cb = ttk.Combobox(
+            tb, textvariable=self._track_var, state="readonly", width=32
+        )
         self._track_cb.pack(side=tk.LEFT, padx=(2, 8))
         self._track_cb.bind("<<ComboboxSelected>>", self._on_track_select)
 
-        tk.Button(tb, text="Delete Selected",
-                  command=self._delete_sel).pack(side=tk.LEFT, padx=2)
-        tk.Button(tb, text="Refresh",
-                  command=self._reload).pack(side=tk.LEFT, padx=2)
+        tk.Button(tb, text="Delete Selected", command=self._delete_sel).pack(
+            side=tk.LEFT, padx=2
+        )
+        tk.Button(tb, text="Refresh", command=self._reload).pack(side=tk.LEFT, padx=2)
 
         # Populate the combobox values
         self._refresh_track_list()
@@ -5366,15 +6137,13 @@ class MidiListView(tk.Toplevel):
         nb.add(notes_frame, text="Notes")
 
         self.tree = ttk.Treeview(
-            notes_frame, columns=self.COLS,
-            show="headings", selectmode="extended")
+            notes_frame, columns=self.COLS, show="headings", selectmode="extended"
+        )
         col_widths = [70, 50, 60, 70, 70, 60]
         for col, w in zip(self.COLS, col_widths):
-            self.tree.heading(col, text=col,
-                              command=lambda c=col: self._sort(c))
+            self.tree.heading(col, text=col, command=lambda c=col: self._sort(c))
             self.tree.column(col, width=w, anchor="center")
-        vsb = ttk.Scrollbar(notes_frame, orient=tk.VERTICAL,
-                             command=self.tree.yview)
+        vsb = ttk.Scrollbar(notes_frame, orient=tk.VERTICAL, command=self.tree.yview)
         self.tree.configure(yscrollcommand=vsb.set)
         vsb.pack(side=tk.RIGHT, fill=tk.Y)
         self.tree.pack(fill=tk.BOTH, expand=True)
@@ -5385,20 +6154,21 @@ class MidiListView(tk.Toplevel):
         nb.add(ev_frame, text="Raw Events")
 
         self.ev_tree = ttk.Treeview(
-            ev_frame, columns=self.EV_COLS,
-            show="headings", selectmode="browse")
+            ev_frame, columns=self.EV_COLS, show="headings", selectmode="browse"
+        )
         ev_widths = [70, 140, 60, 360]
         for col, w in zip(self.EV_COLS, ev_widths):
-            self.ev_tree.heading(col, text=col,
-                                 command=lambda c=col: self._sort_events(c))
-            self.ev_tree.column(col, width=w,
-                                anchor="center" if col != "Detail" else "w")
-        ev_vsb = ttk.Scrollbar(ev_frame, orient=tk.VERTICAL,
-                                command=self.ev_tree.yview)
-        ev_hsb = ttk.Scrollbar(ev_frame, orient=tk.HORIZONTAL,
-                                command=self.ev_tree.xview)
-        self.ev_tree.configure(yscrollcommand=ev_vsb.set,
-                               xscrollcommand=ev_hsb.set)
+            self.ev_tree.heading(
+                col, text=col, command=lambda c=col: self._sort_events(c)
+            )
+            self.ev_tree.column(
+                col, width=w, anchor="center" if col != "Detail" else "w"
+            )
+        ev_vsb = ttk.Scrollbar(ev_frame, orient=tk.VERTICAL, command=self.ev_tree.yview)
+        ev_hsb = ttk.Scrollbar(
+            ev_frame, orient=tk.HORIZONTAL, command=self.ev_tree.xview
+        )
+        self.ev_tree.configure(yscrollcommand=ev_vsb.set, xscrollcommand=ev_hsb.set)
         ev_vsb.pack(side=tk.RIGHT, fill=tk.Y)
         ev_hsb.pack(side=tk.BOTTOM, fill=tk.X)
         self.ev_tree.pack(fill=tk.BOTH, expand=True)
@@ -5407,8 +6177,10 @@ class MidiListView(tk.Toplevel):
     def _refresh_track_list(self):
         """Rebuild the combobox values from the current song's track list."""
         tracks = self.app.song.tracks
-        names  = [f"Track {i+1}:  {tr.name}  (ch {tr.channel+1})"
-                  for i, tr in enumerate(tracks)]
+        names = [
+            f"Track {i+1}:  {tr.name}  (ch {tr.channel+1})"
+            for i, tr in enumerate(tracks)
+        ]
         self._track_cb["values"] = names
         # Select the current track
         idx = max(0, min(self.track_idx, len(tracks) - 1))
@@ -5439,14 +6211,29 @@ class MidiListView(tk.Toplevel):
         self.tree.delete(*self.tree.get_children())
         tr = self.app.song.tracks[self.track_idx]
         for i, n in enumerate(sorted(tr.notes, key=lambda n: n.tick)):
-            self.tree.insert("", tk.END, iid=str(i),
-                values=(n.tick, n.pitch, note_name(n.pitch),
-                        n.velocity, n.duration, n.channel))
+            self.tree.insert(
+                "",
+                tk.END,
+                iid=str(i),
+                values=(
+                    n.tick,
+                    n.pitch,
+                    note_name(n.pitch),
+                    n.velocity,
+                    n.duration,
+                    n.channel,
+                ),
+            )
 
     def _sort(self, col):
         tr = self.app.song.tracks[self.track_idx]
-        m  = {"Tick": "tick", "Pitch": "pitch", "Velocity": "velocity",
-              "Duration": "duration", "Channel": "channel"}
+        m = {
+            "Tick": "tick",
+            "Pitch": "pitch",
+            "Velocity": "velocity",
+            "Duration": "duration",
+            "Channel": "channel",
+        }
         tr.notes.sort(key=lambda n: getattr(n, m.get(col, "tick")))
         self._populate()
 
@@ -5468,8 +6255,13 @@ class MidiListView(tk.Toplevel):
             return
         note = self.app.song.tracks[self.track_idx].notes[int(item)]
         v = simpledialog.askinteger(
-            "Edit Velocity", f"Velocity for {note_name(note.pitch)}:",
-            parent=self, initialvalue=note.velocity, minvalue=1, maxvalue=127)
+            "Edit Velocity",
+            f"Velocity for {note_name(note.pitch)}:",
+            parent=self,
+            initialvalue=note.velocity,
+            minvalue=1,
+            maxvalue=127,
+        )
         if v:
             note.velocity = v
             self.app.song.modified = True
@@ -5484,29 +6276,39 @@ class MidiListView(tk.Toplevel):
             self.ev_tree.insert("", tk.END, values=("", "(no raw events)", "", ""))
             return
         for i, ev in enumerate(sorted(tr.events, key=lambda e: e.tick)):
-            msg   = ev.msg
+            msg = ev.msg
             mtype = getattr(msg, "type", type(msg).__name__)
-            ch    = str(getattr(msg, "channel", "—"))
+            ch = str(getattr(msg, "channel", "—"))
             # Human-readable detail per message type
             if mtype == "set_tempo":
-                bpm    = round(60_000_000 / msg.tempo)
+                bpm = round(60_000_000 / msg.tempo)
                 detail = f"tempo={msg.tempo} us/beat  ({bpm} BPM)"
             elif mtype == "time_signature":
-                detail = (f"{msg.numerator}/{msg.denominator}  "
-                          f"clocks_per_click={msg.clocks_per_click}")
+                detail = (
+                    f"{msg.numerator}/{msg.denominator}  "
+                    f"clocks_per_click={msg.clocks_per_click}"
+                )
             elif mtype == "key_signature":
                 detail = f"key={msg.key}"
             elif mtype == "program_change":
                 detail = f"program={msg.program}"
             elif mtype in ("control_change", "cc"):
-                CC = {1:"Mod Wheel",7:"Volume",10:"Pan",11:"Expression",
-                      64:"Sustain Pedal",91:"Reverb",93:"Chorus"}
+                CC = {
+                    1: "Mod Wheel",
+                    7: "Volume",
+                    10: "Pan",
+                    11: "Expression",
+                    64: "Sustain Pedal",
+                    91: "Reverb",
+                    93: "Chorus",
+                }
                 detail = f"{CC.get(msg.control,f'CC#{msg.control}')}  value={msg.value}"
             elif mtype == "pitchwheel":
                 detail = f"pitch={msg.pitch}"
             elif mtype in ("note_on", "note_off"):
-                detail = (f"note={msg.note} ({note_name(msg.note)})  "
-                          f"vel={msg.velocity}")
+                detail = (
+                    f"note={msg.note} ({note_name(msg.note)})  " f"vel={msg.velocity}"
+                )
             elif mtype == "text":
                 detail = f'"{msg.text}"'
             elif mtype == "track_name":
@@ -5514,19 +6316,23 @@ class MidiListView(tk.Toplevel):
             elif mtype == "end_of_track":
                 detail = "(end of track)"
             else:
-                raw    = str(msg)
-                detail = raw[raw.find(" ")+1:] if " " in raw else raw
-            self.ev_tree.insert("", tk.END, iid=f"ev{i}",
-                values=(ev.tick, mtype, ch, detail))
+                raw = str(msg)
+                detail = raw[raw.find(" ") + 1 :] if " " in raw else raw
+            self.ev_tree.insert(
+                "", tk.END, iid=f"ev{i}", values=(ev.tick, mtype, ch, detail)
+            )
 
     def _sort_events(self, col):
-        tr  = self.app.song.tracks[self.track_idx]
-        key = {"Tick":    lambda e: e.tick,
-               "Type":    lambda e: getattr(e.msg, "type", ""),
-               "Channel": lambda e: getattr(e.msg, "channel", -1),
-               "Detail":  lambda e: e.tick}.get(col, lambda e: e.tick)
+        tr = self.app.song.tracks[self.track_idx]
+        key = {
+            "Tick": lambda e: e.tick,
+            "Type": lambda e: getattr(e.msg, "type", ""),
+            "Channel": lambda e: getattr(e.msg, "channel", -1),
+            "Detail": lambda e: e.tick,
+        }.get(col, lambda e: e.tick)
         tr.events.sort(key=key)
         self._populate_events()
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Mixer
@@ -5547,20 +6353,30 @@ class MidiListView(tk.Toplevel):
 # that lives only in the widget tree and would be lost on rebuild.
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 class DockablePane:
-    def __init__(self, app, dock_parent, content_factory, title="Pane",
-                 floated=False, min_w=300, min_h=200, dock_fill=None):
+    def __init__(
+        self,
+        app,
+        dock_parent,
+        content_factory,
+        title="Pane",
+        floated=False,
+        min_w=300,
+        min_h=200,
+        dock_fill=None,
+    ):
         # dock_fill kept as ignored kwarg for call-site compatibility.
         # The vertical PanedWindow now controls all pane sizing.
-        self.app             = app
-        self.dock_parent     = dock_parent
+        self.app = app
+        self.dock_parent = dock_parent
         self.content_factory = content_factory
-        self.title           = title
-        self.floated         = floated
-        self.min_w           = min_w
-        self.min_h           = min_h
-        self.shell           = None
-        self.content         = None
+        self.title = title
+        self.floated = floated
+        self.min_w = min_w
+        self.min_h = min_h
+        self.shell = None
+        self.content = None
         self._build()
 
     # ── construction ─────────────────────────────────────────────────────────
@@ -5572,17 +6388,45 @@ class DockablePane:
 
     def _title_bar(self, master, dock_label, content=None):
         bar = tk.Frame(master, bg="#161b22")
-        tk.Label(bar, text=self.title, bg="#161b22", fg="#58a6ff",
-                 font=("TkDefaultFont", 8, "bold")).pack(side=tk.LEFT, padx=5, pady=1)
-        tk.Button(bar, text=dock_label, command=self.toggle,
-                  bg="#21262d", fg="#aaa", relief=tk.FLAT, padx=5, pady=0,
-                  font=("TkDefaultFont", 7),
-                  activebackground="#30363d").pack(side=tk.RIGHT, padx=3, pady=1)
-        if content is not None and hasattr(content, "zoom_in") and hasattr(content, "zoom_out"):
-            zbtn_kw = dict(bg="#21262d", fg="#aaa", relief=tk.FLAT, padx=5, pady=0,
-                           font=("TkDefaultFont", 8, "bold"), activebackground="#30363d")
-            tk.Button(bar, text="+", command=content.zoom_in,  **zbtn_kw).pack(side=tk.RIGHT, padx=(3,1), pady=1)
-            tk.Button(bar, text="−", command=content.zoom_out, **zbtn_kw).pack(side=tk.RIGHT, padx=(0,1), pady=1)
+        tk.Label(
+            bar,
+            text=self.title,
+            bg="#161b22",
+            fg="#58a6ff",
+            font=("TkDefaultFont", 8, "bold"),
+        ).pack(side=tk.LEFT, padx=5, pady=1)
+        tk.Button(
+            bar,
+            text=dock_label,
+            command=self.toggle,
+            bg="#21262d",
+            fg="#aaa",
+            relief=tk.FLAT,
+            padx=5,
+            pady=0,
+            font=("TkDefaultFont", 7),
+            activebackground="#30363d",
+        ).pack(side=tk.RIGHT, padx=3, pady=1)
+        if (
+            content is not None
+            and hasattr(content, "zoom_in")
+            and hasattr(content, "zoom_out")
+        ):
+            zbtn_kw = dict(
+                bg="#21262d",
+                fg="#aaa",
+                relief=tk.FLAT,
+                padx=5,
+                pady=0,
+                font=("TkDefaultFont", 8, "bold"),
+                activebackground="#30363d",
+            )
+            tk.Button(bar, text="+", command=content.zoom_in, **zbtn_kw).pack(
+                side=tk.RIGHT, padx=(3, 1), pady=1
+            )
+            tk.Button(bar, text="−", command=content.zoom_out, **zbtn_kw).pack(
+                side=tk.RIGHT, padx=(0, 1), pady=1
+            )
         return bar
 
     def _build_docked(self):
@@ -5610,24 +6454,31 @@ class DockablePane:
         self.shell = win
 
     def toggle(self):
-        try:    self.shell.destroy()
-        except: pass
+        try:
+            self.shell.destroy()
+        except:
+            pass
         self.floated = not self.floated
         self._build()
 
     def refresh(self):
         if self.content is not None:
-            try:    self.content.destroy()
-            except: pass
-        body = getattr(self.content, 'master', None)
+            try:
+                self.content.destroy()
+            except:
+                pass
+        body = getattr(self.content, "master", None)
         if body is None or not _winfo_exists(body):
-            self.toggle(); self.toggle(); return
+            self.toggle()
+            self.toggle()
+            return
         self.content = self.content_factory(body)
         self.content.pack(fill=tk.BOTH, expand=True)
 
 
 class TracksView(tk.Frame):
     """Track List + Overview, wrapped as a dockable pane (v20f)."""
+
     def __init__(self, parent, app):
         super().__init__(parent, bg="#0d1117")
         self.app = app
@@ -5643,54 +6494,99 @@ class TracksView(tk.Frame):
         self._build()
 
     def _build(self):
-        for w in self.winfo_children(): w.destroy()
+        for w in self.winfo_children():
+            w.destroy()
         z = self._zoom
-        hdr_fnt  = max(7, int(9 * z))
+        hdr_fnt = max(7, int(9 * z))
         list_fnt = max(7, int(10 * z))
         app = self.app
 
-        pane=tk.PanedWindow(self,orient=tk.HORIZONTAL,bg="#0d1117",sashrelief=tk.FLAT,sashwidth=4)
-        pane.pack(fill=tk.BOTH,expand=True)
-        left=tk.Frame(pane,bg="#161b22",width=220); pane.add(left,minsize=180)
-        tk.Label(left,text="TRACKS",bg="#161b22",fg="#58a6ff",
-                 font=("TkDefaultFont",hdr_fnt,"bold")).pack(anchor="w",padx=6,pady=(6,2))
-        lf=tk.Frame(left,bg="#161b22"); lf.pack(fill=tk.BOTH,expand=True)
-        app.track_list=tk.Listbox(lf,bg="#0d1117",fg="white",selectbackground="#1f6feb",
-                                   activestyle="none",font=("TkFixedFont",list_fnt),relief=tk.FLAT,borderwidth=0)
-        vsb=ttk.Scrollbar(lf,orient=tk.VERTICAL,command=app.track_list.yview)
+        pane = tk.PanedWindow(
+            self, orient=tk.HORIZONTAL, bg="#0d1117", sashrelief=tk.FLAT, sashwidth=4
+        )
+        pane.pack(fill=tk.BOTH, expand=True)
+        left = tk.Frame(pane, bg="#161b22", width=220)
+        pane.add(left, minsize=180)
+        tk.Label(
+            left,
+            text="TRACKS",
+            bg="#161b22",
+            fg="#58a6ff",
+            font=("TkDefaultFont", hdr_fnt, "bold"),
+        ).pack(anchor="w", padx=6, pady=(6, 2))
+        lf = tk.Frame(left, bg="#161b22")
+        lf.pack(fill=tk.BOTH, expand=True)
+        app.track_list = tk.Listbox(
+            lf,
+            bg="#0d1117",
+            fg="white",
+            selectbackground="#1f6feb",
+            activestyle="none",
+            font=("TkFixedFont", list_fnt),
+            relief=tk.FLAT,
+            borderwidth=0,
+        )
+        vsb = ttk.Scrollbar(lf, orient=tk.VERTICAL, command=app.track_list.yview)
         app.track_list.configure(yscrollcommand=vsb.set)
-        vsb.pack(side=tk.RIGHT,fill=tk.Y); app.track_list.pack(fill=tk.BOTH,expand=True)
-        app.track_list.bind("<Double-1>",lambda e:app._open_piano_roll())
-        app.track_list.bind("<Button-3>",app._track_ctx)
-        right=tk.Frame(pane,bg="#0d1117"); pane.add(right,minsize=300)
-        ov_hdr=tk.Frame(right,bg="#0d1117"); ov_hdr.pack(fill=tk.X,padx=4,pady=(6,0))
-        tk.Label(ov_hdr,text="OVERVIEW",bg="#0d1117",fg="#58a6ff",
-                 font=("TkDefaultFont",hdr_fnt,"bold")).pack(side=tk.LEFT)
-        app._ov_mode_btn=tk.Button(ov_hdr,text="⊞ Minimap",bg="#21262d",fg="#aaa",
-            relief=tk.FLAT,padx=4,pady=1,font=("TkDefaultFont",max(7,hdr_fnt-1)),
-            command=app._toggle_overview_mode)
-        app._ov_mode_btn.pack(side=tk.RIGHT,padx=4)
-        ov_frame=tk.Frame(right,bg="#0d1117")
-        ov_frame.pack(fill=tk.BOTH,expand=True,padx=4,pady=4)
-        ov_vsb=ttk.Scrollbar(ov_frame,orient=tk.VERTICAL)
-        ov_vsb.pack(side=tk.RIGHT,fill=tk.Y)
-        app.overview=tk.Canvas(ov_frame,bg="#0d1117",relief=tk.FLAT,bd=0,
-                                height=120,yscrollcommand=ov_vsb.set)
-        app.overview.pack(side=tk.LEFT,fill=tk.BOTH,expand=True)
+        vsb.pack(side=tk.RIGHT, fill=tk.Y)
+        app.track_list.pack(fill=tk.BOTH, expand=True)
+        app.track_list.bind("<Double-1>", lambda e: app._open_piano_roll())
+        app.track_list.bind("<Button-3>", app._track_ctx)
+        right = tk.Frame(pane, bg="#0d1117")
+        pane.add(right, minsize=300)
+        ov_hdr = tk.Frame(right, bg="#0d1117")
+        ov_hdr.pack(fill=tk.X, padx=4, pady=(6, 0))
+        tk.Label(
+            ov_hdr,
+            text="OVERVIEW",
+            bg="#0d1117",
+            fg="#58a6ff",
+            font=("TkDefaultFont", hdr_fnt, "bold"),
+        ).pack(side=tk.LEFT)
+        app._ov_mode_btn = tk.Button(
+            ov_hdr,
+            text="⊞ Minimap",
+            bg="#21262d",
+            fg="#aaa",
+            relief=tk.FLAT,
+            padx=4,
+            pady=1,
+            font=("TkDefaultFont", max(7, hdr_fnt - 1)),
+            command=app._toggle_overview_mode,
+        )
+        app._ov_mode_btn.pack(side=tk.RIGHT, padx=4)
+        ov_frame = tk.Frame(right, bg="#0d1117")
+        ov_frame.pack(fill=tk.BOTH, expand=True, padx=4, pady=4)
+        ov_vsb = ttk.Scrollbar(ov_frame, orient=tk.VERTICAL)
+        ov_vsb.pack(side=tk.RIGHT, fill=tk.Y)
+        app.overview = tk.Canvas(
+            ov_frame,
+            bg="#0d1117",
+            relief=tk.FLAT,
+            bd=0,
+            height=120,
+            yscrollcommand=ov_vsb.set,
+        )
+        app.overview.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         ov_vsb.configure(command=app.overview.yview)
-        app.overview.bind("<Configure>",app._on_overview_configure)
-        app.overview.bind("<Double-1>",app._overview_dbl_click)
-        app.overview.bind("<ButtonPress-1>",app._overview_btn_press)
-        app.overview.bind("<B1-Motion>",app._overview_drag_motion)
-        app.overview.bind("<ButtonRelease-1>",app._overview_btn_release)
-        app.overview.bind("<MouseWheel>",
-            lambda e:app.overview.yview_scroll(-1 if e.delta>0 else 1,"units"))
+        app.overview.bind("<Configure>", app._on_overview_configure)
+        app.overview.bind("<Double-1>", app._overview_dbl_click)
+        app.overview.bind("<ButtonPress-1>", app._overview_btn_press)
+        app.overview.bind("<B1-Motion>", app._overview_drag_motion)
+        app.overview.bind("<ButtonRelease-1>", app._overview_btn_release)
+        app.overview.bind(
+            "<MouseWheel>",
+            lambda e: app.overview.yview_scroll(-1 if e.delta > 0 else 1, "units"),
+        )
 
 
 class MixerView(tk.Frame):
-    def __init__(self,parent,app):
+    def __init__(self, parent, app):
         super().__init__(parent, bg="#1a1a2e")
-        self.app=app; self._strips=[]; self._zoom=1.0; self._build()
+        self.app = app
+        self._strips = []
+        self._zoom = 1.0
+        self._build()
 
     def zoom_in(self):
         self._zoom = min(2.0, self._zoom * 1.2)
@@ -5701,12 +6597,15 @@ class MixerView(tk.Frame):
         self._build()
 
     def _build(self):
-        for w in self.winfo_children(): w.destroy(); self._strips.clear()
+        for w in self.winfo_children():
+            w.destroy()
+            self._strips.clear()
         z = self._zoom
-        fnt   = max(7, int(9 * z))
+        fnt = max(7, int(9 * z))
         fnt_b = max(7, int(9 * z))
         scale_len = int(75 * z)
-        fr=tk.Frame(self,bg="#1a1a2e"); fr.pack(fill=tk.BOTH,expand=True,padx=4,pady=4)
+        fr = tk.Frame(self, bg="#1a1a2e")
+        fr.pack(fill=tk.BOTH, expand=True, padx=4, pady=4)
         # v22v: use visible_tracks() so empty file-meta tracks don't clutter
         # the mixer — same filtering/renumbering as the track list panel.
         # mk_nm/mk_v/mk_m/mk_s callbacks below all close over the ORIGINAL
@@ -5714,88 +6613,212 @@ class MixerView(tk.Frame):
         # affect the correct underlying track regardless of display filtering.
         _visible = self.app.visible_tracks()
         if not _visible:
-            tk.Label(fr,text="No tracks",bg="#1a1a2e",fg="#888",
-                     font=("TkDefaultFont",fnt)).pack(side=tk.LEFT,padx=20,pady=20)
-        for i,tr,display_name in _visible:
-            col=tk.Frame(fr,bg="#16213e",relief=tk.RAISED,bd=1,padx=4,pady=4)
-            col.pack(side=tk.LEFT,fill=tk.Y,padx=2)
-            nv=tk.StringVar(value=display_name)
-            def mk_nm(idx,v):
-                def cb(*_): self.app.song.tracks[idx].name=v.get(); self.app.song.modified=True; self.app._refresh_track_list()
+            tk.Label(
+                fr,
+                text="No tracks",
+                bg="#1a1a2e",
+                fg="#888",
+                font=("TkDefaultFont", fnt),
+            ).pack(side=tk.LEFT, padx=20, pady=20)
+        for i, tr, display_name in _visible:
+            col = tk.Frame(fr, bg="#16213e", relief=tk.RAISED, bd=1, padx=4, pady=4)
+            col.pack(side=tk.LEFT, fill=tk.Y, padx=2)
+            nv = tk.StringVar(value=display_name)
+
+            def mk_nm(idx, v):
+                def cb(*_):
+                    self.app.song.tracks[idx].name = v.get()
+                    self.app.song.modified = True
+                    self.app._refresh_track_list()
+
                 return cb
-            tk.Entry(col,textvariable=nv,width=10,bg="#0f3460",fg="white",
-                     insertbackground="white",font=("TkDefaultFont",fnt)).pack()
-            nv.trace_add("write",mk_nm(i,nv))
+
+            tk.Entry(
+                col,
+                textvariable=nv,
+                width=10,
+                bg="#0f3460",
+                fg="white",
+                insertbackground="white",
+                font=("TkDefaultFont", fnt),
+            ).pack()
+            nv.trace_add("write", mk_nm(i, nv))
 
             # ── Volume slider beside Mute/Solo/notes (was stacked below —
             #    this cuts ~60-70px off each strip's total height) ────────────
-            row=tk.Frame(col,bg="#16213e"); row.pack()
-            vcol=tk.Frame(row,bg="#16213e"); vcol.pack(side=tk.LEFT)
-            tk.Label(vcol,text="Vol",bg="#16213e",fg="white",font=("TkDefaultFont",fnt)).pack()
-            vv=tk.IntVar(value=tr.volume)
-            def mk_v(idx,v):
-                def cb(*_): self.app.song.tracks[idx].volume=v.get(); self.app.song.modified=True
-                return cb
-            tk.Scale(vcol,from_=127,to=0,variable=vv,orient=tk.VERTICAL,bg="#16213e",fg="white",
-                     troughcolor="#0f3460",highlightthickness=0,length=scale_len,
-                     command=mk_v(i,vv)).pack()
+            row = tk.Frame(col, bg="#16213e")
+            row.pack()
+            vcol = tk.Frame(row, bg="#16213e")
+            vcol.pack(side=tk.LEFT)
+            tk.Label(
+                vcol, text="Vol", bg="#16213e", fg="white", font=("TkDefaultFont", fnt)
+            ).pack()
+            vv = tk.IntVar(value=tr.volume)
 
-            msn=tk.Frame(row,bg="#16213e"); msn.pack(side=tk.LEFT,padx=(4,0),fill=tk.Y)
-            mv=tk.BooleanVar(value=tr.mute); sv=tk.BooleanVar(value=tr.solo)
-            def mk_m(idx,v):
-                def cb(): self.app.song.tracks[idx].mute=v.get()
-                return cb
-            def mk_s(idx,v):
-                def cb(): self.app.song.tracks[idx].solo=v.get()
-                return cb
-            tk.Checkbutton(msn,text="Mute",variable=mv,bg="#16213e",fg="white",selectcolor="#333",
-                           activebackground="#16213e",font=("TkDefaultFont",fnt),
-                           command=mk_m(i,mv)).pack(anchor="w")
-            tk.Checkbutton(msn,text="Solo",variable=sv,bg="#16213e",fg="#fc0",selectcolor="#333",
-                           activebackground="#16213e",font=("TkDefaultFont",fnt),
-                           command=mk_s(i,sv)).pack(anchor="w")
-            tk.Label(msn,text=f"{tr.note_count()}\nnotes",bg="#16213e",fg="#88aacc",
-                     font=("TkFixedFont",max(6,fnt-1)),justify=tk.LEFT).pack(anchor="w",pady=(4,0))
+            def mk_v(idx, v):
+                def cb(*_):
+                    self.app.song.tracks[idx].volume = v.get()
+                    self.app.song.modified = True
 
-            tk.Label(col,text="Instr",bg="#16213e",fg="white",font=("TkDefaultFont",fnt)).pack()
-            pv=tk.StringVar(value=GM_INSTRUMENTS[tr.program])
-            def mk_p(idx,v):
-                def cb(val): self.app.song.tracks[idx].program=GM_INSTRUMENTS.index(val); self.app.song.modified=True
                 return cb
-            cw=ttk.Combobox(col,textvariable=pv,values=GM_INSTRUMENTS,width=12,state="readonly")
-            try: cw.configure(font=("TkDefaultFont",fnt))
-            except Exception: pass
-            cw.pack(); cw.bind("<<ComboboxSelected>>",lambda e,idx=i,v=pv:mk_p(idx,v)(v.get()))
-            tk.Label(col,text="Ch",bg="#16213e",fg="white",font=("TkDefaultFont",fnt)).pack()
-            cv=tk.IntVar(value=tr.channel+1)
-            def mk_c(idx,v):
-                def cb(*_): self.app.song.tracks[idx].channel=v.get()-1; self.app.song.modified=True
+
+            tk.Scale(
+                vcol,
+                from_=127,
+                to=0,
+                variable=vv,
+                orient=tk.VERTICAL,
+                bg="#16213e",
+                fg="white",
+                troughcolor="#0f3460",
+                highlightthickness=0,
+                length=scale_len,
+                command=mk_v(i, vv),
+            ).pack()
+
+            msn = tk.Frame(row, bg="#16213e")
+            msn.pack(side=tk.LEFT, padx=(4, 0), fill=tk.Y)
+            mv = tk.BooleanVar(value=tr.mute)
+            sv = tk.BooleanVar(value=tr.solo)
+
+            def mk_m(idx, v):
+                def cb():
+                    self.app.song.tracks[idx].mute = v.get()
+
                 return cb
-            tk.Spinbox(col,from_=1,to=16,textvariable=cv,width=4,bg="#0f3460",fg="white",
-                       buttonbackground="#0f3460",font=("TkDefaultFont",fnt)).pack()
-            cv.trace_add("write",mk_c(i,cv))
-            self._strips.append((nv,vv,pv,cv,mv,sv))
+
+            def mk_s(idx, v):
+                def cb():
+                    self.app.song.tracks[idx].solo = v.get()
+
+                return cb
+
+            tk.Checkbutton(
+                msn,
+                text="Mute",
+                variable=mv,
+                bg="#16213e",
+                fg="white",
+                selectcolor="#333",
+                activebackground="#16213e",
+                font=("TkDefaultFont", fnt),
+                command=mk_m(i, mv),
+            ).pack(anchor="w")
+            tk.Checkbutton(
+                msn,
+                text="Solo",
+                variable=sv,
+                bg="#16213e",
+                fg="#fc0",
+                selectcolor="#333",
+                activebackground="#16213e",
+                font=("TkDefaultFont", fnt),
+                command=mk_s(i, sv),
+            ).pack(anchor="w")
+            tk.Label(
+                msn,
+                text=f"{tr.note_count()}\nnotes",
+                bg="#16213e",
+                fg="#88aacc",
+                font=("TkFixedFont", max(6, fnt - 1)),
+                justify=tk.LEFT,
+            ).pack(anchor="w", pady=(4, 0))
+
+            tk.Label(
+                col, text="Instr", bg="#16213e", fg="white", font=("TkDefaultFont", fnt)
+            ).pack()
+            pv = tk.StringVar(value=GM_INSTRUMENTS[tr.program])
+
+            def mk_p(idx, v):
+                def cb(val):
+                    self.app.song.tracks[idx].program = GM_INSTRUMENTS.index(val)
+                    self.app.song.modified = True
+
+                return cb
+
+            cw = ttk.Combobox(
+                col, textvariable=pv, values=GM_INSTRUMENTS, width=12, state="readonly"
+            )
+            try:
+                cw.configure(font=("TkDefaultFont", fnt))
+            except Exception:
+                pass
+            cw.pack()
+            cw.bind(
+                "<<ComboboxSelected>>", lambda e, idx=i, v=pv: mk_p(idx, v)(v.get())
+            )
+            tk.Label(
+                col, text="Ch", bg="#16213e", fg="white", font=("TkDefaultFont", fnt)
+            ).pack()
+            cv = tk.IntVar(value=tr.channel + 1)
+
+            def mk_c(idx, v):
+                def cb(*_):
+                    self.app.song.tracks[idx].channel = v.get() - 1
+                    self.app.song.modified = True
+
+                return cb
+
+            tk.Spinbox(
+                col,
+                from_=1,
+                to=16,
+                textvariable=cv,
+                width=4,
+                bg="#0f3460",
+                fg="white",
+                buttonbackground="#0f3460",
+                font=("TkDefaultFont", fnt),
+            ).pack()
+            cv.trace_add("write", mk_c(i, cv))
+            self._strips.append((nv, vv, pv, cv, mv, sv))
 
         # ── Midi Thru strip — rightmost, fixed (matches original Studio4 layout) ─
-        thru=tk.Frame(fr,bg="#0f1f3d",relief=tk.RAISED,bd=1,padx=6,pady=4)
-        thru.pack(side=tk.LEFT,fill=tk.Y,padx=(12,2))
-        tk.Label(thru,text="Midi Thru",bg="#0f1f3d",fg="#58a6ff",
-                 font=("TkDefaultFont",fnt_b,"bold")).pack(pady=(0,4))
-        tk.Checkbutton(thru,text="Enabled",variable=self.app.midi_thru_enabled,
-                       bg="#0f1f3d",fg="white",selectcolor="#333",
-                       activebackground="#0f1f3d",font=("TkDefaultFont",fnt)).pack(pady=2)
-        tk.Label(thru,text="Volume",bg="#0f1f3d",fg="white",font=("TkDefaultFont",fnt)).pack()
-        tk.Scale(thru,from_=127,to=0,variable=self.app.midi_thru_volume,
-                 orient=tk.VERTICAL,bg="#0f1f3d",fg="white",
-                 troughcolor="#0a1730",highlightthickness=0,length=scale_len).pack()
+        thru = tk.Frame(fr, bg="#0f1f3d", relief=tk.RAISED, bd=1, padx=6, pady=4)
+        thru.pack(side=tk.LEFT, fill=tk.Y, padx=(12, 2))
+        tk.Label(
+            thru,
+            text="Midi Thru",
+            bg="#0f1f3d",
+            fg="#58a6ff",
+            font=("TkDefaultFont", fnt_b, "bold"),
+        ).pack(pady=(0, 4))
+        tk.Checkbutton(
+            thru,
+            text="Enabled",
+            variable=self.app.midi_thru_enabled,
+            bg="#0f1f3d",
+            fg="white",
+            selectcolor="#333",
+            activebackground="#0f1f3d",
+            font=("TkDefaultFont", fnt),
+        ).pack(pady=2)
+        tk.Label(
+            thru, text="Volume", bg="#0f1f3d", fg="white", font=("TkDefaultFont", fnt)
+        ).pack()
+        tk.Scale(
+            thru,
+            from_=127,
+            to=0,
+            variable=self.app.midi_thru_volume,
+            orient=tk.VERTICAL,
+            bg="#0f1f3d",
+            fg="white",
+            troughcolor="#0a1730",
+            highlightthickness=0,
+            length=scale_len,
+        ).pack()
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Song Settings dialog
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 class SongSettingsDlg(tk.Toplevel):
-    def __init__(self,parent,app):
-        super().__init__(parent); self.app=app
+    def __init__(self, parent, app):
+        super().__init__(parent)
+        self.app = app
         self.title("Song Settings")
         # v22ze-46: resizable + always-on-top per presentation request --
         # also reported as too tall for the screen on some displays.
@@ -5807,31 +6830,61 @@ class SongSettingsDlg(tk.Toplevel):
         self.attributes("-topmost", True)
         self.grab_set()
         content = _make_scrollable(self, bg=self.cget("bg"))
-        s=app.song
-        tk.Label(content,text="Tempo (BPM):").grid(row=0,column=0,padx=8,pady=4,sticky="w")
-        self.bpm_var=tk.IntVar(value=s.bpm)
-        tk.Spinbox(content,from_=20,to=300,textvariable=self.bpm_var,width=6).grid(row=0,column=1,pady=4)
-        tk.Label(content,text="Time Signature:").grid(row=1,column=0,padx=8,pady=4,sticky="w")
-        tf=tk.Frame(content); tf.grid(row=1,column=1,pady=4)
-        self.ts_num=tk.IntVar(value=s.time_sig_num); self.ts_den=tk.IntVar(value=s.time_sig_den)
-        tk.Spinbox(tf,from_=1,to=16,textvariable=self.ts_num,width=3).pack(side=tk.LEFT)
-        tk.Label(tf,text=" / ").pack(side=tk.LEFT)
-        ttk.Combobox(tf,textvariable=self.ts_den,values=[1,2,4,8,16,32],width=4,state="readonly").pack(side=tk.LEFT)
-        tk.Label(content,text="Ticks per Beat:").grid(row=2,column=0,padx=8,pady=4,sticky="w")
-        self.tpb_var=tk.IntVar(value=s.ticks_per_beat)
-        tk.Spinbox(content,from_=48,to=960,textvariable=self.tpb_var,increment=48,width=6).grid(row=2,column=1)
-        bf=tk.Frame(content); bf.grid(row=3,column=0,columnspan=2,pady=8)
-        tk.Button(bf,text="OK",width=8,command=self._ok).pack(side=tk.LEFT,padx=4)
-        tk.Button(bf,text="Cancel",width=8,command=self.destroy).pack(side=tk.LEFT,padx=4)
+        s = app.song
+        tk.Label(content, text="Tempo (BPM):").grid(
+            row=0, column=0, padx=8, pady=4, sticky="w"
+        )
+        self.bpm_var = tk.IntVar(value=s.bpm)
+        tk.Spinbox(content, from_=20, to=300, textvariable=self.bpm_var, width=6).grid(
+            row=0, column=1, pady=4
+        )
+        tk.Label(content, text="Time Signature:").grid(
+            row=1, column=0, padx=8, pady=4, sticky="w"
+        )
+        tf = tk.Frame(content)
+        tf.grid(row=1, column=1, pady=4)
+        self.ts_num = tk.IntVar(value=s.time_sig_num)
+        self.ts_den = tk.IntVar(value=s.time_sig_den)
+        tk.Spinbox(tf, from_=1, to=16, textvariable=self.ts_num, width=3).pack(
+            side=tk.LEFT
+        )
+        tk.Label(tf, text=" / ").pack(side=tk.LEFT)
+        ttk.Combobox(
+            tf,
+            textvariable=self.ts_den,
+            values=[1, 2, 4, 8, 16, 32],
+            width=4,
+            state="readonly",
+        ).pack(side=tk.LEFT)
+        tk.Label(content, text="Ticks per Beat:").grid(
+            row=2, column=0, padx=8, pady=4, sticky="w"
+        )
+        self.tpb_var = tk.IntVar(value=s.ticks_per_beat)
+        tk.Spinbox(
+            content, from_=48, to=960, textvariable=self.tpb_var, increment=48, width=6
+        ).grid(row=2, column=1)
+        bf = tk.Frame(content)
+        bf.grid(row=3, column=0, columnspan=2, pady=8)
+        tk.Button(bf, text="OK", width=8, command=self._ok).pack(side=tk.LEFT, padx=4)
+        tk.Button(bf, text="Cancel", width=8, command=self.destroy).pack(
+            side=tk.LEFT, padx=4
+        )
 
     def _ok(self):
-        s=self.app.song; s.bpm=self.bpm_var.get()
+        s = self.app.song
+        s.bpm = self.bpm_var.get()
         s.set_time_signature(self.ts_num.get(), self.ts_den.get())
-        s.ticks_per_beat=self.tpb_var.get(); s.modified=True
-        self.app._update_title(); self.app._update_status(); self.destroy()
+        s.ticks_per_beat = self.tpb_var.get()
+        s.modified = True
+        self.app._update_title()
+        self.app._update_status()
+        self.destroy()
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Startup Splash Screen
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 class SplashScreen(tk.Toplevel):
     """Startup splash — stays open until the user explicitly closes it.
@@ -5865,7 +6918,7 @@ class SplashScreen(tk.Toplevel):
         try:
             self.wm_attributes("-type", "splash")
         except tk.TclError:
-            self.overrideredirect(True)       # no title bar / borders (fallback)
+            self.overrideredirect(True)  # no title bar / borders (fallback)
         self.configure(bg="#0d1117")
         self.attributes("-topmost", True)
 
@@ -5883,12 +6936,12 @@ class SplashScreen(tk.Toplevel):
 
         # ── Dismiss bindings ───────────────────────────────────────────────────
         self.bind("<Button-1>", lambda e: self._dismiss())
-        self.bind("<Key>",      lambda e: self._dismiss())
+        self.bind("<Key>", lambda e: self._dismiss())
 
     def _position_on_parent_screen(self, root):
         """Centre on the monitor that currently contains the main window."""
         try:
-            root.update()           # ensure root geometry is up-to-date
+            root.update()  # ensure root geometry is up-to-date
             self.update_idletasks()
 
             # Root window position and size in virtual-desktop coordinates
@@ -5917,14 +6970,15 @@ class SplashScreen(tk.Toplevel):
             self.geometry(f"{w}x{h}+{x}+{y}")
             self.lift()
         except Exception:
-            pass   # if anything fails, splash just appears wherever Tk put it
+            pass  # if anything fails, splash just appears wherever Tk put it
 
     def _build(self):
         import webbrowser
-        BG    = "#0d1117"
-        BLUE  = "#58a6ff"
+
+        BG = "#0d1117"
+        BLUE = "#58a6ff"
         GREEN = "#3fb950"
-        GOLD  = "#d29922"
+        GOLD = "#d29922"
         MUTED = "#8b949e"
         BDCOL = "#21262d"
 
@@ -5933,97 +6987,143 @@ class SplashScreen(tk.Toplevel):
         inner = tk.Frame(outer, bg=BG, padx=40, pady=30)
         inner.pack()
 
-        tk.Label(inner, text="🎹",
-                 bg=BG, fg=BLUE,
-                 font=("TkDefaultFont", 38)).pack()
+        tk.Label(inner, text="🎹", bg=BG, fg=BLUE, font=("TkDefaultFont", 38)).pack()
 
-        tk.Label(inner, text="Midi-Studio",
-                 bg=BG, fg=BLUE,
-                 font=("TkDefaultFont", 24, "bold")).pack(pady=(6, 2))
+        tk.Label(
+            inner,
+            text="Midi-Studio",
+            bg=BG,
+            fg=BLUE,
+            font=("TkDefaultFont", 24, "bold"),
+        ).pack(pady=(6, 2))
 
-        tk.Label(inner,
-                 text="Work-Alike — no code from the original",
-                 bg=BG, fg=MUTED,
-                 font=("TkDefaultFont", 9, "italic")).pack()
+        tk.Label(
+            inner,
+            text="Work-Alike — no code from the original",
+            bg=BG,
+            fg=MUTED,
+            font=("TkDefaultFont", 9, "italic"),
+        ).pack()
 
-        tk.Label(inner,
-                 text="MidiSoft Studio4 created by Raymond Bily",
-                 bg=BG, fg=MUTED,
-                 font=("TkDefaultFont", 8)).pack(pady=(1, 0))
+        tk.Label(
+            inner,
+            text="MidiSoft Studio4 created by Raymond Bily",
+            bg=BG,
+            fg=MUTED,
+            font=("TkDefaultFont", 8),
+        ).pack(pady=(1, 0))
 
         _credit_lf = tk.Frame(inner, bg=BG)
         _credit_lf.pack(pady=(2, 0))
-        for txt, url in [("MidiSoft.com", "https://midisoft.com/"),
-                          ("MIDISOFT Studio 4.0 @ vetusware.com",
-                           "https://vetusware.com/download/MIDISOFT%20Studio%204.0%204.0/?id=5666")]:
-            _clk = tk.Label(_credit_lf, text=txt, bg=BG, fg=MUTED,
-                            font=("TkDefaultFont", 7, "underline"),
-                            cursor="hand2")
+        for txt, url in [
+            ("MidiSoft.com", "https://midisoft.com/"),
+            (
+                "MIDISOFT Studio 4.0 @ vetusware.com",
+                "https://vetusware.com/download/MIDISOFT%20Studio%204.0%204.0/?id=5666",
+            ),
+        ]:
+            _clk = tk.Label(
+                _credit_lf,
+                text=txt,
+                bg=BG,
+                fg=MUTED,
+                font=("TkDefaultFont", 7, "underline"),
+                cursor="hand2",
+            )
             _clk.pack()
             _clk.bind("<Button-1>", lambda e, u=url: webbrowser.open(u))
             _clk.bind("<Enter>", lambda e, w=_clk: w.configure(fg=BLUE))
             _clk.bind("<Leave>", lambda e, w=_clk: w.configure(fg=MUTED))
 
-        tk.Label(inner,
-                 text=f"Version {APP_VERSION}  ·  Python / tkinter / mido",
-                 bg=BG, fg=GREEN,
-                 font=("TkDefaultFont", 9)).pack(pady=(4, 8))
+        tk.Label(
+            inner,
+            text=f"Version {APP_VERSION}  ·  Python / tkinter / mido",
+            bg=BG,
+            fg=GREEN,
+            font=("TkDefaultFont", 9),
+        ).pack(pady=(4, 8))
 
-        tk.Label(inner, text="A collaboration:",
-                 bg=BG, fg=MUTED,
-                 font=("TkDefaultFont", 8)).pack()
-        tk.Label(inner,
-                 text="Michael F. Winthrop  &  Claude Sonnet 4.6",
-                 bg=BG, fg=GOLD,
-                 font=("TkDefaultFont", 10, "bold")).pack(pady=(0, 20))
+        tk.Label(
+            inner, text="A collaboration:", bg=BG, fg=MUTED, font=("TkDefaultFont", 8)
+        ).pack()
+        tk.Label(
+            inner,
+            text="Michael F. Winthrop  &  Claude Sonnet 4.6",
+            bg=BG,
+            fg=GOLD,
+            font=("TkDefaultFont", 10, "bold"),
+        ).pack(pady=(0, 20))
 
         tk.Frame(inner, bg=BDCOL, height=1).pack(fill=tk.X)
 
-        tk.Label(inner,
-                 text="Supporting the Sterling Lions Club",
-                 bg=BG, fg=GOLD,
-                 font=("TkDefaultFont", 11, "italic")).pack(pady=(16, 6))
+        tk.Label(
+            inner,
+            text="Supporting the Sterling Lions Club",
+            bg=BG,
+            fg=GOLD,
+            font=("TkDefaultFont", 11, "italic"),
+        ).pack(pady=(16, 6))
 
         lf = tk.Frame(inner, bg=BG)
         lf.pack()
-        for txt, url in [("🦁  Make a Donation", LIONS_DONATE_URL),
-                         ("🌐  https://e-clubhouse.org/sites/sterlingva", LIONS_WEBSITE_URL)]:
-            lk = tk.Label(lf, text=txt, bg=BG, fg=BLUE,
-                          font=("TkDefaultFont", 10, "underline"),
-                          cursor="hand2")
+        for txt, url in [
+            ("🦁  Make a Donation", LIONS_DONATE_URL),
+            ("🌐  https://e-clubhouse.org/sites/sterlingva", LIONS_WEBSITE_URL),
+        ]:
+            lk = tk.Label(
+                lf,
+                text=txt,
+                bg=BG,
+                fg=BLUE,
+                font=("TkDefaultFont", 10, "underline"),
+                cursor="hand2",
+            )
             lk.pack(pady=1)
-            lk.bind("<Button-1>",
-                    lambda e, u=url: (webbrowser.open(u), self._dismiss()))
+            lk.bind(
+                "<Button-1>", lambda e, u=url: (webbrowser.open(u), self._dismiss())
+            )
             lk.bind("<Enter>", lambda e, w=lk: w.configure(fg="#79c0ff"))
             lk.bind("<Leave>", lambda e, w=lk: w.configure(fg=BLUE))
 
         tk.Frame(inner, bg=BDCOL, height=1).pack(fill=tk.X, pady=(16, 8))
 
-        midi_ok  = MIDI_OUT_OK
+        midi_ok = MIDI_OUT_OK
         midi_txt = "MIDI ready" if midi_ok else "⚠  No MIDI output — start TiMidity"
         midi_col = GREEN if midi_ok else "#f78166"
-        tk.Label(inner, text=midi_txt,
-                 bg=BG, fg=midi_col,
-                 font=("TkDefaultFont", 9)).pack()
+        tk.Label(
+            inner, text=midi_txt, bg=BG, fg=midi_col, font=("TkDefaultFont", 9)
+        ).pack()
 
-        tk.Label(inner,
-                 text="Click anywhere or press any key to continue",
-                 bg=BG, fg=MUTED,
-                 font=("TkDefaultFont", 8)).pack(pady=(6, 4))
+        tk.Label(
+            inner,
+            text="Click anywhere or press any key to continue",
+            bg=BG,
+            fg=MUTED,
+            font=("TkDefaultFont", 8),
+        ).pack(pady=(6, 4))
 
-        tk.Button(inner, text="Continue  ▶",
-                  bg="#21262d", fg=BLUE,
-                  activebackground="#30363d", activeforeground="#79c0ff",
-                  relief=tk.FLAT, bd=0, padx=16, pady=6,
-                  font=("TkDefaultFont", 10, "bold"),
-                  cursor="hand2",
-                  command=self._dismiss).pack(pady=(4, 0))
+        tk.Button(
+            inner,
+            text="Continue  ▶",
+            bg="#21262d",
+            fg=BLUE,
+            activebackground="#30363d",
+            activeforeground="#79c0ff",
+            relief=tk.FLAT,
+            bd=0,
+            padx=16,
+            pady=6,
+            font=("TkDefaultFont", 10, "bold"),
+            cursor="hand2",
+            command=self._dismiss,
+        ).pack(pady=(4, 0))
 
     def _dismiss(self):
         try:
             self.destroy()
         except Exception:
             pass
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 class QuantizeDlg(tk.Toplevel):
@@ -6053,15 +7153,24 @@ class QuantizeDlg(tk.Toplevel):
     # ── UI construction ───────────────────────────────────────────────────────
     def _build(self):
         song = self.app.song
-        BG   = "#0d1117"
-        FG   = "white"
-        LBG  = "#161b22"      # label-frame bg
-        pad  = dict(padx=12, pady=6)
-        lf_kw = dict(bg=LBG, fg="#58a6ff",
-                     font=("TkDefaultFont", 9, "bold"),
-                     relief=tk.GROOVE, bd=1)
-        rb_kw = dict(bg=LBG, fg=FG, selectcolor="#21262d",
-                     activebackground=LBG, activeforeground=FG)
+        BG = "#0d1117"
+        FG = "white"
+        LBG = "#161b22"  # label-frame bg
+        pad = dict(padx=12, pady=6)
+        lf_kw = dict(
+            bg=LBG,
+            fg="#58a6ff",
+            font=("TkDefaultFont", 9, "bold"),
+            relief=tk.GROOVE,
+            bd=1,
+        )
+        rb_kw = dict(
+            bg=LBG,
+            fg=FG,
+            selectcolor="#21262d",
+            activebackground=LBG,
+            activeforeground=FG,
+        )
         # v22ze-57: content lives in a scrollable inner frame (not `self`
         # directly) so shrinking this window below its content shows a
         # scrollbar on the right edge instead of clipping controls.
@@ -6071,39 +7180,65 @@ class QuantizeDlg(tk.Toplevel):
         tf = tk.LabelFrame(content, text=" Target ", **lf_kw)
         tf.pack(fill=tk.X, **pad)
         self._target = tk.StringVar(value="armed")
-        armed_name = (song.tracks[self.app._rec_armed].name
-                      if self.app._rec_armed is not None
-                         and self.app._rec_armed < len(song.tracks)
-                      else "—")
-        tk.Radiobutton(tf, text=f"Armed track  ({armed_name})",
-                       variable=self._target, value="armed", **rb_kw).pack(anchor="w", padx=6, pady=2)
-        tk.Radiobutton(tf, text="All tracks",
-                       variable=self._target, value="all",   **rb_kw).pack(anchor="w", padx=6)
+        armed_name = (
+            song.tracks[self.app._rec_armed].name
+            if self.app._rec_armed is not None
+            and self.app._rec_armed < len(song.tracks)
+            else "—"
+        )
+        tk.Radiobutton(
+            tf,
+            text=f"Armed track  ({armed_name})",
+            variable=self._target,
+            value="armed",
+            **rb_kw,
+        ).pack(anchor="w", padx=6, pady=2)
+        tk.Radiobutton(
+            tf, text="All tracks", variable=self._target, value="all", **rb_kw
+        ).pack(anchor="w", padx=6)
 
         # ── Measure Range ─────────────────────────────────────────────────────
         mf = tk.LabelFrame(content, text=" Measure Range ", **lf_kw)
         mf.pack(fill=tk.X, **pad)
         self._range = tk.StringVar(value="all")
-        tk.Radiobutton(mf, text="All measures",
-                       variable=self._range, value="all",
-                       command=self._sync_range, **rb_kw).pack(anchor="w", padx=6, pady=2)
+        tk.Radiobutton(
+            mf,
+            text="All measures",
+            variable=self._range,
+            value="all",
+            command=self._sync_range,
+            **rb_kw,
+        ).pack(anchor="w", padx=6, pady=2)
 
-        rf = tk.Frame(mf, bg=LBG); rf.pack(anchor="w", padx=6, pady=(0, 6))
-        tk.Radiobutton(rf, text="From measure",
-                       variable=self._range, value="range",
-                       command=self._sync_range, **rb_kw).pack(side=tk.LEFT)
+        rf = tk.Frame(mf, bg=LBG)
+        rf.pack(anchor="w", padx=6, pady=(0, 6))
+        tk.Radiobutton(
+            rf,
+            text="From measure",
+            variable=self._range,
+            value="range",
+            command=self._sync_range,
+            **rb_kw,
+        ).pack(side=tk.LEFT)
 
         total_meas = max(1, int(song.total_ticks() // song.ticks_per_measure()))
         self._m_from = tk.IntVar(value=1)
-        self._m_to   = tk.IntVar(value=total_meas)
-        spin_kw = dict(bg="#21262d", fg=FG, buttonbackground="#21262d",
-                       insertbackground=FG, width=5)
-        self._sp_from = tk.Spinbox(rf, from_=1, to=9999,
-                                   textvariable=self._m_from, **spin_kw)
+        self._m_to = tk.IntVar(value=total_meas)
+        spin_kw = dict(
+            bg="#21262d",
+            fg=FG,
+            buttonbackground="#21262d",
+            insertbackground=FG,
+            width=5,
+        )
+        self._sp_from = tk.Spinbox(
+            rf, from_=1, to=9999, textvariable=self._m_from, **spin_kw
+        )
         self._sp_from.pack(side=tk.LEFT, padx=(4, 2))
         tk.Label(rf, text="to", bg=LBG, fg=FG).pack(side=tk.LEFT)
-        self._sp_to = tk.Spinbox(rf, from_=1, to=9999,
-                                 textvariable=self._m_to, **spin_kw)
+        self._sp_to = tk.Spinbox(
+            rf, from_=1, to=9999, textvariable=self._m_to, **spin_kw
+        )
         self._sp_to.pack(side=tk.LEFT, padx=(2, 0))
 
         # ── Division ──────────────────────────────────────────────────────────
@@ -6111,49 +7246,78 @@ class QuantizeDlg(tk.Toplevel):
         df.pack(fill=tk.X, **pad)
         default_div = getattr(self.app, "quantize_division", 8) or 8
         self._div = tk.IntVar(value=default_div)
-        for lbl, val in [("Quarter notes  (1/4)", 4),
-                         ("Eighth notes   (1/8)", 8),
-                         ("Sixteenth      (1/16)", 16),
-                         ("Thirty-second  (1/32)", 32)]:
-            tk.Radiobutton(df, text=lbl, variable=self._div, value=val,
-                           **rb_kw).pack(anchor="w", padx=6, pady=1)
+        for lbl, val in [
+            ("Quarter notes  (1/4)", 4),
+            ("Eighth notes   (1/8)", 8),
+            ("Sixteenth      (1/16)", 16),
+            ("Thirty-second  (1/32)", 32),
+        ]:
+            tk.Radiobutton(df, text=lbl, variable=self._div, value=val, **rb_kw).pack(
+                anchor="w", padx=6, pady=1
+            )
 
         # ── Strength ──────────────────────────────────────────────────────────
         sf = tk.LabelFrame(content, text=" Snap Strength ", **lf_kw)
         sf.pack(fill=tk.X, **pad)
         self._strength = tk.DoubleVar(value=1.0)
-        for lbl, val in [("100%  — full snap", 1.0),
-                         ("75%   — slight humanise", 0.75),
-                         ("50%   — half-way (humanise)", 0.50)]:
-            tk.Radiobutton(sf, text=lbl, variable=self._strength, value=val,
-                           **rb_kw).pack(anchor="w", padx=6, pady=1)
+        for lbl, val in [
+            ("100%  — full snap", 1.0),
+            ("75%   — slight humanise", 0.75),
+            ("50%   — half-way (humanise)", 0.50),
+        ]:
+            tk.Radiobutton(
+                sf, text=lbl, variable=self._strength, value=val, **rb_kw
+            ).pack(anchor="w", padx=6, pady=1)
 
         # ── Grace-note Cleanup ────────────────────────────────────────────────
         gf = tk.LabelFrame(content, text=" Grace Note Cleanup ", **lf_kw)
         gf.pack(fill=tk.X, **pad)
-        tk.Label(gf, text="Remove notes shorter than:",
-                 bg=LBG, fg="#8b949e",
-                 font=("TkDefaultFont", 8)).pack(anchor="w", padx=6)
-        gr = tk.Frame(gf, bg=LBG); gr.pack(anchor="w", padx=6, pady=(2, 6))
+        tk.Label(
+            gf,
+            text="Remove notes shorter than:",
+            bg=LBG,
+            fg="#8b949e",
+            font=("TkDefaultFont", 8),
+        ).pack(anchor="w", padx=6)
+        gr = tk.Frame(gf, bg=LBG)
+        gr.pack(anchor="w", padx=6, pady=(2, 6))
         default_grace = getattr(self.app, "grace_cleanup_ms", 40)
         self._grace = tk.IntVar(value=default_grace)
-        for lbl, val in [("Off", 0), ("20 ms", 20), ("40 ms", 40),
-                         ("60 ms", 60), ("80 ms", 80)]:
-            tk.Radiobutton(gr, text=lbl, variable=self._grace, value=val,
-                           **rb_kw).pack(side=tk.LEFT, padx=4)
+        for lbl, val in [
+            ("Off", 0),
+            ("20 ms", 20),
+            ("40 ms", 40),
+            ("60 ms", 60),
+            ("80 ms", 80),
+        ]:
+            tk.Radiobutton(gr, text=lbl, variable=self._grace, value=val, **rb_kw).pack(
+                side=tk.LEFT, padx=4
+            )
 
         # ── Buttons ───────────────────────────────────────────────────────────
-        bf = tk.Frame(content, bg=BG); bf.pack(pady=10)
-        btn_kw = dict(relief=tk.FLAT, padx=16, pady=5,
-                      font=("TkDefaultFont", 10))
-        tk.Button(bf, text="Quantize", command=self._ok,
-                  bg="#1f6feb", fg=FG,
-                  activebackground="#388bfd", activeforeground=FG,
-                  **btn_kw).pack(side=tk.LEFT, padx=8)
-        tk.Button(bf, text="Cancel", command=self.destroy,
-                  bg="#21262d", fg=FG,
-                  activebackground="#30363d", activeforeground=FG,
-                  **btn_kw).pack(side=tk.LEFT, padx=8)
+        bf = tk.Frame(content, bg=BG)
+        bf.pack(pady=10)
+        btn_kw = dict(relief=tk.FLAT, padx=16, pady=5, font=("TkDefaultFont", 10))
+        tk.Button(
+            bf,
+            text="Quantize",
+            command=self._ok,
+            bg="#1f6feb",
+            fg=FG,
+            activebackground="#388bfd",
+            activeforeground=FG,
+            **btn_kw,
+        ).pack(side=tk.LEFT, padx=8)
+        tk.Button(
+            bf,
+            text="Cancel",
+            command=self.destroy,
+            bg="#21262d",
+            fg=FG,
+            activebackground="#30363d",
+            activeforeground=FG,
+            **btn_kw,
+        ).pack(side=tk.LEFT, padx=8)
 
         self._sync_range()
 
@@ -6166,19 +7330,22 @@ class QuantizeDlg(tk.Toplevel):
     # ── Apply ─────────────────────────────────────────────────────────────────
     def _ok(self):
         import copy as _copy
+
         song = self.app.song
-        tpb  = song.ticks_per_beat
+        tpb = song.ticks_per_beat
 
         # Measure range
         if self._range.get() == "range":
             m_from = max(1, self._m_from.get())
-            m_to   = max(m_from, self._m_to.get())
+            m_to = max(m_from, self._m_to.get())
         else:
             m_from = m_to = None
 
         # Grace threshold: ms → ticks (using current tempo)
-        grace_ms    = self._grace.get()
-        grace_ticks = int(grace_ms * tpb / (song.tempo / 1_000_000) / 1000) if grace_ms > 0 else 0
+        grace_ms = self._grace.get()
+        grace_ticks = (
+            int(grace_ms * tpb / (song.tempo / 1_000_000) / 1000) if grace_ms > 0 else 0
+        )
 
         # Which tracks
         if self._target.get() == "armed":
@@ -6192,21 +7359,24 @@ class QuantizeDlg(tk.Toplevel):
 
         # Snapshot BEFORE quantizing so Ctrl+Z can restore it
         before_tracks = _copy.deepcopy(song.tracks)
-        before_map    = _copy.deepcopy(song.rationalized_measure_map)
+        before_map = _copy.deepcopy(song.rationalized_measure_map)
 
         if not tracks:
             messagebox.showwarning("No tracks", "No tracks to quantize.", parent=self)
             return
 
-        total_q = 0; total_g = 0
+        total_q = 0
+        total_g = 0
         for tr in tracks:
             nq, ng = quantize_notes_per_measure(
-                tr, song,
+                tr,
+                song,
                 div=self._div.get(),
                 strength=self._strength.get(),
                 measure_start=m_from,
                 measure_end=m_to,
-                grace_ticks=grace_ticks)
+                grace_ticks=grace_ticks,
+            )
             total_q += nq
             total_g += ng
 
@@ -6215,13 +7385,15 @@ class QuantizeDlg(tk.Toplevel):
         self.app._refresh_track_list()
 
         # Push undo so Ctrl+Z restores the pre-quantize state
-        self.app._push_undo(RationalizationAction(
-            description="Quantize",
-            before_tracks=before_tracks,
-            after_tracks=_copy.deepcopy(song.tracks),
-            before_map=before_map,
-            after_map=_copy.deepcopy(song.rationalized_measure_map),
-        ))
+        self.app._push_undo(
+            RationalizationAction(
+                description="Quantize",
+                before_tracks=before_tracks,
+                after_tracks=_copy.deepcopy(song.tracks),
+                before_map=before_map,
+                after_map=_copy.deepcopy(song.rationalized_measure_map),
+            )
+        )
 
         # Force an immediate, unconditional redraw — don't rely on the
         # play-state-gated refresh inside _refresh_track_list(), since the
@@ -6240,9 +7412,11 @@ class QuantizeDlg(tk.Toplevel):
         messagebox.showinfo("Quantize Complete", "\n".join(parts), parent=self.app.root)
         self.destroy()
 
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Score View  — all tracks, playback cursor, editable
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 class ScoreView(tk.Frame):
     """
@@ -6253,27 +7427,30 @@ class ScoreView(tk.Frame):
     • Stems, flags (tails) for 8th/16th notes.
     • Whole-measure rests shown.
     """
+
     # Named tuple for passing stem geometry from _draw_chord to _draw_beams
     from collections import namedtuple
-    StemInfo = namedtuple("StemInfo",
-        ["tick","x","sx","stem_root_y","sy","stem_up","db","staff"])
+
+    StemInfo = namedtuple(
+        "StemInfo", ["tick", "x", "sx", "stem_root_y", "sy", "stem_up", "db", "staff"]
+    )
 
     # Base geometry constants at zoom 1.0 — instance vars are set by
     # _apply_zoom() which scales these by _vzoom. All drawing code uses
     # self.SLG / self.SH / self.TPAD etc. so scaling just works everywhere.
-    _B_SLG   = 12        # staff line gap
-    _B_TPAD  = 58        # grand-staff top pad (label + clef)
-    _B_TPAD1 = 36        # single-staff top pad
-    _B_TPAD1_TOP = 28    # single-staff treble_top offset
-    _B_BGAP  = 52        # gap between treble bottom and bass top
-    _B_BPAD  = 26        # grand-staff bottom pad
-    _B_BPAD1 = 16        # single-staff bottom pad
-    _B_LM    = 60        # left margin (brace zone)
+    _B_SLG = 12  # staff line gap
+    _B_TPAD = 58  # grand-staff top pad (label + clef)
+    _B_TPAD1 = 36  # single-staff top pad
+    _B_TPAD1_TOP = 28  # single-staff treble_top offset
+    _B_BGAP = 52  # gap between treble bottom and bass top
+    _B_BPAD = 26  # grand-staff bottom pad
+    _B_BPAD1 = 16  # single-staff bottom pad
+    _B_LM = 60  # left margin (brace zone)
     _B_STRIP_RESERVE = 40  # v22v: extra headroom above track 0 so the
-                           # measure strip has room to float above high
-                           # notes without going off the top of the canvas
-    MW       = 320       # pixels/measure at zoom 1 (horizontal only)
-    FIRST_EXTRA = 80     # extra px in measure 0 for clef+timesig
+    # measure strip has room to float above high
+    # notes without going off the top of the canvas
+    MW = 320  # pixels/measure at zoom 1 (horizontal only)
+    FIRST_EXTRA = 80  # extra px in measure 0 for clef+timesig
 
     def __init__(self, parent, app):
         super().__init__(parent)
@@ -6287,24 +7464,24 @@ class ScoreView(tk.Frame):
         # smaller" is most literally exactly that: one zoom step down
         # from where it started. The zoom controls remain available to
         # go back up from here for anyone who prefers the larger view.
-        self._zoom  = 0.75    # horizontal zoom — was 1.0
-        self._vzoom = 0.62    # vertical zoom — was 0.82 (see prior tuning
-                              # note below on why 0.82 was chosen over an
-                              # even-smaller 0.67; this new default is a
-                              # direct, explicit user request overriding
-                              # that earlier tuning call, not a reversal
-                              # of the reasoning behind it)
-                              # v22ze: was 0.67 ("2/3 to fit
-                              # more tracks"), but that made noteheads and
-                              # accidentals read uncomfortably small at the
-                              # default view (SLG=8px). 0.82 (SLG=9px) was a
-                              # modest bump favoring initial readability;
-                              # still well short of full size (1.0, SLG=12px)
-                              # so multiple tracks still fit reasonably --
-                              # the zoom controls remain available for
-                              # either direction from here.
+        self._zoom = 0.75  # horizontal zoom — was 1.0
+        self._vzoom = 0.62  # vertical zoom — was 0.82 (see prior tuning
+        # note below on why 0.82 was chosen over an
+        # even-smaller 0.67; this new default is a
+        # direct, explicit user request overriding
+        # that earlier tuning call, not a reversal
+        # of the reasoning behind it)
+        # v22ze: was 0.67 ("2/3 to fit
+        # more tracks"), but that made noteheads and
+        # accidentals read uncomfortably small at the
+        # default view (SLG=8px). 0.82 (SLG=9px) was a
+        # modest bump favoring initial readability;
+        # still well short of full size (1.0, SLG=12px)
+        # so multiple tracks still fit reasonably --
+        # the zoom controls remain available for
+        # either direction from here.
         self._score_dirty = True
-        self._last_sr = None   # song changed, force full scrollregion recalc
+        self._last_sr = None  # song changed, force full scrollregion recalc
         self._last_note_count = 0
         # v22ze-25 (housekeeping item 5): playback flash-highlight state.
         # Defaulted here too (not just in _draw_inner) so _ui_tick_update
@@ -6313,22 +7490,22 @@ class ScoreView(tk.Frame):
         self._flash_ticks_only = None
         self._currently_lit = {}
         self.configure(bg="#fffff8")
-        self._apply_zoom()   # set self.SLG / SH / TPAD … from _vzoom
+        self._apply_zoom()  # set self.SLG / SH / TPAD … from _vzoom
         self._build_ui()
         self._draw()
 
     def _apply_zoom(self):
         """Recompute all vertical geometry from current _vzoom."""
         z = self._vzoom
-        self.SLG       = max(4,  int(self._B_SLG   * z))
-        self.SH        = 4 * self.SLG
-        self.TPAD      = max(18, int(self._B_TPAD  * z))
-        self.TPAD1     = max(12, int(self._B_TPAD1 * z))
-        self.TPAD1_TOP = max(8,  int(self._B_TPAD1_TOP * z))
-        self.BGAP      = max(8,  int(self._B_BGAP  * z))
-        self.BPAD      = max(6,  int(self._B_BPAD  * z))
-        self.BPAD1     = max(4,  int(self._B_BPAD1 * z))
-        self.LM        = max(20, int(self._B_LM    * z))
+        self.SLG = max(4, int(self._B_SLG * z))
+        self.SH = 4 * self.SLG
+        self.TPAD = max(18, int(self._B_TPAD * z))
+        self.TPAD1 = max(12, int(self._B_TPAD1 * z))
+        self.TPAD1_TOP = max(8, int(self._B_TPAD1_TOP * z))
+        self.BGAP = max(8, int(self._B_BGAP * z))
+        self.BPAD = max(6, int(self._B_BPAD * z))
+        self.BPAD1 = max(4, int(self._B_BPAD1 * z))
+        self.LM = max(20, int(self._B_LM * z))
         self.STRIP_RESERVE = max(20, int(self._B_STRIP_RESERVE * z))
 
     # ── geometry ──────────────────────────────────────────────────────────────
@@ -6357,7 +7534,7 @@ class ScoreView(tk.Frame):
         return self.TPAD + self.SH + self.BGAP + self.SH + self.BPAD
 
     def _track_yo(self, ti, tracks=None):
-        _top = 4 + getattr(self, 'STRIP_RESERVE', 40)   # v22v: strip headroom
+        _top = 4 + getattr(self, "STRIP_RESERVE", 40)  # v22v: strip headroom
         if tracks is None:
             return _top + ti * (self.TPAD + self.SH + self.BGAP + self.SH + self.BPAD)
         y = _top
@@ -6366,18 +7543,22 @@ class ScoreView(tk.Frame):
         return y
 
     def _treble_top(self, ti, tracks=None):
-        tr = (tracks[ti] if tracks else None)
+        tr = tracks[ti] if tracks else None
         if tr is not None and not self._uses_grand_staff(tr):
             return self._track_yo(ti, tracks) + self.TPAD1_TOP
         return self._track_yo(ti, tracks) + self.TPAD
 
     def _bass_top(self, ti, tracks=None):
-        tr = (tracks[ti] if tracks else None)
+        tr = tracks[ti] if tracks else None
         if tr is None or not self._uses_grand_staff(tr):
-            return None   # sentinel — callers must check before drawing bass staff
+            return None  # sentinel — callers must check before drawing bass staff
         return self._treble_top(ti, tracks) + self.SH + self.BGAP
-    def _mw(self): return int(self.MW*self._zoom)
-    def _fe(self): return int(self.FIRST_EXTRA*self._zoom)
+
+    def _mw(self):
+        return int(self.MW * self._zoom)
+
+    def _fe(self):
+        return int(self.FIRST_EXTRA * self._zoom)
 
     def _sp_to_y_treble(self, pos, tt):
         """Convert staff position to canvas y.
@@ -6403,41 +7584,50 @@ class ScoreView(tk.Frame):
 
     def _x_to_tick(self, x):
         ppt = self._px_per_tick
-        if ppt <= 0: return 0
+        if ppt <= 0:
+            return 0
         return max(0, int((x - self.LM - self._fe()) / ppt))
 
     # ── UI ────────────────────────────────────────────────────────────────────
     def _build_ui(self):
-        tb=tk.Frame(self,bg="#e8e8e0",pady=2); tb.pack(fill=tk.X)
-        bs=dict(relief=tk.FLAT,bg="#d0d0c8",padx=6,pady=1)
-        _tt(tk.Button(tb,text="Zoom +",command=self._zoom_in,**bs),
-            "Zoom in on the score. Vertical and horizontal scale together."
-            ).pack(side=tk.LEFT,padx=2)
-        _tt(tk.Button(tb,text="Zoom −",command=self._zoom_out,**bs),
-            "Zoom out on the score."
-            ).pack(side=tk.LEFT,padx=2)
-        _tt(tk.Button(tb,text="Fit Width",command=self._fit,**bs),
-            "Scale the whole piece to fit the visible window width exactly."
-            ).pack(side=tk.LEFT,padx=2)
-        _tt(tk.Button(tb,text="Fit Width +",command=self._fit_wider,**bs),
+        tb = tk.Frame(self, bg="#e8e8e0", pady=2)
+        tb.pack(fill=tk.X)
+        bs = dict(relief=tk.FLAT, bg="#d0d0c8", padx=6, pady=1)
+        _tt(
+            tk.Button(tb, text="Zoom +", command=self._zoom_in, **bs),
+            "Zoom in on the score. Vertical and horizontal scale together.",
+        ).pack(side=tk.LEFT, padx=2)
+        _tt(
+            tk.Button(tb, text="Zoom −", command=self._zoom_out, **bs),
+            "Zoom out on the score.",
+        ).pack(side=tk.LEFT, padx=2)
+        _tt(
+            tk.Button(tb, text="Fit Width", command=self._fit, **bs),
+            "Scale the whole piece to fit the visible window width exactly.",
+        ).pack(side=tk.LEFT, padx=2)
+        _tt(
+            tk.Button(tb, text="Fit Width +", command=self._fit_wider, **bs),
             "Show one more measure across the screen (zooms out by one "
-            "measure's width, without changing vertical zoom)."
-            ).pack(side=tk.LEFT,padx=2)
-        _tt(tk.Button(tb,text="Fit Width −",command=self._fit_narrower,**bs),
+            "measure's width, without changing vertical zoom).",
+        ).pack(side=tk.LEFT, padx=2)
+        _tt(
+            tk.Button(tb, text="Fit Width −", command=self._fit_narrower, **bs),
             "Show one fewer measure across the screen (zooms in by one "
-            "measure's width, without changing vertical zoom)."
-            ).pack(side=tk.LEFT,padx=2)
+            "measure's width, without changing vertical zoom).",
+        ).pack(side=tk.LEFT, padx=2)
         # ── Editing toolbar: tabbed tool palette ──────────────────────────────
         # v22ze-35: replaces the standalone "Note value" dropdown with a
         # full tabbed palette (Note/Rest, Accidental, Dynamics,
         # Articulation, Measures), per the housekeeping-list follow-up
         # request. Which tab is active determines what a canvas click
         # does -- see _on_click, which dispatches on self._active_tool.
-        self._active_tool = "note_rest"   # note_rest | accidental | dynamics | articulation
-        self._entry_mode_var  = tk.StringVar(value="note")     # note | rest
-        self._dur_var         = tk.StringVar(value="quarter")
-        self._accidental_var  = tk.StringVar(value="sharp")
-        self._dynamic_var     = tk.StringVar(value="mf")
+        self._active_tool = (
+            "note_rest"  # note_rest | accidental | dynamics | articulation
+        )
+        self._entry_mode_var = tk.StringVar(value="note")  # note | rest
+        self._dur_var = tk.StringVar(value="quarter")
+        self._accidental_var = tk.StringVar(value="sharp")
+        self._dynamic_var = tk.StringVar(value="mf")
         self._articulation_var = tk.StringVar(value="staccato")
 
         nb = ttk.Notebook(self, height=42)
@@ -6445,86 +7635,182 @@ class ScoreView(tk.Frame):
 
         def _on_tab_changed(event=None):
             idx = nb.index(nb.select())
-            self._active_tool = ["note_rest", "accidental", "dynamics",
-                                 "articulation", "measures"][idx]
+            self._active_tool = [
+                "note_rest",
+                "accidental",
+                "dynamics",
+                "articulation",
+                "measures",
+            ][idx]
+
         nb.bind("<<NotebookTabChanged>>", _on_tab_changed)
 
         tabbg = "#e8e8e0"
 
         # -- Tab 1: Note / Rest --------------------------------------------
-        t1 = tk.Frame(nb, bg=tabbg); nb.add(t1, text="Note/Rest")
-        tk.Radiobutton(t1, text="Note", variable=self._entry_mode_var, value="note",
-                      bg=tabbg).pack(side=tk.LEFT, padx=(8,2), pady=6)
-        tk.Radiobutton(t1, text="Rest", variable=self._entry_mode_var, value="rest",
-                      bg=tabbg).pack(side=tk.LEFT, padx=2)
-        tk.Label(t1, text="  Duration:", bg=tabbg).pack(side=tk.LEFT, padx=(10,2))
-        ttk.Combobox(t1, textvariable=self._dur_var,
-                    values=["whole","half","quarter","eighth","16th"],
-                    width=8, state="readonly").pack(side=tk.LEFT)
-        tk.Label(t1, text="  Click the staff to insert. Right-click a note to delete.",
-                bg=tabbg, fg="#666", font=("TkDefaultFont",8)).pack(side=tk.LEFT, padx=10)
+        t1 = tk.Frame(nb, bg=tabbg)
+        nb.add(t1, text="Note/Rest")
+        tk.Radiobutton(
+            t1, text="Note", variable=self._entry_mode_var, value="note", bg=tabbg
+        ).pack(side=tk.LEFT, padx=(8, 2), pady=6)
+        tk.Radiobutton(
+            t1, text="Rest", variable=self._entry_mode_var, value="rest", bg=tabbg
+        ).pack(side=tk.LEFT, padx=2)
+        tk.Label(t1, text="  Duration:", bg=tabbg).pack(side=tk.LEFT, padx=(10, 2))
+        ttk.Combobox(
+            t1,
+            textvariable=self._dur_var,
+            values=["whole", "half", "quarter", "eighth", "16th"],
+            width=8,
+            state="readonly",
+        ).pack(side=tk.LEFT)
+        tk.Label(
+            t1,
+            text="  Click the staff to insert. Right-click a note to delete.",
+            bg=tabbg,
+            fg="#666",
+            font=("TkDefaultFont", 8),
+        ).pack(side=tk.LEFT, padx=10)
 
         # -- Tab 2: Accidental ------------------------------------------------
-        t2 = tk.Frame(nb, bg=tabbg); nb.add(t2, text="Accidental")
-        _acc_labels = [("double_flat","𝄫"), ("flat","♭"), ("natural","♮"),
-                       ("sharp","♯"), ("double_sharp","𝄪")]
+        t2 = tk.Frame(nb, bg=tabbg)
+        nb.add(t2, text="Accidental")
+        _acc_labels = [
+            ("double_flat", "𝄫"),
+            ("flat", "♭"),
+            ("natural", "♮"),
+            ("sharp", "♯"),
+            ("double_sharp", "𝄪"),
+        ]
         for val, sym in _acc_labels:
-            tk.Radiobutton(t2, text=sym, variable=self._accidental_var, value=val,
-                          bg=tabbg, indicatoron=0, width=3, font=("TkDefaultFont",11)
-                          ).pack(side=tk.LEFT, padx=2, pady=6)
-        tk.Label(t2, text="  Click an existing note to apply.",
-                bg=tabbg, fg="#666", font=("TkDefaultFont",8)).pack(side=tk.LEFT, padx=10)
+            tk.Radiobutton(
+                t2,
+                text=sym,
+                variable=self._accidental_var,
+                value=val,
+                bg=tabbg,
+                indicatoron=0,
+                width=3,
+                font=("TkDefaultFont", 11),
+            ).pack(side=tk.LEFT, padx=2, pady=6)
+        tk.Label(
+            t2,
+            text="  Click an existing note to apply.",
+            bg=tabbg,
+            fg="#666",
+            font=("TkDefaultFont", 8),
+        ).pack(side=tk.LEFT, padx=10)
 
         # -- Tab 3: Dynamics ---------------------------------------------------
-        t3 = tk.Frame(nb, bg=tabbg); nb.add(t3, text="Dynamics")
-        for val in ["ppp","pp","p","mp","mf","f","ff","fff"]:
-            tk.Radiobutton(t3, text=val, variable=self._dynamic_var, value=val,
-                          bg=tabbg, indicatoron=0, width=4, font=("TkDefaultFont",9,"italic")
-                          ).pack(side=tk.LEFT, padx=1, pady=6)
-        tk.Label(t3, text="  Click below the staff to place.",
-                bg=tabbg, fg="#666", font=("TkDefaultFont",8)).pack(side=tk.LEFT, padx=10)
+        t3 = tk.Frame(nb, bg=tabbg)
+        nb.add(t3, text="Dynamics")
+        for val in ["ppp", "pp", "p", "mp", "mf", "f", "ff", "fff"]:
+            tk.Radiobutton(
+                t3,
+                text=val,
+                variable=self._dynamic_var,
+                value=val,
+                bg=tabbg,
+                indicatoron=0,
+                width=4,
+                font=("TkDefaultFont", 9, "italic"),
+            ).pack(side=tk.LEFT, padx=1, pady=6)
+        tk.Label(
+            t3,
+            text="  Click below the staff to place.",
+            bg=tabbg,
+            fg="#666",
+            font=("TkDefaultFont", 8),
+        ).pack(side=tk.LEFT, padx=10)
 
         # -- Tab 4: Articulation ------------------------------------------------
-        t4 = tk.Frame(nb, bg=tabbg); nb.add(t4, text="Articulation")
-        _art_labels = [("staccato","Staccato"), ("accent","Accent"),
-                       ("tenuto","Tenuto"), ("legato","Legato"),
-                       ("marcato","Marcato"), ("pizzicato","Pizz."),
-                       ("arco","Arco")]
+        t4 = tk.Frame(nb, bg=tabbg)
+        nb.add(t4, text="Articulation")
+        _art_labels = [
+            ("staccato", "Staccato"),
+            ("accent", "Accent"),
+            ("tenuto", "Tenuto"),
+            ("legato", "Legato"),
+            ("marcato", "Marcato"),
+            ("pizzicato", "Pizz."),
+            ("arco", "Arco"),
+        ]
         for val, label in _art_labels:
-            tk.Radiobutton(t4, text=label, variable=self._articulation_var, value=val,
-                          bg=tabbg, indicatoron=0, padx=4
-                          ).pack(side=tk.LEFT, padx=1, pady=6)
-        tk.Label(t4, text="  Click an existing note to toggle.",
-                bg=tabbg, fg="#666", font=("TkDefaultFont",8)).pack(side=tk.LEFT, padx=10)
+            tk.Radiobutton(
+                t4,
+                text=label,
+                variable=self._articulation_var,
+                value=val,
+                bg=tabbg,
+                indicatoron=0,
+                padx=4,
+            ).pack(side=tk.LEFT, padx=1, pady=6)
+        tk.Label(
+            t4,
+            text="  Click an existing note to toggle.",
+            bg=tabbg,
+            fg="#666",
+            font=("TkDefaultFont", 8),
+        ).pack(side=tk.LEFT, padx=10)
 
         # -- Tab 5: Measures ------------------------------------------------
-        t5 = tk.Frame(nb, bg=tabbg); nb.add(t5, text="Measures")
-        tk.Label(t5, text="  Right-click any measure on the staff for "
-                          "Insert / Delete / Cut options.",
-                bg=tabbg, fg="#333").pack(side=tk.LEFT, padx=8, pady=6)
+        t5 = tk.Frame(nb, bg=tabbg)
+        nb.add(t5, text="Measures")
+        tk.Label(
+            t5,
+            text="  Right-click any measure on the staff for "
+            "Insert / Delete / Cut options.",
+            bg=tabbg,
+            fg="#333",
+        ).pack(side=tk.LEFT, padx=8, pady=6)
 
         # ── Mini transport (synced to main app) ──────────────────────────────
-        tk.Frame(tb,width=1,bg="#aaa").pack(side=tk.LEFT,fill=tk.Y,padx=8,pady=2)
-        mbs=dict(relief=tk.FLAT,bg="#c8c8c0",padx=5,pady=1,font=("TkDefaultFont",12))
-        tk.Button(tb,text="⏮",command=self._t_rewind,**mbs).pack(side=tk.LEFT,padx=1)
-        mbs2=dict(relief=tk.FLAT,bg="#c8c8c0",padx=5,pady=1,font=("TkDefaultFont",9))
-        self._score_play_btn=tk.Button(tb,text="▶ Play",command=self._t_play_pause,**mbs2)
-        self._score_play_btn.pack(side=tk.LEFT,padx=1)
-        tk.Button(tb,text="⏹ Stop",command=self._t_stop,**mbs2).pack(side=tk.LEFT,padx=1)
-        self._score_rec_btn=tk.Button(tb,text="⏺ Rec",command=self._t_rec,
-                                      bg="#0f3320",fg="#3fb950",
-                                      relief=tk.FLAT,padx=5,pady=1,font=("TkDefaultFont",9))
-        self._score_rec_btn.pack(side=tk.LEFT,padx=1)
+        tk.Frame(tb, width=1, bg="#aaa").pack(side=tk.LEFT, fill=tk.Y, padx=8, pady=2)
+        mbs = dict(
+            relief=tk.FLAT, bg="#c8c8c0", padx=5, pady=1, font=("TkDefaultFont", 12)
+        )
+        tk.Button(tb, text="⏮", command=self._t_rewind, **mbs).pack(
+            side=tk.LEFT, padx=1
+        )
+        mbs2 = dict(
+            relief=tk.FLAT, bg="#c8c8c0", padx=5, pady=1, font=("TkDefaultFont", 9)
+        )
+        self._score_play_btn = tk.Button(
+            tb, text="▶ Play", command=self._t_play_pause, **mbs2
+        )
+        self._score_play_btn.pack(side=tk.LEFT, padx=1)
+        tk.Button(tb, text="⏹ Stop", command=self._t_stop, **mbs2).pack(
+            side=tk.LEFT, padx=1
+        )
+        self._score_rec_btn = tk.Button(
+            tb,
+            text="⏺ Rec",
+            command=self._t_rec,
+            bg="#0f3320",
+            fg="#3fb950",
+            relief=tk.FLAT,
+            padx=5,
+            pady=1,
+            font=("TkDefaultFont", 9),
+        )
+        self._score_rec_btn.pack(side=tk.LEFT, padx=1)
         # Manual hand-split override (MIDI pitch; 0 = auto gap detection)
-        tk.Frame(tb,width=1,bg="#aaa").pack(side=tk.LEFT,fill=tk.Y,padx=6,pady=2)
-        tk.Label(tb,text="Split pitch:",bg="#e8e8e0").pack(side=tk.LEFT)
+        tk.Frame(tb, width=1, bg="#aaa").pack(side=tk.LEFT, fill=tk.Y, padx=6, pady=2)
+        tk.Label(tb, text="Split pitch:", bg="#e8e8e0").pack(side=tk.LEFT)
         self._split_var = tk.IntVar(value=0)
-        sp = tk.Spinbox(tb, from_=0, to=127, textvariable=self._split_var,
-                        width=4, command=self._draw)
+        sp = tk.Spinbox(
+            tb,
+            from_=0,
+            to=127,
+            textvariable=self._split_var,
+            width=4,
+            command=self._draw,
+        )
         sp.pack(side=tk.LEFT, padx=2)
         sp.bind("<Return>", lambda e: self._draw())
-        tk.Label(tb,text="(0=auto)",bg="#e8e8e0",font=("TkDefaultFont",8)
-                 ).pack(side=tk.LEFT)
+        tk.Label(tb, text="(0=auto)", bg="#e8e8e0", font=("TkDefaultFont", 8)).pack(
+            side=tk.LEFT
+        )
         # v22ze-66 fix: user feedback -- this control's units (a raw MIDI
         # pitch 0-127, the fixed line above which notes render in the
         # treble staff) were easy to confuse with the completely
@@ -6538,7 +7824,8 @@ class ScoreView(tk.Frame):
         # pushes nearly everything up (pitch 1 is close to the bottom of
         # the MIDI range) rather than doing anything resembling a
         # semitone-span split.
-        _tt(sp,
+        _tt(
+            sp,
             "Manual staff-split PITCH (0-127), not a hand-span setting.\n"
             "Every note at or above this MIDI pitch draws in the treble\n"
             "staff; everything below draws in the bass staff. This is a\n"
@@ -6549,17 +7836,20 @@ class ScoreView(tk.Frame):
             "This is a different setting from \u201cMax hand span\u201d in the\n"
             "Rationalize Score dialog or Edit \u25b8 Separate Hands, which\n"
             "measures the INTERVAL (in semitones) a hand can comfortably\n"
-            "reach, not a fixed pitch line.")
-        fr=tk.Frame(self,bg="#fffff8"); fr.pack(fill=tk.BOTH,expand=True)
-        self.canvas=tk.Canvas(fr,bg="#fffff8",cursor="crosshair")
-        hb=ttk.Scrollbar(fr,orient=tk.HORIZONTAL,command=self.canvas.xview)
-        vb=ttk.Scrollbar(fr,orient=tk.VERTICAL,command=self.canvas.yview)
-        self.canvas.configure(xscrollcommand=hb.set,yscrollcommand=vb.set)
-        vb.pack(side=tk.RIGHT,fill=tk.Y); hb.pack(side=tk.BOTTOM,fill=tk.X)
-        self.canvas.pack(fill=tk.BOTH,expand=True)
+            "reach, not a fixed pitch line.",
+        )
+        fr = tk.Frame(self, bg="#fffff8")
+        fr.pack(fill=tk.BOTH, expand=True)
+        self.canvas = tk.Canvas(fr, bg="#fffff8", cursor="crosshair")
+        hb = ttk.Scrollbar(fr, orient=tk.HORIZONTAL, command=self.canvas.xview)
+        vb = ttk.Scrollbar(fr, orient=tk.VERTICAL, command=self.canvas.yview)
+        self.canvas.configure(xscrollcommand=hb.set, yscrollcommand=vb.set)
+        vb.pack(side=tk.RIGHT, fill=tk.Y)
+        hb.pack(side=tk.BOTTOM, fill=tk.X)
+        self.canvas.pack(fill=tk.BOTH, expand=True)
         self.canvas.bind("<Configure>", self._on_canvas_configure)
-        self.canvas.bind("<Button-1>",self._on_click)
-        self.canvas.bind("<Button-3>",self._on_right)
+        self.canvas.bind("<Button-1>", self._on_click)
+        self.canvas.bind("<Button-3>", self._on_right)
 
     def _current_cursor_tick(self):
         """Current transport position, safely, for redraws triggered by
@@ -6584,20 +7874,24 @@ class ScoreView(tk.Frame):
             return None
 
     def _zoom_in(self):
-        self._zoom  = min(4.0, self._zoom  * 1.33)
+        self._zoom = min(4.0, self._zoom * 1.33)
         self._vzoom = min(2.0, self._vzoom * 1.33)
-        self._last_sr = None   # force scrollregion recalc at new zoom
-        self._apply_zoom(); self._draw(cursor_tick=self._current_cursor_tick())
+        self._last_sr = None  # force scrollregion recalc at new zoom
+        self._apply_zoom()
+        self._draw(cursor_tick=self._current_cursor_tick())
 
     def _zoom_out(self):
-        self._zoom  = max(0.2, self._zoom  / 1.33)
+        self._zoom = max(0.2, self._zoom / 1.33)
         self._vzoom = max(0.2, self._vzoom / 1.33)
-        self._last_sr = None   # force scrollregion recalc at new zoom
-        self._apply_zoom(); self._draw(cursor_tick=self._current_cursor_tick())
+        self._last_sr = None  # force scrollregion recalc at new zoom
+        self._apply_zoom()
+        self._draw(cursor_tick=self._current_cursor_tick())
+
     def _fit(self):
         song = self.app.song
         total_ticks = song.total_ticks()
-        if total_ticks <= 0: return
+        if total_ticks <= 0:
+            return
         w = self.canvas.winfo_width() - self.LM - int(self._fe()) - 40
         tpb = song.ticks_per_beat
         # _px_per_tick * total_ticks == w  →  zoom = w*tpb*4 / (total_ticks*MW)
@@ -6625,7 +7919,7 @@ class ScoreView(tk.Frame):
         if w <= 0:
             return
         self._zoom = max(0.05, w / (n * self.MW))
-        self._last_sr = None   # force scrollregion recalc at new zoom
+        self._last_sr = None  # force scrollregion recalc at new zoom
         self._apply_zoom()
         self._draw(cursor_tick=self._current_cursor_tick())
 
@@ -6659,8 +7953,14 @@ class ScoreView(tk.Frame):
             if not idx:
                 return
             song = self.app.song
-            tpb = song.ticks_per_beat if song and getattr(song, 'ticks_per_beat', None) else 480
-            flash_span = max(1, tpb // 8)   # briefly -- roughly a 32nd note's worth of ticks
+            tpb = (
+                song.ticks_per_beat
+                if song and getattr(song, "ticks_per_beat", None)
+                else 480
+            )
+            flash_span = max(
+                1, tpb // 8
+            )  # briefly -- roughly a 32nd note's worth of ticks
             lo = tick - flash_span
             ticks_only = self._flash_ticks_only
             if ticks_only is None:
@@ -6675,12 +7975,16 @@ class ScoreView(tk.Frame):
             c = self.canvas
             for item_id, orig_fill in prev_lit.items():
                 if item_id not in new_lit:
-                    try: c.itemconfig(item_id, fill=orig_fill)
-                    except Exception: pass
+                    try:
+                        c.itemconfig(item_id, fill=orig_fill)
+                    except Exception:
+                        pass
             for item_id in new_lit:
                 if item_id not in prev_lit:
-                    try: c.itemconfig(item_id, fill="#39FF14")   # neon green
-                    except Exception: pass
+                    try:
+                        c.itemconfig(item_id, fill="#39FF14")  # neon green
+                    except Exception:
+                        pass
             self._currently_lit = new_lit
         except Exception:
             pass
@@ -6691,12 +7995,15 @@ class ScoreView(tk.Frame):
         stuck neon green (housekeeping item 5)."""
         try:
             c = self.canvas
-            for item_id, orig_fill in getattr(self, '_currently_lit', {}).items():
-                try: c.itemconfig(item_id, fill=orig_fill)
-                except Exception: pass
+            for item_id, orig_fill in getattr(self, "_currently_lit", {}).items():
+                try:
+                    c.itemconfig(item_id, fill=orig_fill)
+                except Exception:
+                    pass
             self._currently_lit = {}
         except Exception:
             pass
+
     # ── main draw ─────────────────────────────────────────────────────────────
     # Number of placeholder empty staves shown before any file is loaded
     _PLACEHOLDER_TRACKS = 6
@@ -6715,7 +8022,7 @@ class ScoreView(tk.Frame):
         construction to complete and for rapid resize events to collapse into
         a single repaint.
         """
-        job = getattr(self, '_configure_job', None)
+        job = getattr(self, "_configure_job", None)
         if job is not None:
             try:
                 self.canvas.after_cancel(job)
@@ -6738,7 +8045,9 @@ class ScoreView(tk.Frame):
         # needing a full redraw, so just defer this until playback stops.
         try:
             if self.app.transport.is_playing():
-                self._configure_job = self.canvas.after(200, self._deferred_configure_redraw)
+                self._configure_job = self.canvas.after(
+                    200, self._deferred_configure_redraw
+                )
                 return
         except Exception:
             pass
@@ -6777,7 +8086,8 @@ class ScoreView(tk.Frame):
 
     def _draw_inner(self, cursor_tick=None):
         self._score_dirty = False
-        c = self.canvas; c.delete("all")
+        c = self.canvas
+        c.delete("all")
         song = self.app.song
         # v22ze-38 fix: this was the actual root cause of the "cursor
         # goes off-screen and gets stuck during playback" bug on any
@@ -6819,12 +8129,13 @@ class ScoreView(tk.Frame):
         # note the synthesizer plays appears on the screen.
         # Result: 1/16 and 1/32 notes visible on initial load.
         import sys as _draw_sys
+
         global NOTATION_DIVISION
         _detected_div = song.detect_notation_division()
         if _detected_div != NOTATION_DIVISION:
             NOTATION_DIVISION = _detected_div
-        mmap  = song.get_measure_map()
-        nm    = len(mmap)
+        mmap = song.get_measure_map()
+        nm = len(mmap)
         total_ticks = song.total_ticks()
 
         # ── Merge RH/LH pairs into one grand staff ────────────────────────
@@ -6840,22 +8151,25 @@ class ScoreView(tk.Frame):
         # Merging into one track before drawing gives 2 staves, not 4 —
         # the grand-staff renderer splits treble/bass by pitch automatically
         # regardless of which original track a note came from.
-        import re as _sv_re
         import copy as _sv_copy
+        import re as _sv_re
 
         def _sv_hand_hint(name):
             n = name.lower()
-            if _sv_re.search(r'\bright\b|\brh\b', n):
-                return 'R'
-            if _sv_re.search(r'\bleft\b|\blh\b', n):
-                return 'L'
+            if _sv_re.search(r"\bright\b|\brh\b", n):
+                return "R"
+            if _sv_re.search(r"\bleft\b|\blh\b", n):
+                return "L"
             return None
 
         def _sv_rh_lh(ta, tb):
-            if (ta.name.endswith(' (RH)') and tb.name.endswith(' (LH)') and
-                    ta.name[:-5] == tb.name[:-5]):
+            if (
+                ta.name.endswith(" (RH)")
+                and tb.name.endswith(" (LH)")
+                and ta.name[:-5] == tb.name[:-5]
+            ):
                 return True
-            if _sv_hand_hint(ta.name) == 'R' and _sv_hand_hint(tb.name) == 'L':
+            if _sv_hand_hint(ta.name) == "R" and _sv_hand_hint(tb.name) == "L":
                 return True
             # v22zc: fallback — two consecutive same-instrument-family piano
             # tracks merge into one grand staff even without a name match.
@@ -6868,24 +8182,27 @@ class ScoreView(tk.Frame):
             # "Track 3") showed two separate grand staves on screen while
             # the exported PDF correctly showed one.  This brings the two
             # renderers back into agreement using the SAME criterion.
-            return (ta.program in self._GRAND_STAFF_PROGRAMS
-                   and tb.program in self._GRAND_STAFF_PROGRAMS)
+            return (
+                ta.program in self._GRAND_STAFF_PROGRAMS
+                and tb.program in self._GRAND_STAFF_PROGRAMS
+            )
 
         def _sv_merged_name(name):
-            if name.endswith(' (RH)'):
+            if name.endswith(" (RH)"):
                 return name[:-5]
-            stripped = _sv_re.sub(r'\s*\b(right|rh)\b\s*', ' ', name,
-                                  flags=_sv_re.IGNORECASE).strip()
+            stripped = _sv_re.sub(
+                r"\s*\b(right|rh)\b\s*", " ", name, flags=_sv_re.IGNORECASE
+            ).strip()
             return stripped if stripped else name
 
         raw = song.tracks
         tracks = []
         _i = 0
         while _i < len(raw):
-            if _i + 1 < len(raw) and _sv_rh_lh(raw[_i], raw[_i+1]):
+            if _i + 1 < len(raw) and _sv_rh_lh(raw[_i], raw[_i + 1]):
                 m = _sv_copy.copy(raw[_i])
-                m.name    = _sv_merged_name(raw[_i].name)
-                m.program = 0                    # ensure piano grand staff
+                m.name = _sv_merged_name(raw[_i].name)
+                m.program = 0  # ensure piano grand staff
                 # v22ze-28 fix (housekeeping item 8 regression): this used
                 # to merge RH+LH notes into one pitch-mixed list and
                 # re-derive the hand split via a gap heuristic, discarding
@@ -6902,9 +8219,11 @@ class ScoreView(tk.Frame):
                 # _prehand_split, bypassing pitch-based splitting for it
                 # completely, the same as to_ly does.
                 rh_copies = [_sv_copy.copy(n) for n in raw[_i].notes]
-                lh_copies = [_sv_copy.copy(n) for n in raw[_i+1].notes]
-                for n in rh_copies: n.channel = 0
-                for n in lh_copies: n.channel = 1
+                lh_copies = [_sv_copy.copy(n) for n in raw[_i + 1].notes]
+                for n in rh_copies:
+                    n.channel = 0
+                for n in lh_copies:
+                    n.channel = 1
                 m.notes = sorted(rh_copies + lh_copies, key=lambda n: n.tick)
                 m._prehand_split = True
                 tracks.append(m)
@@ -6933,20 +8252,29 @@ class ScoreView(tk.Frame):
         # Draw per-measure status strip above the first stave
         self._draw_measure_strip(c, mmap, song, tracks)
 
-        for ti,tr in enumerate(tracks):
-            self._draw_system(c,ti,tr,song,nm,mmap,total_w,tracks)
+        for ti, tr in enumerate(tracks):
+            self._draw_system(c, ti, tr, song, nm, mmap, total_w, tracks)
         if cursor_tick is not None:
-            cx=self._tick_to_x(cursor_tick)
-            c.create_line(cx,0,cx,total_h,fill="#dd2222",width=2,dash=(5,3),tags="playhead")
-            self._scroll_to(cx,total_w)
+            cx = self._tick_to_x(cursor_tick)
+            c.create_line(
+                cx,
+                0,
+                cx,
+                total_h,
+                fill="#dd2222",
+                width=2,
+                dash=(5, 3),
+                tags="playhead",
+            )
+            self._scroll_to(cx, total_w)
         # Note 1: force immediate visual refresh so quantize / edit operations
         # are visible without needing a zoom event to trigger a repaint.
         c.update_idletasks()
 
     def _draw_placeholder_staves(self, c):
         """Draw N empty staves so the score looks ready to use on startup."""
-        n   = self._PLACEHOLDER_TRACKS
-        w   = max(c.winfo_width(), 900)
+        n = self._PLACEHOLDER_TRACKS
+        w = max(c.winfo_width(), 900)
         # Use a dummy single-staff height since no tracks exist yet
         row_h = self.TPAD1 + self.SH + self.BPAD1
         total_h = 4 + n * row_h + 20
@@ -6955,11 +8283,23 @@ class ScoreView(tk.Frame):
         for ti in range(n):
             tt = 4 + ti * row_h + self.TPAD1_TOP
             # Track label
-            c.create_text(6, tt - 8, text=names[ti],
-                          font=("TkDefaultFont", 8, "bold"), fill="#aaa", anchor="w")
+            c.create_text(
+                6,
+                tt - 8,
+                text=names[ti],
+                font=("TkDefaultFont", 8, "bold"),
+                fill="#aaa",
+                anchor="w",
+            )
             # Treble clef
-            c.create_text(self.LM + 4, tt + self.SH * 0.55, text="𝄞",
-                          font=("serif", int(self.SLG * 2.8)), fill="#bbb", anchor="w")
+            c.create_text(
+                self.LM + 4,
+                tt + self.SH * 0.55,
+                text="𝄞",
+                font=("serif", int(self.SLG * 2.8)),
+                fill="#bbb",
+                anchor="w",
+            )
             # Staff lines
             for line in range(5):
                 y = tt + line * self.SLG
@@ -6981,22 +8321,23 @@ class ScoreView(tk.Frame):
             # Always recompute from current song geometry — never use the
             # passed-in total_w which may be stale after song replacement.
             song = self.app.song
-            live_total_w = (self.LM + self._fe()
-                            + int(song.total_ticks() * self._px_per_tick) + 80)
+            live_total_w = (
+                self.LM + self._fe() + int(song.total_ticks() * self._px_per_tick) + 80
+            )
             if live_total_w <= 0:
                 live_total_w = max(total_w, 1)
             cx_clamped = max(0, min(cx, live_total_w))
 
             canvas_px = max(self.canvas.winfo_width(), 400)
-            frac      = cx_clamped / live_total_w
-            half_vis  = (canvas_px / 2.0) / live_total_w
+            frac = cx_clamped / live_total_w
+            half_vis = (canvas_px / 2.0) / live_total_w
 
             if frac <= half_vis:
-                target_lo = 0.0                               # Phase 1
+                target_lo = 0.0  # Phase 1
             elif frac >= 1.0 - half_vis:
-                target_lo = max(0.0, 1.0 - 2 * half_vis)     # Phase 3
+                target_lo = max(0.0, 1.0 - 2 * half_vis)  # Phase 3
             else:
-                target_lo = frac - half_vis                   # Phase 2: center lock
+                target_lo = frac - half_vis  # Phase 2: center lock
 
             lo, _ = self.canvas.xview()
             if abs(target_lo - lo) * live_total_w >= _MIN_PX_MOVE:
@@ -7004,12 +8345,12 @@ class ScoreView(tk.Frame):
         except Exception:
             pass
 
-    def _draw_system(self,c,ti,tr,song,nm,mmap,total_w,tracks=None):
+    def _draw_system(self, c, ti, tr, song, nm, mmap, total_w, tracks=None):
         grand = self._uses_grand_staff(tr)
         tt = self._treble_top(ti, tracks)
-        bt = self._bass_top(ti, tracks)   # None for single-staff tracks
-        fe=self._fe()
-        x0=self.LM+fe          # x where measure 0 downbeat sits
+        bt = self._bass_top(ti, tracks)  # None for single-staff tracks
+        fe = self._fe()
+        x0 = self.LM + fe  # x where measure 0 downbeat sits
 
         # ── Track label ───────────────────────────────────────────────────
         # v22v: renumber a generic "Track N" name to match its sequential
@@ -7020,21 +8361,38 @@ class ScoreView(tk.Frame):
         # even imported).  Meaningful custom names ("Piano right", etc.)
         # are left untouched.
         import re as _lbl_re
-        if _lbl_re.match(r'^Track\s+\d+$', tr.name or ''):
+
+        if _lbl_re.match(r"^Track\s+\d+$", tr.name or ""):
             label = f"Track {ti + 1}"
         else:
             label = f"{tr.name}"
-        if len(label)>28: label=label[:26]+"…"
-        c.create_text(6,tt-10,text=label,
-                      font=("TkDefaultFont",9,"bold"),fill="#333",anchor="w")
+        if len(label) > 28:
+            label = label[:26] + "…"
+        c.create_text(
+            6,
+            tt - 10,
+            text=label,
+            font=("TkDefaultFont", 9, "bold"),
+            fill="#333",
+            anchor="w",
+        )
 
         # ── Brace (grand staff only) ───────────────────────────────────────
         if grand and bt is not None:
-            bx=18
-            c.create_line(bx,tt,bx,bt+self.SH,width=3,fill="black")
-            for yy in (tt,bt+self.SH):
-                c.create_arc(bx-7,yy-7,bx+7,yy+7,start=0,extent=180,
-                             style=tk.ARC,outline="black",width=2)
+            bx = 18
+            c.create_line(bx, tt, bx, bt + self.SH, width=3, fill="black")
+            for yy in (tt, bt + self.SH):
+                c.create_arc(
+                    bx - 7,
+                    yy - 7,
+                    bx + 7,
+                    yy + 7,
+                    start=0,
+                    extent=180,
+                    style=tk.ARC,
+                    outline="black",
+                    width=2,
+                )
 
         # ── Clef symbols ──────────────────────────────────────────────────
         # v22ze-25 fix (housekeeping item 7): the opening clef of each
@@ -7050,13 +8408,14 @@ class ScoreView(tk.Frame):
         # starts high. Same "isolate a plausible cluster, then test if
         # it's uncomfortable" logic as the inline mid-line check,
         # restricted to measure 0 only.
-        top_clef, bot_clef = "𝄞", "𝄢"   # defaults
+        top_clef, bot_clef = "𝄞", "𝄢"  # defaults
         if grand and bt is not None and mmap:
             _use_flats0 = _song_uses_flats(self.app.song)
             _ms0, _me0 = mmap[0][1], mmap[0][2]
             m0_notes = [n for n in tr.notes if _ms0 <= n.tick < _me0]
-            treble_notes0 = [n for n in m0_notes
-                              if note_staff_pos(n, _use_flats0)[0] >= -2]
+            treble_notes0 = [
+                n for n in m0_notes if note_staff_pos(n, _use_flats0)[0] >= -2
+            ]
             # v22ze-67 fix: on a RAW, not-yet-hand-split file (the normal
             # state right after loading, before Rationalize/Separate
             # Hands has run), m0_notes is BOTH hands mixed together --
@@ -7078,34 +8437,53 @@ class ScoreView(tk.Frame):
             # v22ze-25 fix this heuristic exists for) still clears both
             # bars easily.
             if len(treble_notes0) >= 2 and all(n.pitch < 60 for n in treble_notes0):
-                top_clef = "𝄢"          # RH opens low -- bass clef in treble staff
-            bass_notes0 = [n for n in m0_notes
-                           if note_staff_pos(n, _use_flats0)[0] < 2]
+                top_clef = "𝄢"  # RH opens low -- bass clef in treble staff
+            bass_notes0 = [n for n in m0_notes if note_staff_pos(n, _use_flats0)[0] < 2]
             if len(bass_notes0) >= 2 and all(n.pitch > 64 for n in bass_notes0):
-                bot_clef = "𝄞"          # LH opens high -- treble clef in bass staff
+                bot_clef = "𝄞"  # LH opens high -- treble clef in bass staff
 
         clef_x = self.LM + 4
-        c.create_text(clef_x, tt+self.SH*0.55, text=top_clef,
-                      font=("serif",int(self.SLG*2.8)), fill="#111", anchor="w")
+        c.create_text(
+            clef_x,
+            tt + self.SH * 0.55,
+            text=top_clef,
+            font=("serif", int(self.SLG * 2.8)),
+            fill="#111",
+            anchor="w",
+        )
         if grand and bt is not None:
-            c.create_text(clef_x, bt+self.SLG*1.8,  text=bot_clef,
-                          font=("serif",int(self.SLG*2.8)), fill="#111", anchor="w")
+            c.create_text(
+                clef_x,
+                bt + self.SLG * 1.8,
+                text=bot_clef,
+                font=("serif", int(self.SLG * 2.8)),
+                fill="#111",
+                anchor="w",
+            )
 
         # ── Key signature ────────────────────────────────────────────────
         # Draw flats or sharps on the staff lines/spaces at standard positions.
         # Key name from MIDI meta-event e.g. "Bb", "F#", "Gm", "C".
-        key_str = getattr(song, 'key_sig', 'C') or 'C'
+        key_str = getattr(song, "key_sig", "C") or "C"
 
         # Circle-of-fifths: standard sharp/flat accidental order for engraving
         # (n_sharps/n_flats below come from key_sig_accidentals(), not from
         # these lists directly).
         # Positions on treble staff (staff-position from top line = 0, each line/space = 0.5 SLG)
         # Sharp positions (F#,C#,G#,D#,A#,E#,B#) on treble: line4,sp2,line5,sp3,sp1,line3,sp5
-        _SHARP_POS_T = [0.0, 1.5, -0.5, 1.0, 2.5, 0.5, 2.0]   # in SLG units from treble top
-        _FLAT_POS_T  = [1.5, 0.5, 2.0, 1.0, 2.5, 1.5, 3.0]    # Bb,Eb,Ab,Db,Gb,Cb,Fb
+        _SHARP_POS_T = [
+            0.0,
+            1.5,
+            -0.5,
+            1.0,
+            2.5,
+            0.5,
+            2.0,
+        ]  # in SLG units from treble top
+        _FLAT_POS_T = [1.5, 0.5, 2.0, 1.0, 2.5, 1.5, 3.0]  # Bb,Eb,Ab,Db,Gb,Cb,Fb
         # Bass staff offsets — each accidental is 3 staff positions (1.5 SLG) lower
         _SHARP_POS_B = [p + 1.5 for p in _SHARP_POS_T]
-        _FLAT_POS_B  = [p + 1.5 for p in _FLAT_POS_T]
+        _FLAT_POS_B = [p + 1.5 for p in _FLAT_POS_T]
 
         # v22ze fix: this used to do `key_str.rstrip('m')` and look the
         # result up in the MAJOR-key tables above -- which silently
@@ -7118,9 +8496,9 @@ class ScoreView(tk.Frame):
         # directive (and any real edition) actually shows.
         n_sharps, n_flats = key_sig_accidentals(key_str)
 
-        clef_w   = int(self.SLG * 2.8)          # approximate clef glyph width
-        key_x0   = self.LM + 4 + clef_w + 2     # start just after clef
-        acc_w    = max(6, int(self.SLG * 0.85))  # spacing between accidentals
+        clef_w = int(self.SLG * 2.8)  # approximate clef glyph width
+        key_x0 = self.LM + 4 + clef_w + 2  # start just after clef
+        acc_w = max(6, int(self.SLG * 0.85))  # spacing between accidentals
         acc_font = ("serif", max(8, int(self.SLG * 1.3)), "bold")
 
         # v22ze fix: same font optical-center offset as the per-note
@@ -7130,20 +8508,24 @@ class ScoreView(tk.Frame):
         _key_acc_dy = -self.SLG * 0.30
         if n_sharps > 0:
             for k in range(n_sharps):
-                x  = key_x0 + k * acc_w
+                x = key_x0 + k * acc_w
                 yt = tt + _SHARP_POS_T[k] * self.SLG + _key_acc_dy
                 c.create_text(x, yt, text="♯", font=acc_font, fill="#111", anchor="w")
                 if grand and bt is not None:
                     yb = bt + _SHARP_POS_B[k] * self.SLG + _key_acc_dy
-                    c.create_text(x, yb, text="♯", font=acc_font, fill="#111", anchor="w")
+                    c.create_text(
+                        x, yb, text="♯", font=acc_font, fill="#111", anchor="w"
+                    )
         elif n_flats > 0:
             for k in range(n_flats):
-                x  = key_x0 + k * acc_w
+                x = key_x0 + k * acc_w
                 yt = tt + _FLAT_POS_T[k] * self.SLG + _key_acc_dy
                 c.create_text(x, yt, text="♭", font=acc_font, fill="#111", anchor="w")
                 if grand and bt is not None:
                     yb = bt + _FLAT_POS_B[k] * self.SLG + _key_acc_dy
-                    c.create_text(x, yb, text="♭", font=acc_font, fill="#111", anchor="w")
+                    c.create_text(
+                        x, yb, text="♭", font=acc_font, fill="#111", anchor="w"
+                    )
 
         # Advance time-sig x to clear the key signature
         key_sig_w = max(0, (n_sharps or n_flats) * acc_w + acc_w)
@@ -7152,25 +8534,39 @@ class ScoreView(tk.Frame):
         ts_x = key_x0 + key_sig_w + 4
         m0_num, m0_den = mmap[0][3], mmap[0][4]
         for top_y in ([tt] if not grand or bt is None else [tt, bt]):
-            mid = top_y + self.SH/2
-            c.create_text(ts_x, mid-self.SLG*0.9,
-                          text=str(m0_num),
-                          font=("serif",int(self.SLG*1.8),"bold"), fill="black")
-            c.create_text(ts_x, mid+self.SLG*0.9,
-                          text=str(m0_den),
-                          font=("serif",int(self.SLG*1.8),"bold"), fill="black")
+            mid = top_y + self.SH / 2
+            c.create_text(
+                ts_x,
+                mid - self.SLG * 0.9,
+                text=str(m0_num),
+                font=("serif", int(self.SLG * 1.8), "bold"),
+                fill="black",
+            )
+            c.create_text(
+                ts_x,
+                mid + self.SLG * 0.9,
+                text=str(m0_den),
+                font=("serif", int(self.SLG * 1.8), "bold"),
+                fill="black",
+            )
 
         # ── Tempo marking ─────────────────────────────────────────────────
         bpm = max(1, round(60_000_000 / song.tempo))
-        c.create_text(ts_x+2, tt-16, text=f"♩ = {bpm}",
-                      font=("TkDefaultFont",9), fill="#333", anchor="w")
+        c.create_text(
+            ts_x + 2,
+            tt - 16,
+            text=f"♩ = {bpm}",
+            font=("TkDefaultFont", 9),
+            fill="#333",
+            anchor="w",
+        )
 
         # ── Staff lines ───────────────────────────────────────────────────
         staves = [tt] if not grand or bt is None else [tt, bt]
         for top_y in staves:
             for line in range(5):
-                y = top_y + line*self.SLG
-                c.create_line(self.LM, y, total_w-10, y, fill="#444", width=1)
+                y = top_y + line * self.SLG
+                c.create_line(self.LM, y, total_w - 10, y, fill="#444", width=1)
 
         # ── Bar lines + measure numbers + inline time sig changes ─────────
         # v22ze-30 fix: this was the actual source of the "unsupported
@@ -7186,7 +8582,7 @@ class ScoreView(tk.Frame):
         # point for that track ever got drawn.
         y1 = tt
         y2 = (bt + self.SH) if (grand and bt is not None) else (tt + self.SH)
-        c.create_line(x0, y1, x0, y2, fill="#666", width=1)   # opening barline
+        c.create_line(x0, y1, x0, y2, fill="#666", width=1)  # opening barline
         prev_num, prev_den = m0_num, m0_den
         for m_idx, ms, me, num, den, tpm in mmap:
             xs = self._tick_to_x(ms)
@@ -7194,8 +8590,14 @@ class ScoreView(tk.Frame):
             # Closing barline of this measure
             c.create_line(xe, y1, xe, y2, fill="#666", width=1)
             # Measure number above treble staff
-            c.create_text(xs+3, tt-14, text=str(m_idx+1),
-                          font=("TkFixedFont",8), fill="#aaa", anchor="w")
+            c.create_text(
+                xs + 3,
+                tt - 14,
+                text=str(m_idx + 1),
+                font=("TkFixedFont", 8),
+                fill="#aaa",
+                anchor="w",
+            )
             # Inline time sig change (drawn at the START of the new measure)
             if m_idx > 0 and (num != prev_num or den != prev_den):
                 tsig_x = xs + 4
@@ -7207,26 +8609,36 @@ class ScoreView(tk.Frame):
                 # one wasn't the first thing hit) reached a non-piano
                 # track.
                 for top_y in ([tt] if not grand or bt is None else [tt, bt]):
-                    mid = top_y + self.SH/2
-                    c.create_text(tsig_x, mid-self.SLG*0.75,
-                                  text=str(num),
-                                  font=("serif",int(self.SLG*1.4),"bold"), fill="#555")
-                    c.create_text(tsig_x, mid+self.SLG*0.75,
-                                  text=str(den),
-                                  font=("serif",int(self.SLG*1.4),"bold"), fill="#555")
+                    mid = top_y + self.SH / 2
+                    c.create_text(
+                        tsig_x,
+                        mid - self.SLG * 0.75,
+                        text=str(num),
+                        font=("serif", int(self.SLG * 1.4), "bold"),
+                        fill="#555",
+                    )
+                    c.create_text(
+                        tsig_x,
+                        mid + self.SLG * 0.75,
+                        text=str(den),
+                        font=("serif", int(self.SLG * 1.4), "bold"),
+                        fill="#555",
+                    )
                 prev_num, prev_den = num, den
         # Final double barline
         last_xe = self._tick_to_x(mmap[-1][2])
-        c.create_line(last_xe-3, y1, last_xe-3, y2, fill="black", width=3)
+        c.create_line(last_xe - 3, y1, last_xe - 3, y2, fill="black", width=3)
 
         # ── Notes and rests ───────────────────────────────────────────────
-        nr=max(3,int(self.SLG*0.70))   # v22ze: was doubled to 0.88, corrected -20% per feedback
-        self._draw_chords(c,tr,tt,bt,nr,song,nm,mmap,ti=ti)
-        self._draw_rests(c,tr,tt,bt,nm,song,mmap,ti=ti)
+        nr = max(
+            3, int(self.SLG * 0.70)
+        )  # v22ze: was doubled to 0.88, corrected -20% per feedback
+        self._draw_chords(c, tr, tt, bt, nr, song, nm, mmap, ti=ti)
+        self._draw_rests(c, tr, tt, bt, nm, song, mmap, ti=ti)
 
     # ─── Chord-aware note drawing ────────────────────────────────────────────
 
-    CHORD_TOL = 20   # ticks — notes within this range are treated as one chord
+    CHORD_TOL = 20  # ticks — notes within this range are treated as one chord
 
     def _group_chords(self, notes):
         """Group notes into chords.  Two notes belong to the same chord when
@@ -7235,17 +8647,19 @@ class ScoreView(tk.Frame):
         note), so a run of notes 18 ticks apart does NOT cascade into one
         giant chord — only notes genuinely close to the group's anchor tick
         are merged.  Each group is sorted low→high by pitch."""
-        if not notes: return []
+        if not notes:
+            return []
         sorted_n = sorted(notes, key=lambda n: n.tick)
-        groups = []; cur = [sorted_n[0]]
+        groups = []
+        cur = [sorted_n[0]]
         anchor_tick = sorted_n[0].tick
         for n in sorted_n[1:]:
             if n.tick - anchor_tick <= self.CHORD_TOL:
-                cur.append(n)          # same chord — compare vs anchor, not prev
+                cur.append(n)  # same chord — compare vs anchor, not prev
             else:
                 groups.append(sorted(cur, key=lambda n: n.pitch))
                 cur = [n]
-                anchor_tick = n.tick   # new anchor for next chord
+                anchor_tick = n.tick  # new anchor for next chord
         groups.append(sorted(cur, key=lambda n: n.pitch))
         return groups
 
@@ -7263,9 +8677,10 @@ class ScoreView(tk.Frame):
         # Score-only quantization copy (does not modify song data)
         class _TmpTrack:
             pass
+
         qtr = _TmpTrack()
-        qtr.name   = getattr(tr, "name", "track")
-        qtr.notes  = []
+        qtr.name = getattr(tr, "name", "track")
+        qtr.notes = []
         qtr.events = getattr(tr, "events", [])  # v22q: needed by _draw_pedal
         # v22ze-50 fix: dynamics markings (mf, ff, etc.) live on
         # Track.markings, not Track.notes/events -- _click_dynamics()
@@ -7295,7 +8710,7 @@ class ScoreView(tk.Frame):
             cpy.spelling = getattr(n, "spelling", "")  # v22ze-51
             qtr.notes.append(cpy)
 
-        div_map = {4:1, 8:2, 16:4, 32:8}
+        div_map = {4: 1, 8: 2, 16: 4, 32: 8}
         score_div = div_map.get(getattr(self.app, "quantize_division", 8), 2)
 
         # Score-display onset snap: move note onsets to nearest grid position
@@ -7304,7 +8719,7 @@ class ScoreView(tk.Frame):
         # Quantizing duration was the root cause of sixteenth notes appearing
         # as eighth notes on screen: a 200-tick note at 480-tick grid rounded
         # to 0 → clamped to 1 tick; a 350-tick note rounded to 480 (eighth).
-        grid = max(1, tpb // (score_div * 2))   # finer onset grid (16th default)
+        grid = max(1, tpb // (score_div * 2))  # finer onset grid (16th default)
         for n in qtr.notes:
             n.tick = int(round(n.tick / grid) * grid)
         tr = qtr
@@ -7328,18 +8743,20 @@ class ScoreView(tk.Frame):
         # then picks the pieces up automatically with zero changes of its
         # own, since it already looks for exactly this shape.
         _mmap_starts_r = [ms for (_mi, ms, me, *_r) in mmap]
+
         def _measure_bounds_r(tick):
             i = bisect.bisect_right(_mmap_starts_r, tick) - 1
             if 0 <= i < len(mmap):
                 _mi, ms, me, _n, _d, _tpm = mmap[i]
                 return ms, me
             return None, None
+
         _split_notes = []
         for n in qtr.notes:
             cur = n
-            _guard = 0   # safety cap -- a note can only cross so many
-                         # real barlines; this just prevents a runaway
-                         # loop if mmap/tick data is ever malformed.
+            _guard = 0  # safety cap -- a note can only cross so many
+            # real barlines; this just prevents a runaway
+            # loop if mmap/tick data is ever malformed.
             while _guard < 64:
                 _guard += 1
                 ms, me = _measure_bounds_r(cur.tick)
@@ -7354,10 +8771,10 @@ class ScoreView(tk.Frame):
                     break
                 # Piece 1: clip to the barline, keep in this measure.
                 piece = type("QNote", (), {})()
-                piece.tick     = cur.tick
-                piece.pitch    = cur.pitch
+                piece.tick = cur.tick
+                piece.pitch = cur.pitch
                 piece.velocity = cur.velocity
-                piece.channel  = cur.channel
+                piece.channel = cur.channel
                 piece.articulation = getattr(cur, "articulation", "")
                 piece.spelling = getattr(cur, "spelling", "")  # v22ze-51
                 piece.duration = max_dur
@@ -7366,20 +8783,20 @@ class ScoreView(tk.Frame):
                 # the remainder.  Loop again in case it crosses ANOTHER
                 # barline (a note tied across 2+ measures).
                 nxt = type("QNote", (), {})()
-                nxt.tick     = me
-                nxt.pitch    = cur.pitch
+                nxt.tick = me
+                nxt.pitch = cur.pitch
                 nxt.velocity = cur.velocity
-                nxt.channel  = cur.channel
+                nxt.channel = cur.channel
                 nxt.articulation = getattr(cur, "articulation", "")
                 nxt.spelling = getattr(cur, "spelling", "")  # v22ze-51
                 nxt.duration = cur.duration - max_dur
                 cur = nxt
             if cur is not None:
                 _split_notes.append(cur)
-        qtr.notes = _split_notes   # tr IS qtr (see `tr = qtr` above), so
-                                    # this update is already visible via tr
+        qtr.notes = _split_notes  # tr IS qtr (see `tr = qtr` above), so
+        # this update is already visible via tr
 
-        manual_split = self._split_var.get()   # 0 = auto
+        manual_split = self._split_var.get()  # 0 = auto
         # v22ze-27 fix (housekeeping item 8): ONE split point for the
         # whole track, computed the same way to_ly() computes it for
         # export -- not a fresh split recomputed per chord (see
@@ -7388,15 +8805,18 @@ class ScoreView(tk.Frame):
         # export in agreement.
         auto_split = _find_split_pitch_for_track(
             tr.notes,
-            prefer_lh_octaves=getattr(self.app.song, 'prefer_lh_octaves', True))
+            prefer_lh_octaves=getattr(self.app.song, "prefer_lh_octaves", True),
+        )
 
         # ── Detect runs of measures where bass notes go high ────────────────
         _use_flats = _song_uses_flats(self.app.song)
         bass_treble_measures = set()
         for m_idx, ms, me, num, den, tpm in mmap:
-            bass_notes = [n for n in tr.notes
-                          if ms <= n.tick < me
-                          and note_staff_pos(n, _use_flats)[0] < 2]
+            bass_notes = [
+                n
+                for n in tr.notes
+                if ms <= n.tick < me and note_staff_pos(n, _use_flats)[0] < 2
+            ]
             if bass_notes and all(n.pitch > 59 for n in bass_notes):
                 bass_treble_measures.add(m_idx)
 
@@ -7427,9 +8847,11 @@ class ScoreView(tk.Frame):
         # the bass_treble check uses, mirrored onto the other boundary.
         treble_bass_measures = set()
         for m_idx, ms, me, num, den, tpm in mmap:
-            treble_notes = [n for n in tr.notes
-                            if ms <= n.tick < me
-                            and note_staff_pos(n, _use_flats)[0] >= -2]
+            treble_notes = [
+                n
+                for n in tr.notes
+                if ms <= n.tick < me and note_staff_pos(n, _use_flats)[0] >= -2
+            ]
             if treble_notes and all(n.pitch < 64 for n in treble_notes):
                 treble_bass_measures.add(m_idx)
 
@@ -7471,18 +8893,28 @@ class ScoreView(tk.Frame):
         # size. Derived from the same SLG*2.8 constant used for the main
         # clef rather than a new hardcoded literal, so the two stay in
         # proportion if the grand-staff clef size is ever changed.
-        clef_sz  = int(self.SLG * 2.8 * 0.7)
+        clef_sz = int(self.SLG * 2.8 * 0.7)
         # v22ze-30 fix: same missing "bt is None" guard as the two
         # _draw_system fixes above -- this whole block only means
         # anything for a grand-staff (piano) track with a real bass
         # staff to draw an inline clef change into, but the assignment
         # itself ran unconditionally, crashing on any single-staff
         # track before ever reaching the (harmlessly empty) loop below.
-        clef_y   = (bt + self.SH * 0.52) if bt is not None else (tt + self.SH * 0.52)   # vertical centre of bass staff
-        dash_y   = tt + self.SH + self.BGAP//2  # midway between staves
-        for (rs, re) in runs:
-            x0 = (self._tick_to_x(mmap[rs][1]) - clef_sz * 0.9) if rs < len(mmap) else self._tick_to_x(0) - clef_sz*0.9
-            x1 = (self._tick_to_x(mmap[re][2]) - 4) if re < len(mmap) else self._tick_to_x(0)
+        clef_y = (
+            (bt + self.SH * 0.52) if bt is not None else (tt + self.SH * 0.52)
+        )  # vertical centre of bass staff
+        dash_y = tt + self.SH + self.BGAP // 2  # midway between staves
+        for rs, re in runs:
+            x0 = (
+                (self._tick_to_x(mmap[rs][1]) - clef_sz * 0.9)
+                if rs < len(mmap)
+                else self._tick_to_x(0) - clef_sz * 0.9
+            )
+            x1 = (
+                (self._tick_to_x(mmap[re][2]) - 4)
+                if re < len(mmap)
+                else self._tick_to_x(0)
+            )
             # v22ze-25 fix: if this run starts at measure 0, the opening
             # staff clef (item 7) already shows the correct clef for the
             # whole line -- drawing the small inline clef glyph again
@@ -7494,49 +8926,89 @@ class ScoreView(tk.Frame):
             if rs == 0:
                 dash_x0 = x0
             else:
-                c.create_text(x0, clef_y, text="𝄞",
-                              font=("serif", clef_sz), fill="black",
-                              anchor="w", tags="clef_change")
+                c.create_text(
+                    x0,
+                    clef_y,
+                    text="𝄞",
+                    font=("serif", clef_sz),
+                    fill="black",
+                    anchor="w",
+                    tags="clef_change",
+                )
                 dash_x0 = x0 + clef_sz
             # Dashed horizontal line from after clef to end of run
-            c.create_line(dash_x0, dash_y, x1, dash_y,
-                          fill="#444", width=1, dash=(6, 4))
+            c.create_line(
+                dash_x0, dash_y, x1, dash_y, fill="#444", width=1, dash=(6, 4)
+            )
             # Closing bracket at end of run
-            c.create_line(x1, dash_y, x1, dash_y + self.SLG,
-                          fill="#444", width=1)
+            c.create_line(x1, dash_y, x1, dash_y + self.SLG, fill="#444", width=1)
             # Return bass clef (slightly smaller than main)
             if re + 1 < nm:
-                rx = (self._tick_to_x(mmap[re + 1][1]) - clef_sz * 0.9) if re + 1 < len(mmap) else self._tick_to_x(mmap[-1][2]) - clef_sz*0.9
-                c.create_text(rx, clef_y, text="𝄢",
-                              font=("serif", clef_sz), fill="black",
-                              anchor="w", tags="clef_change")
+                rx = (
+                    (self._tick_to_x(mmap[re + 1][1]) - clef_sz * 0.9)
+                    if re + 1 < len(mmap)
+                    else self._tick_to_x(mmap[-1][2]) - clef_sz * 0.9
+                )
+                c.create_text(
+                    rx,
+                    clef_y,
+                    text="𝄢",
+                    font=("serif", clef_sz),
+                    fill="black",
+                    anchor="w",
+                    tags="clef_change",
+                )
 
         # v22ze: symmetric drawing for the RH-too-low case -- same idea,
         # mirrored into the treble staff's vertical band: inline bass
         # clef at the run's start, return treble clef at its end.
-        clef_y_tr  = tt + self.SH * 0.52   # vertical centre of treble staff
-        dash_y_tr  = tt - self.BGAP//2      # just above the treble staff
-        for (rs, re) in treble_bass_runs:
-            x0 = (self._tick_to_x(mmap[rs][1]) - clef_sz * 0.9) if rs < len(mmap) else self._tick_to_x(0) - clef_sz*0.9
-            x1 = (self._tick_to_x(mmap[re][2]) - 4) if re < len(mmap) else self._tick_to_x(0)
+        clef_y_tr = tt + self.SH * 0.52  # vertical centre of treble staff
+        dash_y_tr = tt - self.BGAP // 2  # just above the treble staff
+        for rs, re in treble_bass_runs:
+            x0 = (
+                (self._tick_to_x(mmap[rs][1]) - clef_sz * 0.9)
+                if rs < len(mmap)
+                else self._tick_to_x(0) - clef_sz * 0.9
+            )
+            x1 = (
+                (self._tick_to_x(mmap[re][2]) - 4)
+                if re < len(mmap)
+                else self._tick_to_x(0)
+            )
             # v22ze-25 fix: same redundancy fix as the bass-staff loop
             # above -- skip the inline glyph when the run opens the line.
             if rs == 0:
                 dash_x0_tr = x0
             else:
-                c.create_text(x0, clef_y_tr, text="𝄢",
-                              font=("serif", clef_sz), fill="black",
-                              anchor="w", tags="clef_change")
+                c.create_text(
+                    x0,
+                    clef_y_tr,
+                    text="𝄢",
+                    font=("serif", clef_sz),
+                    fill="black",
+                    anchor="w",
+                    tags="clef_change",
+                )
                 dash_x0_tr = x0 + clef_sz
-            c.create_line(dash_x0_tr, dash_y_tr, x1, dash_y_tr,
-                          fill="#444", width=1, dash=(6, 4))
-            c.create_line(x1, dash_y_tr, x1, dash_y_tr - self.SLG,
-                          fill="#444", width=1)
+            c.create_line(
+                dash_x0_tr, dash_y_tr, x1, dash_y_tr, fill="#444", width=1, dash=(6, 4)
+            )
+            c.create_line(x1, dash_y_tr, x1, dash_y_tr - self.SLG, fill="#444", width=1)
             if re + 1 < nm:
-                rx = (self._tick_to_x(mmap[re + 1][1]) - clef_sz * 0.9) if re + 1 < len(mmap) else self._tick_to_x(mmap[-1][2]) - clef_sz*0.9
-                c.create_text(rx, clef_y_tr, text="𝄞",
-                              font=("serif", clef_sz), fill="black",
-                              anchor="w", tags="clef_change")
+                rx = (
+                    (self._tick_to_x(mmap[re + 1][1]) - clef_sz * 0.9)
+                    if re + 1 < len(mmap)
+                    else self._tick_to_x(mmap[-1][2]) - clef_sz * 0.9
+                )
+                c.create_text(
+                    rx,
+                    clef_y_tr,
+                    text="𝄞",
+                    font=("serif", clef_sz),
+                    fill="black",
+                    anchor="w",
+                    tags="clef_change",
+                )
 
         # ── Pass 1: collect every prospective chord entry without drawing ──
         # v22ze: previously drew each chord's stem direction independently,
@@ -7550,7 +9022,7 @@ class ScoreView(tk.Frame):
         # for whatever will actually end up beamed, THEN drawing with
         # that answer already known, fixes this at the root instead of
         # patching stems after they're already on the canvas.
-        entries = []   # (notes, force_treble, is_v2)
+        entries = []  # (notes, force_treble, is_v2)
         for group in self._group_chords(tr.notes):
             if bt is None:
                 # v22ze-30 fix: this was the root cause of the orchestral-
@@ -7566,7 +9038,7 @@ class ScoreView(tk.Frame):
                 # notes on a single-staff track belong on that one
                 # staff, full stop -- no pitch-based splitting applies.
                 rh, lh = group, []
-            elif getattr(tr, '_prehand_split', False):
+            elif getattr(tr, "_prehand_split", False):
                 # v22ze-28 fix: trust the DP's already-decided hand
                 # assignment (tagged via channel: 0=RH, 1=LH at merge
                 # time) instead of re-deriving a split from pitch --
@@ -7574,31 +9046,35 @@ class ScoreView(tk.Frame):
                 # set one, same as the pitch-based path below.
                 if manual_split > 0:
                     rh = [n for n in group if n.pitch >= manual_split]
-                    lh = [n for n in group if n.pitch <  manual_split]
+                    lh = [n for n in group if n.pitch < manual_split]
                 else:
                     rh = [n for n in group if n.channel == 0]
                     lh = [n for n in group if n.channel == 1]
             else:
                 split = manual_split if manual_split > 0 else auto_split
                 rh = [n for n in group if n.pitch >= split]
-                lh = [n for n in group if n.pitch <  split]
+                lh = [n for n in group if n.pitch < split]
 
             def split_voices(notes):
                 """If chord has mixed durations, return (voice1, voice2).
                 voice1 = longer notes (stem down), voice2 = shorter (stem up).
                 If all same duration, return (notes, [])."""
-                if len(notes) < 2: return notes, []
+                if len(notes) < 2:
+                    return notes, []
                 durs = sorted(set(n.duration for n in notes), reverse=True)
-                if len(durs) == 1: return notes, []
+                if len(durs) == 1:
+                    return notes, []
                 # Split at median duration
-                med = durs[len(durs)//2]
+                med = durs[len(durs) // 2]
                 v1 = [n for n in notes if n.duration >= med]
-                v2 = [n for n in notes if n.duration <  med]
-                if not v2: return notes, []
+                v2 = [n for n in notes if n.duration < med]
+                if not v2:
+                    return notes, []
                 return v1, v2
 
             for hand_notes, force_t in [(rh, True), (lh, False)]:
-                if not hand_notes: continue
+                if not hand_notes:
+                    continue
                 v1, v2 = split_voices(hand_notes)
                 entries.append((v1, force_t, False))
                 if v2:
@@ -7606,11 +9082,18 @@ class ScoreView(tk.Frame):
 
         # ── Pass 2: predict beam groups and their shared stem direction ──
         forced_dir = self._predict_beam_stem_directions(
-            entries, tt, bt, tpb, mmap, _use_flats,
-            bass_treble_measures, treble_bass_measures)
+            entries,
+            tt,
+            bt,
+            tpb,
+            mmap,
+            _use_flats,
+            bass_treble_measures,
+            treble_bass_measures,
+        )
 
         # ── Pass 3: draw using the predicted direction where applicable ──
-        stems = []   # collect StemInfo for beam drawing
+        stems = []  # collect StemInfo for beam drawing
         # v22ze: separate courtesy-accidental memory per hand/staff --
         # accidental persistence is a per-staff concept, RH and LH don't
         # share it. entries are already in tick order (built by iterating
@@ -7618,20 +9101,31 @@ class ScoreView(tk.Frame):
         # sequence this naturally processes oldest-to-newest.
         accidental_state_rh = {}
         accidental_state_lh = {}
-        for (notes, force_t, is_v2) in entries:
+        for notes, force_t, is_v2 in entries:
             # v2 (the shorter-duration voice within a mixed-duration
             # chord) keeps its existing always-stem-up rule regardless of
             # beam prediction -- that's a different, unrelated engraving
             # rule (voice separation within one chord), not something
             # beam-group prediction should override.
             fsu = True if is_v2 else forced_dir.get(id(notes))
-            si = self._draw_chord(c, notes, tt, bt, nr, tpb, mmap,
-                                  bass_treble_measures, force_treble=force_t,
-                                  force_stem_up=fsu,
-                                  treble_bass_measures=treble_bass_measures,
-                                  accidental_state=(accidental_state_rh if force_t
-                                                    else accidental_state_lh))
-            if si: stems.append(si)
+            si = self._draw_chord(
+                c,
+                notes,
+                tt,
+                bt,
+                nr,
+                tpb,
+                mmap,
+                bass_treble_measures,
+                force_treble=force_t,
+                force_stem_up=fsu,
+                treble_bass_measures=treble_bass_measures,
+                accidental_state=(
+                    accidental_state_rh if force_t else accidental_state_lh
+                ),
+            )
+            if si:
+                stems.append(si)
 
         # Draw beams (replaces flags for beamed groups)
         self._draw_beams(c, stems, tpb, song)
@@ -7642,8 +9136,17 @@ class ScoreView(tk.Frame):
         # Draw dynamics markings (v22ze-50 fix -- see qtr.markings above)
         self._draw_dynamics(c, tr, tt, bt, tpb, mmap)
 
-    def _clef_branch_for_chord(self, notes, tt, bt, mmap, force_treble,
-                               bass_treble_measures, treble_bass_measures, _use_flats):
+    def _clef_branch_for_chord(
+        self,
+        notes,
+        tt,
+        bt,
+        mmap,
+        force_treble,
+        bass_treble_measures,
+        treble_bass_measures,
+        _use_flats,
+    ):
         """Determine which staff/clef branch a chord draws on, and the
         resulting (sp_to_y, top_y, bot_sp, top_sp, mid_sp, measure, use_treble).
 
@@ -7657,64 +9160,89 @@ class ScoreView(tk.Frame):
         source of truth.
         """
         positions = [note_staff_pos(n, _use_flats)[0] for n in notes]
-        med_pos   = sorted(positions)[len(positions) // 2]
+        med_pos = sorted(positions)[len(positions) // 2]
         if force_treble is True:
             use_treble = True
         elif force_treble is False:
             use_treble = False
         else:
-            use_treble = med_pos >= 2   # corrected: treble bottom line = pos 2
+            use_treble = med_pos >= 2  # corrected: treble bottom line = pos 2
 
         measure = 0
         for m_idx, ms, me, _n, _d, _t in mmap:
             if ms <= notes[0].tick < me:
                 measure = m_idx
                 break
-        use_treble_clef_in_bass = (not use_treble and measure in bass_treble_measures)
-        use_bass_clef_in_treble = (use_treble and treble_bass_measures is not None
-                                    and measure in treble_bass_measures)
+        use_treble_clef_in_bass = not use_treble and measure in bass_treble_measures
+        use_bass_clef_in_treble = (
+            use_treble
+            and treble_bass_measures is not None
+            and measure in treble_bass_measures
+        )
 
         if use_treble:
-            sp_to_y          = self._sp_to_y_treble
-            top_y            = tt
-            bot_sp, top_sp   = 2, 10   # E4 (bottom) to F5 (top)
-            mid_sp           = 6       # B4 = middle line of treble staff
+            sp_to_y = self._sp_to_y_treble
+            top_y = tt
+            bot_sp, top_sp = 2, 10  # E4 (bottom) to F5 (top)
+            mid_sp = 6  # B4 = middle line of treble staff
         elif use_treble_clef_in_bass:
-            sp_to_y          = self._sp_to_y_treble
-            top_y            = bt      # render in bass strip but treble positions
-            bot_sp, top_sp   = 2, 10
-            mid_sp           = 6
+            sp_to_y = self._sp_to_y_treble
+            top_y = bt  # render in bass strip but treble positions
+            bot_sp, top_sp = 2, 10
+            mid_sp = 6
         else:
-            sp_to_y          = self._sp_to_y_bass
-            top_y            = bt
-            bot_sp, top_sp   = -10, -2  # G2 (bottom) to A3 (top)
-            mid_sp           = -6       # D3 = middle line of bass staff
+            sp_to_y = self._sp_to_y_bass
+            top_y = bt
+            bot_sp, top_sp = -10, -2  # G2 (bottom) to A3 (top)
+            mid_sp = -6  # D3 = middle line of bass staff
 
         if use_bass_clef_in_treble:
-            sp_to_y          = self._sp_to_y_bass
-            top_y            = tt      # render in treble strip but bass positions
-            bot_sp, top_sp   = -10, -2
-            mid_sp           = -6
+            sp_to_y = self._sp_to_y_bass
+            top_y = tt  # render in treble strip but bass positions
+            bot_sp, top_sp = -10, -2
+            mid_sp = -6
 
         return sp_to_y, top_y, bot_sp, top_sp, mid_sp, measure, use_treble
 
-    def _draw_chord(self, c, notes, tt, bt, nr, tpb, mmap, bass_treble_measures,
-                    force_treble=None, force_stem_up=None, treble_bass_measures=None,
-                    accidental_state=None):
+    def _draw_chord(
+        self,
+        c,
+        notes,
+        tt,
+        bt,
+        nr,
+        tpb,
+        mmap,
+        bass_treble_measures,
+        force_treble=None,
+        force_stem_up=None,
+        treble_bass_measures=None,
+        accidental_state=None,
+    ):
         """Draw a chord (1–N simultaneous notes) following LilyPond engraving rules.
 
         force_treble=True  → draw in treble staff (right hand)
         force_treble=False → draw in bass staff (left hand)
         force_treble=None  → auto-assign by median pitch
         """
-        if not notes: return
+        if not notes:
+            return
 
         _use_flats = _song_uses_flats(self.app.song)
-        _key_str = getattr(self.app.song, 'key_sig', 'C') or 'C'
+        _key_str = getattr(self.app.song, "key_sig", "C") or "C"
 
-        sp_to_y, top_y, bot_sp, top_sp, mid_sp, measure, use_treble = self._clef_branch_for_chord(
-            notes, tt, bt, mmap, force_treble,
-            bass_treble_measures, treble_bass_measures, _use_flats)
+        sp_to_y, top_y, bot_sp, top_sp, mid_sp, measure, use_treble = (
+            self._clef_branch_for_chord(
+                notes,
+                tt,
+                bt,
+                mmap,
+                force_treble,
+                bass_treble_measures,
+                treble_bass_measures,
+                _use_flats,
+            )
+        )
 
         # v22ze: courtesy-accidental tracking. A sharp/flat only needs to
         # be drawn once per measure for a given specific line/space
@@ -7725,19 +9253,19 @@ class ScoreView(tk.Frame):
         # measure changes; accidental_state may be None if a caller
         # doesn't want this behavior (falls back to always showing).
         if accidental_state is not None:
-            if accidental_state.get('measure') != measure:
-                accidental_state['measure'] = measure
-                accidental_state['active'] = {}
+            if accidental_state.get("measure") != measure:
+                accidental_state["measure"] = measure
+                accidental_state["active"] = {}
 
         # Use median duration so one short note doesn't misclassify whole chord
         durs = sorted(n.duration for n in notes)
-        db   = durs[len(durs)//2] / tpb
+        db = durs[len(durs) // 2] / tpb
         # Round to nearest integer rather than truncating — both RH and LH
         # staves compute x from _tick_to_x(tick) which returns a float.
         # Truncating (int()) can give different pixel positions for the same
         # tick when floating-point rounding differs slightly between calls.
         # round() guarantees both staves land on the same pixel column.
-        x    = round(self._tick_to_x(notes[0].tick)) + nr + 2
+        x = round(self._tick_to_x(notes[0].tick)) + nr + 2
 
         # ── Collect notehead y-positions (staff positions, accidentals) ──────
         # ys: list of (staff_pos, accidental, canvas_y, MidiNote)  low→high pitch
@@ -7751,7 +9279,10 @@ class ScoreView(tk.Frame):
         if force_stem_up is not None:
             stem_up = force_stem_up
         else:
-            def dist(pos): return abs(pos - mid_sp)
+
+            def dist(pos):
+                return abs(pos - mid_sp)
+
             furthest = max(ys, key=lambda t: dist(t[0]))
             stem_up = True if dist(furthest[0]) == 0 else furthest[0] < mid_sp
 
@@ -7775,24 +9306,24 @@ class ScoreView(tk.Frame):
         sl = self.SLG * sl_spaces
 
         # Canvas y increases downward; high pitch = small y
-        mid_y = sp_to_y(mid_sp, top_y)   # canvas y of staff middle line
+        mid_y = sp_to_y(mid_sp, top_y)  # canvas y of staff middle line
 
         # stem_root_y = notehead end of stem (spans all noteheads);
         # sy = free tip. Stem drawn from stem_root_y to sy covers all notes.
         if stem_up:
-            stem_root_y = max(t[2] for t in ys)   # BOTTOM notehead (largest y)
-            tip_anchor  = min(t[2] for t in ys)   # TOP notehead (smallest y)
-            sy = tip_anchor - sl   # tip above topmost note
-            sy = min(sy, mid_y)                    # must reach middle line
-            sy = max(sy, mid_y - self.SLG * 4)    # not >4 spaces above it
+            stem_root_y = max(t[2] for t in ys)  # BOTTOM notehead (largest y)
+            tip_anchor = min(t[2] for t in ys)  # TOP notehead (smallest y)
+            sy = tip_anchor - sl  # tip above topmost note
+            sy = min(sy, mid_y)  # must reach middle line
+            sy = max(sy, mid_y - self.SLG * 4)  # not >4 spaces above it
             # prevent up-stem from a bass-staff chord entering the treble area
             sy = max(sy, top_y - self.SLG * 1.5)
         else:
-            stem_root_y = min(t[2] for t in ys)   # TOP notehead (smallest y)
-            tip_anchor  = max(t[2] for t in ys)   # BOTTOM notehead (largest y)
-            sy = tip_anchor + sl   # tip below bottommost note
-            sy = max(sy, mid_y)                    # must reach middle line
-            sy = min(sy, mid_y + self.SLG * 4)    # not >4 spaces below it
+            stem_root_y = min(t[2] for t in ys)  # TOP notehead (smallest y)
+            tip_anchor = max(t[2] for t in ys)  # BOTTOM notehead (largest y)
+            sy = tip_anchor + sl  # tip below bottommost note
+            sy = max(sy, mid_y)  # must reach middle line
+            sy = min(sy, mid_y + self.SLG * 4)  # not >4 spaces below it
 
         sx = x + (nr if stem_up else -nr)
 
@@ -7821,11 +9352,13 @@ class ScoreView(tk.Frame):
         sorted_ys = sorted(ys, key=lambda t: t[0])
         n = len(sorted_ys)
         parent = list(range(n))
+
         def _find(i):
             while parent[i] != i:
                 parent[i] = parent[parent[i]]
                 i = parent[i]
             return i
+
         def _union(i, j):
             ri, rj = _find(i), _find(j)
             if ri != rj:
@@ -7841,8 +9374,8 @@ class ScoreView(tk.Frame):
         # the first -- both notes were genuinely there in the data, only
         # one was ever visible.
         for i in range(n - 1):
-            if sorted_ys[i+1][0] - sorted_ys[i][0] <= 1:
-                _union(i, i+1)
+            if sorted_ys[i + 1][0] - sorted_ys[i][0] <= 1:
+                _union(i, i + 1)
 
         # Phase 2: grow seeded clusters outward via accidental-thirds,
         # repeating to a fixed point so a chain of several altered tones
@@ -7854,29 +9387,33 @@ class ScoreView(tk.Frame):
             for i in range(n):
                 root_size[_find(i)] = root_size.get(_find(i), 0) + 1
             for i in range(n - 1):
-                diff = sorted_ys[i+1][0] - sorted_ys[i][0]
+                diff = sorted_ys[i + 1][0] - sorted_ys[i][0]
                 if diff != 2:
                     continue
-                if not (sorted_ys[i][1] != 0 or sorted_ys[i+1][1] != 0):
+                if not (sorted_ys[i][1] != 0 or sorted_ys[i + 1][1] != 0):
                     continue
-                ri, rj = _find(i), _find(j := i+1)
-                if ri != rj and (root_size.get(ri, 1) >= 2 or root_size.get(rj, 1) >= 2):
+                ri, rj = _find(i), _find(j := i + 1)
+                if ri != rj and (
+                    root_size.get(ri, 1) >= 2 or root_size.get(rj, 1) >= 2
+                ):
                     _union(i, j)
                     changed = True
 
         clusters_by_root = {}
         for i in range(n):
             clusters_by_root.setdefault(_find(i), []).append(i)
-        clusters = list(clusters_by_root.values())   # each already ascending (built in index order)
+        clusters = list(
+            clusters_by_root.values()
+        )  # each already ascending (built in index order)
 
-        offset_set = set()   # note ids that get mirrored to the far side of the stem
+        offset_set = set()  # note ids that get mirrored to the far side of the stem
         for cluster in clusters:
             if len(cluster) < 2:
-                continue   # isolated note, no conflict -- stays normal
+                continue  # isolated note, no conflict -- stays normal
             # anchor end: topmost for stem-up, bottommost for stem-down
             order = list(reversed(cluster)) if stem_up else list(cluster)
             for k, idx in enumerate(order):
-                if k % 2 == 1:   # alternate: anchor normal, then offset, normal, ...
+                if k % 2 == 1:  # alternate: anchor normal, then offset, normal, ...
                     offset_set.add(id(sorted_ys[idx][3]))
 
         # ── Draw ledger lines, accidentals, noteheads ────────────────────────
@@ -7896,18 +9433,18 @@ class ScoreView(tk.Frame):
             # exactly the "note placed off the stem behind the rest of the
             # chord" symptom originally reported.
             if id(n) in offset_set:
-                nx = x + (2*nr if stem_up else -2*nr)
+                nx = x + (2 * nr if stem_up else -2 * nr)
             else:
                 nx = x
-            for lp in range(int(bot_sp)-2, int(pos)-1, -2):
+            for lp in range(int(bot_sp) - 2, int(pos) - 1, -2):
                 ly = sp_to_y(lp, top_y)
-                c.create_line(nx-nr-4, ly, nx+nr+4, ly, fill="black", width=1)
-            for lp in range(int(top_sp)+2, int(pos)+1, 2):
+                c.create_line(nx - nr - 4, ly, nx + nr + 4, ly, fill="black", width=1)
+            for lp in range(int(top_sp) + 2, int(pos) + 1, 2):
                 ly = sp_to_y(lp, top_y)
-                c.create_line(nx-nr-4, ly, nx+nr+4, ly, fill="black", width=1)
+                c.create_line(nx - nr - 4, ly, nx + nr + 4, ly, fill="black", width=1)
             if n.pitch == 60:
                 ly = self._sp_to_y_treble(0, tt)
-                c.create_line(nx-nr-4, ly, nx+nr+4, ly, fill="black", width=1)
+                c.create_line(nx - nr - 4, ly, nx + nr + 4, ly, fill="black", width=1)
             # v22ze fix: courtesy-accidental suppression. Without
             # accidental_state tracking, every note redundantly redrew
             # its sharp/flat even when the SAME specific line/space was
@@ -7918,14 +9455,14 @@ class ScoreView(tk.Frame):
             # also means a plain B in a piece keyed to 2 flats shows
             # nothing at all (already covered by the key signature),
             # not a flat on its first occurrence in every measure.
-            show_glyph = None   # None=nothing, 1='#', -1='b', 0=natural
+            show_glyph = None  # None=nothing, 1='#', -1='b', 0=natural
             if accidental_state is not None:
                 letter_idx = int(pos) % 7
                 key_default = key_implied_accidental(letter_idx, _key_str)
-                prev = accidental_state['active'].get(pos, key_default)
+                prev = accidental_state["active"].get(pos, key_default)
                 if acc != prev:
                     show_glyph = acc
-                    accidental_state['active'][pos] = acc
+                    accidental_state["active"][pos] = acc
             else:
                 show_glyph = acc if acc != 0 else None
 
@@ -7942,28 +9479,43 @@ class ScoreView(tk.Frame):
             # this pass, so accidentals needed to scale up to match).
             _acc_y = y - self.SLG * 0.30
             if show_glyph == 1:
-                c.create_text(nx-nr-10, _acc_y, text="♯",
-                              font=("serif", int(self.SLG*1.8), "bold"),
-                              fill="#111", anchor="center")
+                c.create_text(
+                    nx - nr - 10,
+                    _acc_y,
+                    text="♯",
+                    font=("serif", int(self.SLG * 1.8), "bold"),
+                    fill="#111",
+                    anchor="center",
+                )
             elif show_glyph == -1:
-                c.create_text(nx-nr-10, _acc_y, text="♭",
-                              font=("serif", int(self.SLG*1.8), "bold"),
-                              fill="#111", anchor="center")
+                c.create_text(
+                    nx - nr - 10,
+                    _acc_y,
+                    text="♭",
+                    font=("serif", int(self.SLG * 1.8), "bold"),
+                    fill="#111",
+                    anchor="center",
+                )
             elif show_glyph == 0:
-                c.create_text(nx-nr-10, _acc_y, text="♮",
-                              font=("serif", int(self.SLG*1.8), "bold"),
-                              fill="#111", anchor="center")
+                c.create_text(
+                    nx - nr - 10,
+                    _acc_y,
+                    text="♮",
+                    font=("serif", int(self.SLG * 1.8), "bold"),
+                    fill="#111",
+                    anchor="center",
+                )
             # Notehead as proper oval (wider than tall) that doesn't touch staff lines
             # h_rad = horizontal radius (width/2), v_rad = vertical radius (height/2)
             # Scale so noteheads fit snugly between staff lines (gap of ~0.1*SLG on each side)
-            h_rad = nr * 0.90   # horizontal (slightly wider)
-            v_rad = nr * 0.60   # vertical (noticeably shorter — fits between lines)
+            h_rad = nr * 0.90  # horizontal (slightly wider)
+            v_rad = nr * 0.60  # vertical (noticeably shorter — fits between lines)
             # Grace notes: smaller notehead, drawn in dark grey to distinguish
-            is_grace = any(getattr(n, 'articulation', '') == 'grace' for n in notes)
+            is_grace = any(getattr(n, "articulation", "") == "grace" for n in notes)
             if is_grace:
                 h_rad *= 0.65
                 v_rad *= 0.65
-            fill_col    = "black"
+            fill_col = "black"
             outline_col = "black"
             if is_grace:
                 fill_col = outline_col = "#444444"
@@ -7972,11 +9524,15 @@ class ScoreView(tk.Frame):
                 # so a staff line already drawn underneath shows through
                 # the open interior, matching real engraving -- "white"
                 # painted over and hid the line instead.
-                _nh_id = _draw_notehead(c, nx, y, h_rad, v_rad, outline_col, "", width=2)
+                _nh_id = _draw_notehead(
+                    c, nx, y, h_rad, v_rad, outline_col, "", width=2
+                )
                 _nh_orig_fill = ""
             elif db >= 2:
                 # Half note: outline only, same reasoning as whole note above.
-                _nh_id = _draw_notehead(c, nx, y, h_rad, v_rad, outline_col, "", width=2)
+                _nh_id = _draw_notehead(
+                    c, nx, y, h_rad, v_rad, outline_col, "", width=2
+                )
                 _nh_orig_fill = ""
             else:
                 # Quarter, eighth, etc: filled
@@ -7995,46 +9551,83 @@ class ScoreView(tk.Frame):
             # apply the requested mark" was really "applies the data
             # change, never draws it." Marks are placed on the side of
             # the notehead away from the stem, per standard engraving.
-            art = getattr(n, 'articulation', '')
-            if art and art not in ('grace', 'pedal_extended', 'tie_continuation'):
+            art = getattr(n, "articulation", "")
+            if art and art not in ("grace", "pedal_extended", "tie_continuation"):
                 art_y = y + (self.SLG * 1.15 if stem_up else -self.SLG * 1.15)
-                if art == 'staccato':
+                if art == "staccato":
                     r = max(1.5, self.SLG * 0.14)
-                    c.create_oval(nx - r, art_y - r, nx + r, art_y + r,
-                                  fill="black", outline="black")
-                elif art == 'accent':
+                    c.create_oval(
+                        nx - r,
+                        art_y - r,
+                        nx + r,
+                        art_y + r,
+                        fill="black",
+                        outline="black",
+                    )
+                elif art == "accent":
                     w = self.SLG * 0.55
-                    c.create_line(nx - w, art_y - w*0.7, nx + w, art_y,
-                                  nx - w, art_y + w*0.7,
-                                  fill="black", width=1.6, smooth=False)
-                elif art == 'marcato':
+                    c.create_line(
+                        nx - w,
+                        art_y - w * 0.7,
+                        nx + w,
+                        art_y,
+                        nx - w,
+                        art_y + w * 0.7,
+                        fill="black",
+                        width=1.6,
+                        smooth=False,
+                    )
+                elif art == "marcato":
                     w = self.SLG * 0.5
-                    c.create_line(nx - w, art_y + w*0.8, nx, art_y - w*0.9,
-                                  nx + w, art_y + w*0.8,
-                                  fill="black", width=1.6, smooth=False)
-                elif art == 'tenuto':
+                    c.create_line(
+                        nx - w,
+                        art_y + w * 0.8,
+                        nx,
+                        art_y - w * 0.9,
+                        nx + w,
+                        art_y + w * 0.8,
+                        fill="black",
+                        width=1.6,
+                        smooth=False,
+                    )
+                elif art == "tenuto":
                     w = self.SLG * 0.55
-                    c.create_line(nx - w, art_y, nx + w, art_y,
-                                  fill="black", width=2.2)
-                elif art in ('pizzicato', 'arco'):
-                    label = 'pizz.' if art == 'pizzicato' else 'arco'
-                    c.create_text(nx, art_y + (self.SLG * 0.9 if stem_up else -self.SLG * 0.9),
-                                  text=label,
-                                  font=("serif", max(7, int(self.SLG * 1.0)), "italic"),
-                                  fill="#222", anchor="center")
+                    c.create_line(nx - w, art_y, nx + w, art_y, fill="black", width=2.2)
+                elif art in ("pizzicato", "arco"):
+                    label = "pizz." if art == "pizzicato" else "arco"
+                    c.create_text(
+                        nx,
+                        art_y + (self.SLG * 0.9 if stem_up else -self.SLG * 0.9),
+                        text=label,
+                        font=("serif", max(7, int(self.SLG * 1.0)), "italic"),
+                        fill="#222",
+                        anchor="center",
+                    )
 
         # ── Single stem for the whole chord (not for whole notes) ────────────
         if db < 4:
-            c.create_line(sx, stem_root_y, sx, sy, fill="black",
-                          width=max(2, int(self.SLG*0.16)))   # v22ze: bolder stem
+            c.create_line(
+                sx,
+                stem_root_y,
+                sx,
+                sy,
+                fill="black",
+                width=max(2, int(self.SLG * 0.16)),
+            )  # v22ze: bolder stem
 
         # ── Return StemInfo for beam drawing; flags drawn later by _draw_beams ─
         if db < 4:
             staff_id = "treble" if use_treble else "bass"
             return self.StemInfo(
-                tick=notes[0].tick, x=x, sx=sx,
-                stem_root_y=stem_root_y, sy=sy,
-                stem_up=stem_up, db=db, staff=staff_id)
+                tick=notes[0].tick,
+                x=x,
+                sx=sx,
+                stem_root_y=stem_root_y,
+                sy=sy,
+                stem_up=stem_up,
+                db=db,
+                staff=staff_id,
+            )
         return None
 
     # ─── Beam drawing ────────────────────────────────────────────────────────
@@ -8045,22 +9638,33 @@ class ScoreView(tk.Frame):
         like a real engraved flag — resembling a large tilde/curl, not a U.
         stem_up=True  → flags hang downward from tip (fd=+1 in canvas y)
         stem_up=False → flags rise upward from tip  (fd=-1 in canvas y)"""
-        fd       = 1 if stem_up else -1   # direction away from notehead
-        flag_sp  = self.SLG * 1.15        # vertical spacing between stacked flags
-        fw       = self.SLG * 1.4         # maximum rightward reach
-        fh       = self.SLG * 1.5         # total vertical travel of one flag
+        fd = 1 if stem_up else -1  # direction away from notehead
+        flag_sp = self.SLG * 1.15  # vertical spacing between stacked flags
+        fw = self.SLG * 1.4  # maximum rightward reach
+        fh = self.SLG * 1.5  # total vertical travel of one flag
 
         def cubic_pts(p0, p1, p2, p3, steps=20):
             pts = []
             for i in range(steps + 1):
-                t = i / steps; mt = 1 - t
-                x = mt**3*p0[0] + 3*mt**2*t*p1[0] + 3*mt*t**2*p2[0] + t**3*p3[0]
-                y = mt**3*p0[1] + 3*mt**2*t*p1[1] + 3*mt*t**2*p2[1] + t**3*p3[1]
+                t = i / steps
+                mt = 1 - t
+                x = (
+                    mt**3 * p0[0]
+                    + 3 * mt**2 * t * p1[0]
+                    + 3 * mt * t**2 * p2[0]
+                    + t**3 * p3[0]
+                )
+                y = (
+                    mt**3 * p0[1]
+                    + 3 * mt**2 * t * p1[1]
+                    + 3 * mt * t**2 * p2[1]
+                    + t**3 * p3[1]
+                )
                 pts.extend([x, y])
             return pts
 
         for fi in range(n_flags):
-            fy0 = sy + fi * flag_sp * fd   # root of this flag at stem
+            fy0 = sy + fi * flag_sp * fd  # root of this flag at stem
 
             # Control points designed for the classic engraved flag shape:
             #  P0: root at stem (left)
@@ -8070,10 +9674,10 @@ class ScoreView(tk.Frame):
             #
             # This produces: a stroke that leaves the stem going right, swells
             # outward, then curls back inward — a tilde/hook, not a U or loop.
-            p0 = (sx,          fy0)
-            p1 = (sx + fw*0.7, fy0 + fh*0.15*fd)
-            p2 = (sx + fw,     fy0 + fh*0.55*fd)
-            p3 = (sx + fw*0.4, fy0 + fh*1.00*fd)
+            p0 = (sx, fy0)
+            p1 = (sx + fw * 0.7, fy0 + fh * 0.15 * fd)
+            p2 = (sx + fw, fy0 + fh * 0.55 * fd)
+            p3 = (sx + fw * 0.4, fy0 + fh * 1.00 * fd)
 
             pts = cubic_pts(p0, p1, p2, p3, steps=22)
 
@@ -8081,11 +9685,12 @@ class ScoreView(tk.Frame):
             c.create_line(pts, fill="black", width=2.2, smooth=False)
             # Thin inner highlight to give the impression of a tapered stroke
             hi_pts = cubic_pts(
-                (sx + 0.5,      fy0 + 0.5*fd),
-                (sx + fw*0.65,  fy0 + fh*0.18*fd),
-                (sx + fw*0.9,   fy0 + fh*0.52*fd),
-                (sx + fw*0.35,  fy0 + fh*0.95*fd),
-                steps=22)
+                (sx + 0.5, fy0 + 0.5 * fd),
+                (sx + fw * 0.65, fy0 + fh * 0.18 * fd),
+                (sx + fw * 0.9, fy0 + fh * 0.52 * fd),
+                (sx + fw * 0.35, fy0 + fh * 0.95 * fd),
+                steps=22,
+            )
             c.create_line(hi_pts, fill="#555", width=0.8, smooth=False)
 
     @staticmethod
@@ -8113,8 +9718,17 @@ class ScoreView(tk.Frame):
                 return True
         return False
 
-    def _predict_beam_stem_directions(self, entries, tt, bt, tpb, mmap, _use_flats,
-                                      bass_treble_measures, treble_bass_measures):
+    def _predict_beam_stem_directions(
+        self,
+        entries,
+        tt,
+        bt,
+        tpb,
+        mmap,
+        _use_flats,
+        bass_treble_measures,
+        treble_bass_measures,
+    ):
         """Predict which chord entries will end up in the same beam group
         (mirroring _draw_beams's own grouping rule exactly, including its
         use of song.ticks_per_measure() for the measure boundary, not a
@@ -8135,66 +9749,87 @@ class ScoreView(tk.Frame):
         tpm = song.ticks_per_measure()
 
         by_force_treble = {True: [], False: []}
-        for (notes, force_t, is_v2) in entries:
+        for notes, force_t, is_v2 in entries:
             if is_v2:
-                continue   # the always-stem-up mixed-duration voice sits
-                           # outside this prediction -- unrelated rule
+                continue  # the always-stem-up mixed-duration voice sits
+                # outside this prediction -- unrelated rule
             durs = sorted(n.duration for n in notes)
-            db = durs[len(durs)//2] / tpb
-            _sp_to_y, _top_y, _bot_sp, _top_sp, mid_sp, _measure, _use_treble = \
-                self._clef_branch_for_chord(notes, tt, bt, mmap, force_t,
-                                            bass_treble_measures,
-                                            treble_bass_measures, _use_flats)
+            db = durs[len(durs) // 2] / tpb
+            _sp_to_y, _top_y, _bot_sp, _top_sp, mid_sp, _measure, _use_treble = (
+                self._clef_branch_for_chord(
+                    notes,
+                    tt,
+                    bt,
+                    mmap,
+                    force_t,
+                    bass_treble_measures,
+                    treble_bass_measures,
+                    _use_flats,
+                )
+            )
             positions = [note_staff_pos(n, _use_flats)[0] for n in notes]
-            by_force_treble[force_t].append({
-                'notes': notes, 'tick': notes[0].tick, 'db': db,
-                'mid_sp': mid_sp, 'positions': positions,
-            })
+            by_force_treble[force_t].append(
+                {
+                    "notes": notes,
+                    "tick": notes[0].tick,
+                    "db": db,
+                    "mid_sp": mid_sp,
+                    "positions": positions,
+                }
+            )
 
         MAX_BEAM = 8
         forced = {}
         for _force_t, stream in by_force_treble.items():
-            stream.sort(key=lambda e: e['tick'])
+            stream.sort(key=lambda e: e["tick"])
             groups, cur = [], []
             for e in stream:
-                beat = int(e['tick'] // tpb)
-                meas = int(e['tick'] // tpm)
-                if e['db'] > 0.5:
-                    if cur: groups.append(cur); cur = []
+                beat = int(e["tick"] // tpb)
+                meas = int(e["tick"] // tpm)
+                if e["db"] > 0.5:
+                    if cur:
+                        groups.append(cur)
+                        cur = []
                     continue
                 if cur:
                     prev = cur[-1]
-                    prev_beat = int(prev['tick'] // tpb)
-                    prev_meas = int(prev['tick'] // tpm)
+                    prev_beat = int(prev["tick"] // tpb)
+                    prev_meas = int(prev["tick"] // tpm)
                     if prev_meas != meas or prev_beat != beat or len(cur) >= MAX_BEAM:
-                        groups.append(cur); cur = []
+                        groups.append(cur)
+                        cur = []
                 cur.append(e)
-            if cur: groups.append(cur)
+            if cur:
+                groups.append(cur)
 
             for grp in groups:
                 if len(grp) < 2:
-                    continue   # isolated notes keep their own independent decision
+                    continue  # isolated notes keep their own independent decision
                 all_positions = []
                 for e in grp:
-                    all_positions.extend(e['positions'])
-                mid_sp = grp[0]['mid_sp']   # same staff for the whole group by construction
+                    all_positions.extend(e["positions"])
+                mid_sp = grp[0][
+                    "mid_sp"
+                ]  # same staff for the whole group by construction
                 furthest = max(all_positions, key=lambda p: abs(p - mid_sp))
                 stem_up = True if abs(furthest - mid_sp) == 0 else furthest < mid_sp
                 for e in grp:
-                    forced[id(e['notes'])] = stem_up
+                    forced[id(e["notes"])] = stem_up
         return forced
 
     def _draw_beams(self, c, stems, tpb, song):
         # Beam groups of short notes; draw flags on isolated short notes.
-        if not stems: return
+        if not stems:
+            return
 
         stems = sorted(stems, key=lambda s: (s.tick, s.staff))
-        bw    = max(2, int(self.SLG * 0.38))   # beam bar thickness
-        tpm   = song.ticks_per_measure()        # hard break at barlines
+        bw = max(2, int(self.SLG * 0.38))  # beam bar thickness
+        tpm = song.ticks_per_measure()  # hard break at barlines
 
         for staff_id in ("treble", "bass"):
             ss = [s for s in stems if s.staff == staff_id]
-            if not ss: continue
+            if not ss:
+                continue
 
             # -- Pre-compute IOI-based written duration for each stem --------
             # Standard engraving uses inter-onset interval (gap to next note
@@ -8208,37 +9843,48 @@ class ScoreView(tk.Frame):
                     _wdb[id(_s)] = max(_s.db, _ioi / tpb) if _ioi > 0 else _s.db
                 else:
                     _wdb[id(_s)] = _s.db
-            def _wdb_get(s): return _wdb.get(id(s), s.db)
 
+            def _wdb_get(s):
+                return _wdb.get(id(s), s.db)
 
             # ── Partition into beam groups ────────────────────────────────
             # Breaks on: non-beamable note (db>=0.5), beat boundary,
             # measure boundary, OR max group size of 8 notes.
             MAX_BEAM = 8
-            groups = []; cur = []
+            groups = []
+            cur = []
             for s in ss:
-                beat  = int(s.tick // tpb)
-                meas  = int(s.tick // tpm)
+                beat = int(s.tick // tpb)
+                meas = int(s.tick // tpm)
                 if _wdb_get(s) > 0.5:
-                    if cur: groups.append(cur); cur = []
+                    if cur:
+                        groups.append(cur)
+                        cur = []
                 else:
                     if cur:
                         prev_beat = int(cur[-1].tick // tpb)
                         prev_meas = int(cur[-1].tick // tpm)
-                        if (prev_meas != meas or prev_beat != beat
-                                or len(cur) >= MAX_BEAM):
-                            groups.append(cur); cur = []
+                        if (
+                            prev_meas != meas
+                            or prev_beat != beat
+                            or len(cur) >= MAX_BEAM
+                        ):
+                            groups.append(cur)
+                            cur = []
                     cur.append(s)
-            if cur: groups.append(cur)
+            if cur:
+                groups.append(cur)
 
             for grp in groups:
                 # ── Isolated note: just draw flag ─────────────────────────
                 if len(grp) == 1:
-                    s  = grp[0]
+                    s = grp[0]
                     wdb = _wdb_get(s)
-                    nf  = 1 if wdb <= 0.5 else 0
-                    if wdb <= 0.25:  nf = 2
-                    if wdb <= 0.125: nf = 3
+                    nf = 1 if wdb <= 0.5 else 0
+                    if wdb <= 0.25:
+                        nf = 2
+                    if wdb <= 0.125:
+                        nf = 3
                     # v22ze fix: nf was computed correctly here and then
                     # just discarded -- this branch never actually called
                     # _draw_flag at all, for ANY isolated short note,
@@ -8256,24 +9902,25 @@ class ScoreView(tk.Frame):
 
                 # ── Beam group ────────────────────────────────────────────
                 # Unified stem direction: majority vote
-                beam_up = sum(1 for s in grp if s.stem_up) >= len(grp)/2
+                beam_up = sum(1 for s in grp if s.stem_up) >= len(grp) / 2
 
                 # Beam anchor y: use the stem tip that is most extreme
                 # (furthest from noteheads) to anchor the beam level,
                 # then slope gently toward last note.
                 # Slope: use median of first-half vs median of second-half
                 # tips, capped at SLG*0.4 total across the group.
-                half  = max(1, len(grp)//2)
-                y_lo  = sum(s.sy for s in grp[:half])  / half
-                y_hi  = sum(s.sy for s in grp[half:])  / max(1,len(grp)-half)
-                raw   = y_hi - y_lo
-                cap   = self.SLG * 0.4
-                rise  = max(-cap, min(cap, raw))
+                half = max(1, len(grp) // 2)
+                y_lo = sum(s.sy for s in grp[:half]) / half
+                y_hi = sum(s.sy for s in grp[half:]) / max(1, len(grp) - half)
+                raw = y_hi - y_lo
+                cap = self.SLG * 0.4
+                rise = max(-cap, min(cap, raw))
 
-                x0    = grp[0].sx;   x1 = grp[-1].sx
+                x0 = grp[0].sx
+                x1 = grp[-1].sx
                 # Anchor: outermost tip (highest for beam_up, lowest for beam_down)
                 if beam_up:
-                    anchor_y = min(s.sy for s in grp)   # highest point (min y)
+                    anchor_y = min(s.sy for s in grp)  # highest point (min y)
                 else:
                     anchor_y = max(s.sy for s in grp)
 
@@ -8283,15 +9930,18 @@ class ScoreView(tk.Frame):
                     # beam line runs along the tops of stems
                     # find x of the most extreme stem
                     anchor_s = min(grp, key=lambda s: s.sy)
-                    beam_at_anchor = anchor_s.sy   # beam touches this tip
+                    beam_at_anchor = anchor_s.sy  # beam touches this tip
                 else:
                     anchor_s = max(grp, key=lambda s: s.sy)
                     beam_at_anchor = anchor_s.sy
 
                 def beam_y_at(sx):
-                    if x1 == x0: return beam_at_anchor
+                    if x1 == x0:
+                        return beam_at_anchor
                     frac = (sx - x0) / (x1 - x0)
-                    return beam_at_anchor + rise * (frac - (anchor_s.sx-x0)/(x1-x0+1e-9))
+                    return beam_at_anchor + rise * (
+                        frac - (anchor_s.sx - x0) / (x1 - x0 + 1e-9)
+                    )
 
                 # Extend stems to meet beam (never shorten past notehead)
                 for s in grp:
@@ -8301,28 +9951,37 @@ class ScoreView(tk.Frame):
                     else:
                         new_sy = max(s.sy, target)
                     # Redraw stem in canvas (raise it to front implicitly)
-                    c.create_line(s.sx, s.stem_root_y, s.sx, new_sy,
-                                  fill="black", width=max(2, int(self.SLG*0.16)))
+                    c.create_line(
+                        s.sx,
+                        s.stem_root_y,
+                        s.sx,
+                        new_sy,
+                        fill="black",
+                        width=max(2, int(self.SLG * 0.16)),
+                    )
 
                 # ── Draw beam bars ────────────────────────────────────────
-                fd = -1 if beam_up else 1   # direction away from noteheads
-                bar_gap = self.SLG * 0.62   # gap between successive beam bars
+                fd = -1 if beam_up else 1  # direction away from noteheads
+                bar_gap = self.SLG * 0.62  # gap between successive beam bars
 
                 for bar_level in range(3):
-                    threshold = 0.5 / (2**bar_level)   # 0.5, 0.25, 0.125
-                    eligible  = [s for s in grp if _wdb_get(s) <= threshold]
-                    if not eligible: continue
+                    threshold = 0.5 / (2**bar_level)  # 0.5, 0.25, 0.125
+                    eligible = [s for s in grp if _wdb_get(s) <= threshold]
+                    if not eligible:
+                        continue
 
-                    offset = bar_level * bar_gap   # offset from primary beam
+                    offset = bar_level * bar_gap  # offset from primary beam
 
                     # Find contiguous runs of eligible notes
-                    runs = []; run = [eligible[0]]
-                    gi   = {s: i for i,s in enumerate(grp)}
+                    runs = []
+                    run = [eligible[0]]
+                    gi = {s: i for i, s in enumerate(grp)}
                     for s in eligible[1:]:
                         if gi[s] == gi[run[-1]] + 1:
                             run.append(s)
                         else:
-                            runs.append(run); run = [s]
+                            runs.append(run)
+                            run = [s]
                     runs.append(run)
 
                     for run in runs:
@@ -8347,13 +10006,13 @@ class ScoreView(tk.Frame):
                             # other position (including genuinely
                             # isolated single mid-group 16ths) points
                             # backward instead.
-                            s    = run[0]
+                            s = run[0]
                             stub = self.SLG * 1.0
-                            bx0  = s.sx
+                            bx0 = s.sx
                             if gi[s] == 0:
-                                bx1 = bx0 + stub    # first note: point forward
+                                bx1 = bx0 + stub  # first note: point forward
                             else:
-                                bx1 = bx0 - stub    # last/mid note: point backward
+                                bx1 = bx0 - stub  # last/mid note: point backward
                             # v22ze-18 fix: secondary/tertiary beams (bar_level>0)
                             # must stack toward the NOTEHEADS, not past the tip.
                             # fd points away from the noteheads (the direction the
@@ -8365,19 +10024,26 @@ class ScoreView(tk.Frame):
                             # instead walks each additional beam back in, toward
                             # the stem root/notehead, which is where engraving
                             # convention stacks them.
-                            by0  = beam_y_at(bx0) - offset*fd
-                            by1  = beam_y_at(bx1) - offset*fd
+                            by0 = beam_y_at(bx0) - offset * fd
+                            by1 = beam_y_at(bx1) - offset * fd
                         else:
-                            bx0 = run[0].sx; bx1 = run[-1].sx
-                            by0 = beam_y_at(bx0) - offset*fd
-                            by1 = beam_y_at(bx1) - offset*fd
+                            bx0 = run[0].sx
+                            bx1 = run[-1].sx
+                            by0 = beam_y_at(bx0) - offset * fd
+                            by1 = beam_y_at(bx1) - offset * fd
                         half_bw = bw / 2
                         c.create_polygon(
-                            bx0, by0 - half_bw,
-                            bx1, by1 - half_bw,
-                            bx1, by1 + half_bw,
-                            bx0, by0 + half_bw,
-                            fill="black", outline="black")
+                            bx0,
+                            by0 - half_bw,
+                            bx1,
+                            by1 - half_bw,
+                            bx1,
+                            by1 + half_bw,
+                            bx0,
+                            by0 + half_bw,
+                            fill="black",
+                            outline="black",
+                        )
 
                 # ── Triplet "3" bracket ───────────────────────────────────
                 # Fire only on exactly-3-note beamed groups whose IOI matches
@@ -8389,32 +10055,52 @@ class ScoreView(tk.Frame):
                     if ioi_01 > 0 and ioi_12 > 0:
                         avg_ioi = (ioi_01 + ioi_12) / 2
                         # Equal spacing gate: both IOIs within 20% of average
-                        equal_spaced = (abs(ioi_01 - avg_ioi) / avg_ioi < 0.20
-                                        and abs(ioi_12 - avg_ioi) / avg_ioi < 0.20)
+                        equal_spaced = (
+                            abs(ioi_01 - avg_ioi) / avg_ioi < 0.20
+                            and abs(ioi_12 - avg_ioi) / avg_ioi < 0.20
+                        )
                         if equal_spaced and self._is_triplet_ioi(avg_ioi, tpb):
                             # Bracket geometry
-                            gap    = self.SLG * 1.3   # clearance above/below beam
+                            gap = self.SLG * 1.3  # clearance above/below beam
                             stub_h = self.SLG * 0.55  # vertical stub height
-                            fd     = -1 if beam_up else 1   # direction away from notes
-                            bx_l   = grp[0].sx
-                            bx_r   = grp[-1].sx
+                            fd = -1 if beam_up else 1  # direction away from notes
+                            bx_l = grp[0].sx
+                            bx_r = grp[-1].sx
                             # Bracket y: above beam if stems up, below if stems down
                             if beam_up:
                                 by = min(beam_y_at(s.sx) for s in grp) - gap
                             else:
                                 by = max(beam_y_at(s.sx) for s in grp) + gap
                             # Horizontal bar
-                            c.create_line(bx_l, by, bx_r, by,
-                                          fill="#333333", width=1,
-                                          tags="triplet_bracket")
+                            c.create_line(
+                                bx_l,
+                                by,
+                                bx_r,
+                                by,
+                                fill="#333333",
+                                width=1,
+                                tags="triplet_bracket",
+                            )
                             # Left stub
-                            c.create_line(bx_l, by, bx_l, by + stub_h * fd,
-                                          fill="#333333", width=1,
-                                          tags="triplet_bracket")
+                            c.create_line(
+                                bx_l,
+                                by,
+                                bx_l,
+                                by + stub_h * fd,
+                                fill="#333333",
+                                width=1,
+                                tags="triplet_bracket",
+                            )
                             # Right stub
-                            c.create_line(bx_r, by, bx_r, by + stub_h * fd,
-                                          fill="#333333", width=1,
-                                          tags="triplet_bracket")
+                            c.create_line(
+                                bx_r,
+                                by,
+                                bx_r,
+                                by + stub_h * fd,
+                                fill="#333333",
+                                width=1,
+                                tags="triplet_bracket",
+                            )
                             # "3" numeral centred on the bracket
                             c.create_text(
                                 (bx_l + bx_r) / 2,
@@ -8422,14 +10108,15 @@ class ScoreView(tk.Frame):
                                 text="3",
                                 font=("serif", max(7, int(self.SLG * 0.9))),
                                 fill="#333333",
-                                tags="triplet_bracket")
+                                tags="triplet_bracket",
+                            )
 
         # Raise all triplet bracket items above beam bars so they are readable
         c.tag_raise("triplet_bracket")
 
     # ── Measure status strip ─────────────────────────────────────────────────
-    STRIP_H           = 18    # px height of the strip band
-    STRIP_MIN_MEAS_PX = 40   # hide strip entirely below this measure width
+    STRIP_H = 18  # px height of the strip band
+    STRIP_MIN_MEAS_PX = 40  # hide strip entirely below this measure width
 
     def _draw_measure_strip(self, c, mmap, song, tracks):
         """Draw the per-measure beat-count status strip above the first stave.
@@ -8454,7 +10141,7 @@ class ScoreView(tk.Frame):
         # Threshold check on first measure
         _, ms0, me0, _, _, _ = mmap[0]
         if self._tick_to_x(me0) - self._tick_to_x(ms0) < self.STRIP_MIN_MEAS_PX:
-            return   # strip hidden at this zoom level
+            return  # strip hidden at this zoom level
 
         # Strip sits in the TPAD space just above the top stave — but must
         # never overlap a high note's stem/ledger lines.  Previously this
@@ -8474,8 +10161,8 @@ class ScoreView(tk.Frame):
 
         _max_pos = None
         _use_flats = _song_uses_flats(app.song)
-        for _tr in tracks[:1]:   # top staff's track (grand-staff merge puts
-                                 # both hands here when applicable)
+        for _tr in tracks[:1]:  # top staff's track (grand-staff merge puts
+            # both hands here when applicable)
             for _n in _tr.notes:
                 _pos, _ = note_staff_pos(_n, _use_flats)
                 if _pos >= 2 and (_max_pos is None or _pos > _max_pos):
@@ -8487,7 +10174,7 @@ class ScoreView(tk.Frame):
             _stem_clearance = self.SLG * 3.5 + 6
             _top_reach_y = _notehead_y - _stem_clearance
             if _top_reach_y < strip_bot:
-                strip_bot = _top_reach_y - 4   # small gap above the stem tip
+                strip_bot = _top_reach_y - 4  # small gap above the stem tip
                 strip_top = strip_bot - self.STRIP_H
 
         # Safety clamp (v22v): even with reserved headroom above, an
@@ -8501,12 +10188,12 @@ class ScoreView(tk.Frame):
             strip_bot = strip_top + self.STRIP_H
 
         # App-level state
-        accepted   = getattr(app, '_accepted_measures', set())
-        selected   = getattr(app, '_selected_measure_idx', None)
+        accepted = getattr(app, "_accepted_measures", set())
+        selected = getattr(app, "_selected_measure_idx", None)
         global_bpm = song.bpm
 
-        f_main  = ("TkDefaultFont",  8)
-        f_small = ("TkDefaultFont",  7)
+        f_main = ("TkDefaultFont", 8)
+        f_small = ("TkDefaultFont", 7)
 
         for m_idx, ms, me, num, den, tpm in mmap:
             x0 = self._tick_to_x(ms)
@@ -8525,14 +10212,14 @@ class ScoreView(tk.Frame):
                     if ms <= n.tick < me:
                         latest_end = max(latest_end, n.tick + n.duration)
 
-            actual_ticks   = max(0, latest_end - ms)
+            actual_ticks = max(0, latest_end - ms)
             expected_ticks = tpm
             if actual_ticks == 0:
-                actual_ticks = expected_ticks   # empty = neutral
+                actual_ticks = expected_ticks  # empty = neutral
 
-            actual_q   = actual_ticks   / tpb
+            actual_q = actual_ticks / tpb
             expected_q = expected_ticks / tpb
-            delta      = actual_q - expected_q   # positive = overflow
+            delta = actual_q - expected_q  # positive = overflow
 
             # ── Choose cell colour ────────────────────────────────────────
             if m_idx == selected:
@@ -8540,57 +10227,76 @@ class ScoreView(tk.Frame):
             elif m_idx in accepted:
                 fill = "#1a4a1a"
             elif abs(delta) < 0.15:
-                fill = None          # clean
+                fill = None  # clean
             elif abs(delta) <= 1.0:
-                fill = "#5a4200"     # amber
+                fill = "#5a4200"  # amber
             else:
-                fill = "#5a1010"     # red
+                fill = "#5a1010"  # red
 
             # ── Draw cell background ──────────────────────────────────────
             pad = 1
             if fill:
                 c.create_rectangle(
-                    x0 + pad, strip_top + pad, x1 - pad, strip_bot - pad,
-                    fill=fill, outline="", tags="strip")
+                    x0 + pad,
+                    strip_top + pad,
+                    x1 - pad,
+                    strip_bot - pad,
+                    fill=fill,
+                    outline="",
+                    tags="strip",
+                )
 
             # ── Beat-count label (omit when clean and not selected) ───────
             cx = (x0 + x1) / 2
             if abs(delta) >= 0.15 or m_idx == selected:
-                label   = f"{round(actual_q)}/{round(expected_q)}"
+                label = f"{round(actual_q)}/{round(expected_q)}"
                 txt_col = "#ffffff" if fill else "#888888"
-                c.create_text(cx, strip_top + self.STRIP_H * 0.42,
-                               text=label, font=f_main,
-                               fill=txt_col, tags="strip")
+                c.create_text(
+                    cx,
+                    strip_top + self.STRIP_H * 0.42,
+                    text=label,
+                    font=f_main,
+                    fill=txt_col,
+                    tags="strip",
+                )
 
                 # Local BPM below the fraction when it differs by > 3 BPM
                 if actual_ticks > 0 and actual_ticks != expected_ticks:
                     local_bpm = global_bpm * (expected_ticks / actual_ticks)
                     if abs(local_bpm - global_bpm) > 3:
-                        c.create_text(cx, strip_bot - 3,
-                                       text=f"{local_bpm:.0f}",
-                                       font=f_small, fill="#aaaaaa",
-                                       anchor="s", tags="strip")
+                        c.create_text(
+                            cx,
+                            strip_bot - 3,
+                            text=f"{local_bpm:.0f}",
+                            font=f_small,
+                            fill="#aaaaaa",
+                            anchor="s",
+                            tags="strip",
+                        )
 
             # ── Clickable overlay ─────────────────────────────────────────
             tag = f"strip_m{m_idx}"
-            c.create_rectangle(x0, strip_top, x1, strip_bot,
-                                fill="", outline="",
-                                tags=("strip", tag))
-            c.tag_bind(tag, "<Button-1>",
-                       lambda e, idx=m_idx: self._on_strip_click(idx))
-            c.tag_bind(tag, "<Enter>",
-                       lambda e: c.configure(cursor="hand2"))
-            c.tag_bind(tag, "<Leave>",
-                       # v22ze-68 fix: this used to reset to "" (the
-                       # system default arrow) -- but ScoreView's canvas
-                       # is created with cursor="crosshair" as its own
-                       # normal state, not the system default. Once the
-                       # user hovered over ANY clickable measure-strip
-                       # overlay even once, leaving it permanently
-                       # overwrote the canvas cursor to the arrow, with
-                       # nothing anywhere restoring "crosshair" -- so it
-                       # never came back for the rest of the session.
-                       lambda e: c.configure(cursor="crosshair"))
+            c.create_rectangle(
+                x0, strip_top, x1, strip_bot, fill="", outline="", tags=("strip", tag)
+            )
+            c.tag_bind(
+                tag, "<Button-1>", lambda e, idx=m_idx: self._on_strip_click(idx)
+            )
+            c.tag_bind(tag, "<Enter>", lambda e: c.configure(cursor="hand2"))
+            c.tag_bind(
+                tag,
+                "<Leave>",
+                # v22ze-68 fix: this used to reset to "" (the
+                # system default arrow) -- but ScoreView's canvas
+                # is created with cursor="crosshair" as its own
+                # normal state, not the system default. Once the
+                # user hovered over ANY clickable measure-strip
+                # overlay even once, leaving it permanently
+                # overwrote the canvas cursor to the arrow, with
+                # nothing anywhere restoring "crosshair" -- so it
+                # never came back for the rest of the session.
+                lambda e: c.configure(cursor="crosshair"),
+            )
 
     def _on_strip_click(self, measure_idx):
         """Handle click on a measure strip cell.
@@ -8608,8 +10314,7 @@ class ScoreView(tk.Frame):
         """
         self.app._selected_measure_idx = measure_idx
         app = self.app
-        if (app._score_setup_dlg is not None
-                and app._score_setup_dlg.winfo_exists()):
+        if app._score_setup_dlg is not None and app._score_setup_dlg.winfo_exists():
             app._score_setup_dlg._populate_measure_detail(measure_idx)
         else:
             app._open_score_setup()
@@ -8626,21 +10331,30 @@ class ScoreView(tk.Frame):
         matches _draw_pedal() (below the bottom staff), using the standard
         bold-italic dynamics typeface convention.
         """
-        markings = getattr(tr, 'markings', None)
+        markings = getattr(tr, "markings", None)
         if not markings:
             return
-        dyn_y = (bt + self.SH + self.SLG * 3.2) if bt is not None \
-                else (tt + self.SH + self.SLG * 1.6)
+        dyn_y = (
+            (bt + self.SH + self.SLG * 3.2)
+            if bt is not None
+            else (tt + self.SH + self.SLG * 1.6)
+        )
         for ev in markings:
             # v22ze-35: markings hold a ("dynamic", value) tuple in .msg,
             # not a real mido message -- guard the shape before reading it.
-            msg = getattr(ev, 'msg', None)
-            if not (isinstance(msg, tuple) and len(msg) == 2 and msg[0] == 'dynamic'):
+            msg = getattr(ev, "msg", None)
+            if not (isinstance(msg, tuple) and len(msg) == 2 and msg[0] == "dynamic"):
                 continue
             x = self._tick_to_x(ev.tick)
-            c.create_text(x, dyn_y, text=msg[1],
-                          font=("serif", max(9, int(self.SLG * 1.6)), "bold italic"),
-                          fill="#222", anchor="w", tags="dynamic_mark")
+            c.create_text(
+                x,
+                dyn_y,
+                text=msg[1],
+                font=("serif", max(9, int(self.SLG * 1.6)), "bold italic"),
+                fill="#222",
+                anchor="w",
+                tags="dynamic_mark",
+            )
 
     def _draw_pedal(self, c, tr, tt, bt, tpb, mmap):
         """Draw sustain-pedal marks below the bass staff.
@@ -8672,7 +10386,7 @@ class ScoreView(tk.Frame):
         reliable.  Falls back to the old heuristic if no CC64 events found.
         """
         if bt is None:
-            return   # single-staff track — no bass staff to mark below
+            return  # single-staff track — no bass staff to mark below
 
         _use_flats_pd = _song_uses_flats(self.app.song)
         # Staff position -10 = the bass staff's own bottom line (G2). Any
@@ -8680,26 +10394,31 @@ class ScoreView(tk.Frame):
         # lines cleared too -- take whichever is lower.
         _min_pos_pd = -10
         if tr.notes:
-            _min_pos_pd = min(_min_pos_pd,
-                              min(note_staff_pos(n, _use_flats_pd)[0] for n in tr.notes))
+            _min_pos_pd = min(
+                _min_pos_pd, min(note_staff_pos(n, _use_flats_pd)[0] for n in tr.notes)
+            )
         _lowest_y = self._sp_to_y_bass(_min_pos_pd, bt)
-        ped_y = _lowest_y + self.SLG * 1.1   # clearance below the lowest content
+        ped_y = _lowest_y + self.SLG * 1.1  # clearance below the lowest content
 
         # ── Read CC64 events ──────────────────────────────────────────────
         # v22ze-35 fix: Track.events can now also hold lightweight
         # tuple-based markers (dynamics, via EventEditAction) alongside
         # real mido pedal messages -- guard that ev.msg actually HAS a
         # .type before reading it, not just that ev itself has a .msg.
-        cc64 = [(ev.tick, ev.msg.value)
-                for ev in getattr(tr, 'events', [])
-                if (hasattr(ev, 'msg')
-                    and hasattr(ev.msg, 'type')
-                    and ev.msg.type == 'control_change'
-                    and ev.msg.control == 64)]
+        cc64 = [
+            (ev.tick, ev.msg.value)
+            for ev in getattr(tr, "events", [])
+            if (
+                hasattr(ev, "msg")
+                and hasattr(ev.msg, "type")
+                and ev.msg.type == "control_change"
+                and ev.msg.control == 64
+            )
+        ]
         cc64.sort(key=lambda x: x[0])
 
         if not cc64:
-            return   # no pedal data — skip rendering
+            return  # no pedal data — skip rendering
 
         # Build pedal segments: on when value ≥ 64, off when value < 64
         segs = []
@@ -8713,32 +10432,38 @@ class ScoreView(tk.Frame):
         if ped_on_tick is not None:
             # Pedal still held at end of events — close at last note end
             last_note_end = max(
-                (n.tick + n.duration for n in tr.notes), default=ped_on_tick)
+                (n.tick + n.duration for n in tr.notes), default=ped_on_tick
+            )
             segs.append((ped_on_tick, last_note_end))
 
         # ── Draw each pedal segment ───────────────────────────────────────
         _ped_fill = "#222"
-        _tick_h = self.SLG * 0.5   # half-line-gap tall, matching a light bracket
+        _tick_h = self.SLG * 0.5  # half-line-gap tall, matching a light bracket
         for ped_start, ped_end in segs:
             x0 = self._tick_to_x(ped_start)
             x1 = self._tick_to_x(ped_end)
             if x1 - x0 < 4:
                 continue
             # "Ped." text at start (bold italic, per the requested WP style)
-            c.create_text(x0, ped_y,
-                          text="Ped.",
-                          font=("serif", max(9, int(self.SLG * 1.3)), "bold italic"),
-                          fill=_ped_fill, anchor="w")
+            c.create_text(
+                x0,
+                ped_y,
+                text="Ped.",
+                font=("serif", max(9, int(self.SLG * 1.3)), "bold italic"),
+                fill=_ped_fill,
+                anchor="w",
+            )
             # Short vertical tick marking the initial depress, right after
             # the text -- and the sustain line for the held duration.
             lx0 = x0 + max(8, int(self.SLG * 2.4))
-            c.create_line(lx0, ped_y - _tick_h, lx0, ped_y + _tick_h,
-                          fill=_ped_fill, width=2)
-            c.create_line(lx0, ped_y, x1, ped_y,
-                          fill=_ped_fill, width=2)
+            c.create_line(
+                lx0, ped_y - _tick_h, lx0, ped_y + _tick_h, fill=_ped_fill, width=2
+            )
+            c.create_line(lx0, ped_y, x1, ped_y, fill=_ped_fill, width=2)
             # Short vertical tick marking the release.
-            c.create_line(x1, ped_y - _tick_h, x1, ped_y + _tick_h,
-                          fill=_ped_fill, width=2)
+            c.create_line(
+                x1, ped_y - _tick_h, x1, ped_y + _tick_h, fill=_ped_fill, width=2
+            )
 
     def _draw_ties(self, c, tr, tt, bt, nr, tpb, mmap, ti=0):
         """Draw tie arcs for notes whose duration crosses a barline."""
@@ -8749,6 +10474,7 @@ class ScoreView(tk.Frame):
 
         # Build a fast lookup: for each measure index, (start_tick, end_tick)
         meas_bounds = {m_idx: (ms, me) for m_idx, ms, me, _n, _d, _t in mmap}
+
         # tick → measure index helper
         def meas_of(tick):
             for m_idx, ms, me, _n, _d, _t in mmap:
@@ -8766,11 +10492,11 @@ class ScoreView(tk.Frame):
             if note.duration > MAX_TIE_TICKS:
                 continue
 
-            end_tick  = note.tick + note.duration
+            end_tick = note.tick + note.duration
             note_meas = meas_of(note.tick)
-            end_meas  = meas_of(end_tick)
+            end_meas = meas_of(end_tick)
             if end_meas <= note_meas:
-                continue   # doesn't cross a barline
+                continue  # doesn't cross a barline
 
             # Require continuation note in the immediately next measure
             if note_meas + 1 not in meas_bounds:
@@ -8792,13 +10518,15 @@ class ScoreView(tk.Frame):
                 tie_above = pos >= 5.5
             else:
                 bt_y = self._bass_top(ti, tracks)
-                if bt_y is None: continue   # single-staff track — skip bass ties
+                if bt_y is None:
+                    continue  # single-staff track — skip bass ties
                 y = self._sp_to_y_bass(pos, bt_y)
                 tie_above = pos >= 5.5
 
             x1 = int(self._tick_to_x(note.tick)) + nr + 2
             x2 = int(self._tick_to_x(cont_note.tick)) - nr - 2
-            if x2 <= x1: continue
+            if x2 <= x1:
+                continue
 
             arc_w = x2 - x1
             arc_h = max(5, min(int(self.SLG * 1.2), int(arc_w * 0.12)))
@@ -8807,150 +10535,235 @@ class ScoreView(tk.Frame):
             pts = []
             steps = 24
             for i in range(steps + 1):
-                t = i / steps; mt = 1 - t
-                bx = (mt**3*x1 + 3*mt**2*t*(x1+arc_w*0.25) +
-                      3*mt*t**2*(x2-arc_w*0.25) + t**3*x2)
-                by = (mt**3*y  + 3*mt**2*t*(y+h_dir*arc_h) +
-                      3*mt*t**2*(y+h_dir*arc_h) + t**3*y)
+                t = i / steps
+                mt = 1 - t
+                bx = (
+                    mt**3 * x1
+                    + 3 * mt**2 * t * (x1 + arc_w * 0.25)
+                    + 3 * mt * t**2 * (x2 - arc_w * 0.25)
+                    + t**3 * x2
+                )
+                by = (
+                    mt**3 * y
+                    + 3 * mt**2 * t * (y + h_dir * arc_h)
+                    + 3 * mt * t**2 * (y + h_dir * arc_h)
+                    + t**3 * y
+                )
                 pts.extend([bx, by])
             c.create_line(pts, fill="#222", width=1.8, smooth=False)
 
-    def _draw_note(self,c,note,tt,bt,nr,tpb):
+    def _draw_note(self, c, note, tt, bt, nr, tpb):
         # Legacy single-note draw — kept for compatibility; chord path is used instead.
-        pos,acc=note_staff_pos(note, _song_uses_flats(self.app.song))
-        db=note.duration/tpb
-        use_treble=pos>=-2
+        pos, acc = note_staff_pos(note, _song_uses_flats(self.app.song))
+        db = note.duration / tpb
+        use_treble = pos >= -2
         if use_treble:
-            y=self._sp_to_y_treble(pos,tt); top_y=tt
-            sp_to_y=self._sp_to_y_treble; bot_sp=-3; top_sp=5
+            y = self._sp_to_y_treble(pos, tt)
+            top_y = tt
+            sp_to_y = self._sp_to_y_treble
+            bot_sp = -3
+            top_sp = 5
         else:
-            y=self._sp_to_y_bass(pos,bt); top_y=bt
-            sp_to_y=self._sp_to_y_bass; bot_sp=-10; top_sp=-4
+            y = self._sp_to_y_bass(pos, bt)
+            top_y = bt
+            sp_to_y = self._sp_to_y_bass
+            bot_sp = -10
+            top_sp = -4
 
-        x=int(self._tick_to_x(note.tick))+nr+2
+        x = int(self._tick_to_x(note.tick)) + nr + 2
 
         # ledger lines below staff
-        lp=bot_sp-1
-        while lp>=pos:
-            if (lp-bot_sp)%2==0:
-                ly=sp_to_y(lp,top_y)
-                c.create_line(x-nr-3,ly,x+nr+3,ly,fill="black",width=1)
-            lp-=1
+        lp = bot_sp - 1
+        while lp >= pos:
+            if (lp - bot_sp) % 2 == 0:
+                ly = sp_to_y(lp, top_y)
+                c.create_line(x - nr - 3, ly, x + nr + 3, ly, fill="black", width=1)
+            lp -= 1
         # ledger lines above staff
-        lp=top_sp+1
-        while lp<=pos:
-            if (lp-top_sp)%2==0:
-                ly=sp_to_y(lp,top_y)
-                c.create_line(x-nr-3,ly,x+nr+3,ly,fill="black",width=1)
-            lp+=1
+        lp = top_sp + 1
+        while lp <= pos:
+            if (lp - top_sp) % 2 == 0:
+                ly = sp_to_y(lp, top_y)
+                c.create_line(x - nr - 3, ly, x + nr + 3, ly, fill="black", width=1)
+            lp += 1
         # middle C ledger
-        if note.pitch==60:
-            ly=sp_to_y(0,tt) if use_treble else sp_to_y(0,bt)
-            c.create_line(x-nr-3,ly,x+nr+3,ly,fill="black",width=1)
+        if note.pitch == 60:
+            ly = sp_to_y(0, tt) if use_treble else sp_to_y(0, bt)
+            c.create_line(x - nr - 3, ly, x + nr + 3, ly, fill="black", width=1)
 
         # accidental
         # v22ze fix: same font optical-center offset as the main chord
         # drawing path above -- see that comment for the full reasoning.
         # v22ze round 2: more lift + bold + larger, matching the main path.
         _acc_y = y - self.SLG * 0.30
-        if acc==1:
-            c.create_text(x-nr-9,_acc_y,text="♯",font=("serif",int(self.SLG*1.9),"bold"),fill="black",anchor="center")
-        elif acc==-1:
-            c.create_text(x-nr-9,_acc_y,text="♭",font=("serif",int(self.SLG*1.9),"bold"),fill="black",anchor="center")
+        if acc == 1:
+            c.create_text(
+                x - nr - 9,
+                _acc_y,
+                text="♯",
+                font=("serif", int(self.SLG * 1.9), "bold"),
+                fill="black",
+                anchor="center",
+            )
+        elif acc == -1:
+            c.create_text(
+                x - nr - 9,
+                _acc_y,
+                text="♭",
+                font=("serif", int(self.SLG * 1.9), "bold"),
+                fill="black",
+                anchor="center",
+            )
 
         # stem direction: up when note is below the middle line (B4=pos 2)
-        stem_up=pos<2
-        sl=self.SLG*3.5
-        sx=x+(nr if stem_up else -nr)
+        stem_up = pos < 2
+        sl = self.SLG * 3.5
+        sx = x + (nr if stem_up else -nr)
 
-        if db>=4:   # whole
-            _draw_notehead(c, x, y, nr+1, nr-2, "black", "", width=2)
-        elif db>=2: # half
-            _draw_notehead(c, x, y, nr, nr-1, "black", "", width=2)
-            sy=y-sl if stem_up else y+sl
-            c.create_line(sx,y,sx,sy,fill="black",width=2)
-        else:       # quarter or shorter — filled
-            _draw_notehead(c, x, y, nr, nr-1, "black", "black")
-            sy=y-sl if stem_up else y+sl
-            c.create_line(sx,y,sx,sy,fill="black",width=2)
+        if db >= 4:  # whole
+            _draw_notehead(c, x, y, nr + 1, nr - 2, "black", "", width=2)
+        elif db >= 2:  # half
+            _draw_notehead(c, x, y, nr, nr - 1, "black", "", width=2)
+            sy = y - sl if stem_up else y + sl
+            c.create_line(sx, y, sx, sy, fill="black", width=2)
+        else:  # quarter or shorter — filled
+            _draw_notehead(c, x, y, nr, nr - 1, "black", "black")
+            sy = y - sl if stem_up else y + sl
+            c.create_line(sx, y, sx, sy, fill="black", width=2)
             # flags (tails)
-            n_flags=0
-            if db<0.5:  n_flags=1   # 8th
-            if db<0.25: n_flags=2   # 16th
-            if db<0.125:n_flags=3   # 32nd
+            n_flags = 0
+            if db < 0.5:
+                n_flags = 1  # 8th
+            if db < 0.25:
+                n_flags = 2  # 16th
+            if db < 0.125:
+                n_flags = 3  # 32nd
             # fd: direction flags stack FROM stem tip, always toward notehead
             # stem_up → tip is high (small y), flags hang downward (+y)
             # stem_down → tip is low (large y), flags go upward (-y)
             fd = 1 if stem_up else -1
-            flag_sp = self.SLG * 0.85   # spacing between consecutive flags
+            flag_sp = self.SLG * 0.85  # spacing between consecutive flags
             for fi in range(n_flags):
-                fy0 = sy + fi * flag_sp * fd   # start of this flag at stem tip side
+                fy0 = sy + fi * flag_sp * fd  # start of this flag at stem tip side
                 # Flag sweeps right then curls back; curve points go away then return
                 # All y offsets are relative to fy0, in the fd direction
                 c.create_line(
-                    sx,          fy0,
-                    sx + 10,     fy0 + self.SLG * 0.5 * fd,
-                    sx + 10,     fy0 + self.SLG * 1.0 * fd,
-                    sx,          fy0 + self.SLG * 1.2 * fd,
-                    fill="black", width=1.5, smooth=True)
+                    sx,
+                    fy0,
+                    sx + 10,
+                    fy0 + self.SLG * 0.5 * fd,
+                    sx + 10,
+                    fy0 + self.SLG * 1.0 * fd,
+                    sx,
+                    fy0 + self.SLG * 1.2 * fd,
+                    fill="black",
+                    width=1.5,
+                    smooth=True,
+                )
 
     def _draw_rest_shape(self, c, rest_type, cx, y, slg):
         """Draw a rest symbol geometrically (no font dependency).
         rest_type: 'whole','half','quarter','eighth','16th','32nd'
         cx: horizontal center, y: vertical centre reference, slg: staff-line-gap px"""
-        rw = max(int(slg * 0.9), 6)   # rest rectangle width
+        rw = max(int(slg * 0.9), 6)  # rest rectangle width
         rh = max(int(slg * 0.55), 4)  # rest rectangle height
 
-        if rest_type == 'whole':
+        if rest_type == "whole":
             # Filled rectangle hanging BELOW a staff line
-            c.create_rectangle(cx - rw, y - rh, cx + rw, y,
-                                fill="black", outline="black")
-        elif rest_type == 'half':
+            c.create_rectangle(
+                cx - rw, y - rh, cx + rw, y, fill="black", outline="black"
+            )
+        elif rest_type == "half":
             # Filled rectangle sitting ON TOP of a staff line
-            c.create_rectangle(cx - rw, y, cx + rw, y + rh,
-                                fill="black", outline="black")
-        elif rest_type == 'quarter':
+            c.create_rectangle(
+                cx - rw, y, cx + rw, y + rh, fill="black", outline="black"
+            )
+        elif rest_type == "quarter":
             # Zigzag stroke (classic quarter rest shape)
             s = slg * 0.45
             pts = [
-                cx + s*0.5, y - slg*1.0,
-                cx - s*0.5, y - slg*0.4,
-                cx + s*0.7, y + slg*0.1,
-                cx - s*0.4, y + slg*0.6,
-                cx + s*0.15,y + slg*1.0,
-                cx - s*0.2, y + slg*1.35,
+                cx + s * 0.5,
+                y - slg * 1.0,
+                cx - s * 0.5,
+                y - slg * 0.4,
+                cx + s * 0.7,
+                y + slg * 0.1,
+                cx - s * 0.4,
+                y + slg * 0.6,
+                cx + s * 0.15,
+                y + slg * 1.0,
+                cx - s * 0.2,
+                y + slg * 1.35,
             ]
-            c.create_line(pts, fill="black", width=max(2, int(slg*0.18)),
-                          smooth=True, joinstyle=tk.ROUND, capstyle=tk.ROUND)
-        elif rest_type == 'eighth':
+            c.create_line(
+                pts,
+                fill="black",
+                width=max(2, int(slg * 0.18)),
+                smooth=True,
+                joinstyle=tk.ROUND,
+                capstyle=tk.ROUND,
+            )
+        elif rest_type == "eighth":
             # Diagonal slash + filled dot
             dot_r = max(2, int(slg * 0.22))
-            c.create_oval(cx - dot_r, y - dot_r, cx + dot_r, y + dot_r,
-                          fill="black", outline="black")
-            c.create_line(cx + dot_r, y - slg*0.1,
-                          cx - dot_r, y + slg*0.8,
-                          fill="black", width=max(2, int(slg*0.16)))
-        elif rest_type == '16th':
+            c.create_oval(
+                cx - dot_r,
+                y - dot_r,
+                cx + dot_r,
+                y + dot_r,
+                fill="black",
+                outline="black",
+            )
+            c.create_line(
+                cx + dot_r,
+                y - slg * 0.1,
+                cx - dot_r,
+                y + slg * 0.8,
+                fill="black",
+                width=max(2, int(slg * 0.16)),
+            )
+        elif rest_type == "16th":
             # Two stacked dots + two diagonal slashes
             dot_r = max(2, int(slg * 0.20))
-            for dy_dot, dy_slash in ((-slg*0.3, 0.05), (slg*0.35, 0.55)):
-                c.create_oval(cx - dot_r, y + dy_dot - dot_r,
-                              cx + dot_r, y + dy_dot + dot_r,
-                              fill="black", outline="black")
-                c.create_line(cx + dot_r, y + dy_slash*slg,
-                              cx - dot_r, y + (dy_slash + 0.7)*slg,
-                              fill="black", width=max(1, int(slg*0.14)))
-        elif rest_type == '32nd':
+            for dy_dot, dy_slash in ((-slg * 0.3, 0.05), (slg * 0.35, 0.55)):
+                c.create_oval(
+                    cx - dot_r,
+                    y + dy_dot - dot_r,
+                    cx + dot_r,
+                    y + dy_dot + dot_r,
+                    fill="black",
+                    outline="black",
+                )
+                c.create_line(
+                    cx + dot_r,
+                    y + dy_slash * slg,
+                    cx - dot_r,
+                    y + (dy_slash + 0.7) * slg,
+                    fill="black",
+                    width=max(1, int(slg * 0.14)),
+                )
+        elif rest_type == "32nd":
             # Three stacked dots + slashes
             dot_r = max(1, int(slg * 0.18))
-            for i, (dy_dot, dy_slash) in enumerate([
-                    (-slg*0.55, -0.25), (slg*0.05, 0.25), (slg*0.55, 0.75)]):
-                c.create_oval(cx - dot_r, y + dy_dot - dot_r,
-                              cx + dot_r, y + dy_dot + dot_r,
-                              fill="black", outline="black")
-                c.create_line(cx + dot_r, y + dy_slash*slg,
-                              cx - dot_r, y + (dy_slash + 0.6)*slg,
-                              fill="black", width=max(1, int(slg*0.12)))
+            for i, (dy_dot, dy_slash) in enumerate(
+                [(-slg * 0.55, -0.25), (slg * 0.05, 0.25), (slg * 0.55, 0.75)]
+            ):
+                c.create_oval(
+                    cx - dot_r,
+                    y + dy_dot - dot_r,
+                    cx + dot_r,
+                    y + dy_dot + dot_r,
+                    fill="black",
+                    outline="black",
+                )
+                c.create_line(
+                    cx + dot_r,
+                    y + dy_slash * slg,
+                    cx - dot_r,
+                    y + (dy_slash + 0.6) * slg,
+                    fill="black",
+                    width=max(1, int(slg * 0.12)),
+                )
 
     def _draw_rests(self, c, tr, tt, bt, nm, song, mmap, ti=0):
         """Draw rests: whole-measure rests where there are no notes, and
@@ -8962,8 +10775,8 @@ class ScoreView(tk.Frame):
             pass
 
         qtr = _TmpTrack()
-        qtr.name   = getattr(tr, "name", "track")
-        qtr.notes  = []
+        qtr.name = getattr(tr, "name", "track")
+        qtr.notes = []
         qtr.events = getattr(tr, "events", [])  # v22q: needed by _draw_pedal
         # v22ze-37 fix: carry the pre-hand-split tag through, same as
         # _draw_chords does, so the hand-split below can trust it.
@@ -8978,11 +10791,8 @@ class ScoreView(tk.Frame):
             cpy.channel = getattr(n, "channel", 0)
             qtr.notes.append(cpy)
 
-        div_map = {4:1, 8:2, 16:4, 32:8}
-        score_div = div_map.get(
-            getattr(self.app, "quantize_division", 8),
-            2
-        )
+        div_map = {4: 1, 8: 2, 16: 4, 32: 8}
+        score_div = div_map.get(getattr(self.app, "quantize_division", 8), 2)
 
         # v22ze-42 fix (was a flagged, unfinished WIP item): this used to
         # call quantize_notes(), which snaps BOTH onset AND duration onto
@@ -9007,24 +10817,27 @@ class ScoreView(tk.Frame):
         tr = qtr
 
         tt_local = self._treble_top(ti, self.app.song.tracks)
-        bt_local = self._bass_top(ti, self.app.song.tracks)   # None for single-staff
+        bt_local = self._bass_top(ti, self.app.song.tracks)  # None for single-staff
         slg = self.SLG
 
         REST_VALS = [
-            (tpb * 4,   'whole'),
-            (tpb * 2,   'half'),
-            (tpb,       'quarter'),
-            (tpb // 2,  'eighth'),
-            (tpb // 4,  '16th'),
-            (tpb // 8,  '32nd'),
+            (tpb * 4, "whole"),
+            (tpb * 2, "half"),
+            (tpb, "quarter"),
+            (tpb // 2, "eighth"),
+            (tpb // 4, "16th"),
+            (tpb // 8, "32nd"),
         ]
 
         def _rest_seq(gap_ticks):
-            remaining = int(gap_ticks); parts = []
+            remaining = int(gap_ticks)
+            parts = []
             for val, rtype in REST_VALS:
-                if val <= 0: continue
+                if val <= 0:
+                    continue
                 while remaining >= val:
-                    parts.append((val, rtype)); remaining -= val
+                    parts.append((val, rtype))
+                    remaining -= val
             return parts
 
         def _draw_rests_for_hand(hand_notes, y_top):
@@ -9047,14 +10860,14 @@ class ScoreView(tk.Frame):
                 if not meas_notes:
                     mx = (self._tick_to_x(ms) + self._tick_to_x(me)) // 2
                     ry = y_top + slg
-                    self._draw_rest_shape(c, 'whole', mx, ry, slg)
+                    self._draw_rest_shape(c, "whole", mx, ry, slg)
                     continue
 
                 # ── Beat-level gaps within the measure ──────────────────
                 cursor = ms
                 events = []
                 for n in meas_notes:
-                    events.append((n.tick,                       +1))
+                    events.append((n.tick, +1))
                     events.append((min(n.tick + n.duration, me), -1))
                 events.sort()
 
@@ -9066,11 +10879,11 @@ class ScoreView(tk.Frame):
                             parts = _rest_seq(gap)
                             gx = self._tick_to_x(cursor)
                             for val, rtype in parts:
-                                pw  = val * self._px_per_tick
+                                pw = val * self._px_per_tick
                                 mid = gx + pw / 2
-                                if rtype == 'whole':
+                                if rtype == "whole":
                                     ry = y_top + slg
-                                elif rtype == 'half':
+                                elif rtype == "half":
                                     ry = y_top + slg * 2
                                 else:
                                     ry = mid_y
@@ -9087,11 +10900,11 @@ class ScoreView(tk.Frame):
                         parts = _rest_seq(gap)
                         gx = self._tick_to_x(cursor)
                         for val, rtype in parts:
-                            pw  = val * self._px_per_tick
+                            pw = val * self._px_per_tick
                             mid = gx + pw / 2
-                            if rtype == 'whole':
+                            if rtype == "whole":
                                 ry = y_top + slg
-                            elif rtype == 'half':
+                            elif rtype == "half":
                                 ry = y_top + slg * 2
                             else:
                                 ry = mid_y
@@ -9104,7 +10917,7 @@ class ScoreView(tk.Frame):
         else:
             # v22ze-37: split by hand the same way _draw_chords does, so
             # each staff's rests are computed and drawn independently.
-            if getattr(tr, '_prehand_split', False):
+            if getattr(tr, "_prehand_split", False):
                 rh_notes = [n for n in tr.notes if n.channel == 0]
                 lh_notes = [n for n in tr.notes if n.channel == 1]
             else:
@@ -9112,14 +10925,18 @@ class ScoreView(tk.Frame):
                 if split <= 0:
                     split = _find_split_pitch_for_track(
                         tr.notes,
-                        prefer_lh_octaves=getattr(self.app.song, 'prefer_lh_octaves', True))
+                        prefer_lh_octaves=getattr(
+                            self.app.song, "prefer_lh_octaves", True
+                        ),
+                    )
                 rh_notes = [n for n in tr.notes if n.pitch >= split]
-                lh_notes = [n for n in tr.notes if n.pitch <  split]
+                lh_notes = [n for n in tr.notes if n.pitch < split]
             _draw_rests_for_hand(rh_notes, tt_local)
             _draw_rests_for_hand(lh_notes, bt_local)
 
     # ── click editing ─────────────────────────────────────────────────────────
-    def _cxy(self,e): return self.canvas.canvasx(e.x),self.canvas.canvasy(e.y)
+    def _cxy(self, e):
+        return self.canvas.canvasx(e.x), self.canvas.canvasy(e.y)
 
     def _display_tick(self, tick):
         """Map a note's raw (unsnapped) tick to the same onset-snapped grid
@@ -9147,14 +10964,15 @@ class ScoreView(tk.Frame):
         grid = max(1, tpb // (score_div * 2))
         return int(round(tick / grid) * grid)
 
-    def _xy_to_pitch(self,cx,cy):
+    def _xy_to_pitch(self, cx, cy):
         tracks = self.app.song.tracks
-        for ti,tr in enumerate(tracks):
+        for ti, tr in enumerate(tracks):
             tt = self._treble_top(ti, tracks)
-            bt = self._bass_top(ti, tracks)   # None for single-staff
+            bt = self._bass_top(ti, tracks)  # None for single-staff
             grand = bt is not None
-            bot   = (bt + self.SH + self.BPAD) if grand else (tt + self.SH + 16)
-            if not (self._track_yo(ti, tracks) <= cy <= bot): continue
+            bot = (bt + self.SH + self.BPAD) if grand else (tt + self.SH + 16)
+            if not (self._track_yo(ti, tracks) <= cy <= bot):
+                continue
             step = self.SLG / 2
             # v22ze-36 fix: this treble-branch constant (-3) didn't match
             # _sp_to_y_treble's actual rendering formula ((tt+SH)-(pos-2)*
@@ -9170,13 +10988,21 @@ class ScoreView(tk.Frame):
             return ti, self._pos_to_pitch(pos)
         return None, None
 
-    def _pos_to_pitch(self,pos):
-        total_d=pos+35; oct_=total_d//7; step=total_d%7
-        semi=[0,2,4,5,7,9,11][max(0,min(6,step))]
-        return max(0,min(127,oct_*12+semi))
+    def _pos_to_pitch(self, pos):
+        total_d = pos + 35
+        oct_ = total_d // 7
+        step = total_d % 7
+        semi = [0, 2, 4, 5, 7, 9, 11][max(0, min(6, step))]
+        return max(0, min(127, oct_ * 12 + semi))
 
-    def _dur_to_ticks(self,name,tpb):
-        return {"whole":tpb*4,"half":tpb*2,"quarter":tpb,"eighth":tpb//2,"16th":tpb//4}.get(name,tpb)
+    def _dur_to_ticks(self, name, tpb):
+        return {
+            "whole": tpb * 4,
+            "half": tpb * 2,
+            "quarter": tpb,
+            "eighth": tpb // 2,
+            "16th": tpb // 4,
+        }.get(name, tpb)
 
     def _on_click(self, event):
         cx, cy = self._cxy(event)
@@ -9199,14 +11025,14 @@ class ScoreView(tk.Frame):
         ti, pitch = self._xy_to_pitch(cx, cy)
         if ti is None:
             return
-        tr  = self.app.song.tracks[ti]
+        tr = self.app.song.tracks[ti]
         tpb = self.app.song.ticks_per_beat
         dur = self._dur_to_ticks(self._dur_var.get(), tpb)
         # Snap the inserted tick to the nearest grid position (same grid as
         # the score display) so notes land on beat/sub-beat positions rather
         # than at an arbitrary sub-pixel offset.
         raw_tick = self._x_to_tick(cx)
-        grid = max(1, tpb // 4)   # 16th-note grid for insertion
+        grid = max(1, tpb // 4)  # 16th-note grid for insertion
         tick = round(raw_tick / grid) * grid
 
         if self._entry_mode_var.get() == "rest":
@@ -9222,23 +11048,37 @@ class ScoreView(tk.Frame):
             # intuitive interaction: turn into a rest whichever single
             # note (if any) is actually sounding at the exact clicked
             # tick, regardless of the toolbar's duration setting.
-            hit = [n for n in tr.notes
-                   if self._display_tick(n.tick) <= tick
-                   < self._display_tick(n.tick) + n.duration]
+            hit = [
+                n
+                for n in tr.notes
+                if self._display_tick(n.tick)
+                <= tick
+                < self._display_tick(n.tick) + n.duration
+            ]
             if not hit:
-                return   # already silent here -- nothing to do, no undo step
+                return  # already silent here -- nothing to do, no undo step
             for n in hit:
                 tr.notes.remove(n)
-                self.app._push_undo(NoteEditAction(
-                    description=f"Insert rest (cleared pitch {n.pitch})",
-                    track_index=ti, before_note=n, after_note=None))
+                self.app._push_undo(
+                    NoteEditAction(
+                        description=f"Insert rest (cleared pitch {n.pitch})",
+                        track_index=ti,
+                        before_note=n,
+                        after_note=None,
+                    )
+                )
         else:
             new_note = MidiNote(tick, pitch, 80, dur, tr.channel)
             tr.notes.append(new_note)
             tr.notes.sort(key=lambda n: n.tick)
-            self.app._push_undo(NoteEditAction(
-                description=f"Add note (pitch {pitch})",
-                track_index=ti, before_note=None, after_note=new_note))
+            self.app._push_undo(
+                NoteEditAction(
+                    description=f"Add note (pitch {pitch})",
+                    track_index=ti,
+                    before_note=None,
+                    after_note=new_note,
+                )
+            )
 
         self.app.song.modified = True
         self.app._update_title()
@@ -9253,24 +11093,35 @@ class ScoreView(tk.Frame):
         ti, click_pitch = self._xy_to_pitch(cx, cy)
         if ti is None:
             return
-        tr  = self.app.song.tracks[ti]
+        tr = self.app.song.tracks[ti]
         tick = self._x_to_tick(cx)
-        tpb  = self.app.song.ticks_per_beat
+        tpb = self.app.song.ticks_per_beat
         best, bestd = None, 9999
-        threshold = int(tpb * 1.5 + tpb // 4 * 3)   # same generous hit-test as delete-note
+        threshold = int(
+            tpb * 1.5 + tpb // 4 * 3
+        )  # same generous hit-test as delete-note
         for i, n in enumerate(tr.notes):
-            d = abs(self._display_tick(n.tick) - tick) + abs(n.pitch - click_pitch) * tpb // 8
+            d = (
+                abs(self._display_tick(n.tick) - tick)
+                + abs(n.pitch - click_pitch) * tpb // 8
+            )
             if d < bestd:
                 best, bestd = i, d
         if best is None or bestd >= threshold:
             return
         import copy as _copy
+
         old_note = tr.notes[best]
         _use_flats = _song_uses_flats(self.app.song)
         _, cur_acc = note_staff_pos(old_note, _use_flats)
-        natural_pitch = old_note.pitch - cur_acc   # strip whatever accidental it has now
-        delta = {"double_flat": -2, "flat": -1, "natural": 0,
-                 "sharp": 1, "double_sharp": 2}[self._accidental_var.get()]
+        natural_pitch = old_note.pitch - cur_acc  # strip whatever accidental it has now
+        delta = {
+            "double_flat": -2,
+            "flat": -1,
+            "natural": 0,
+            "sharp": 1,
+            "double_sharp": 2,
+        }[self._accidental_var.get()]
         new_pitch = max(0, min(127, natural_pitch + delta))
         new_spelling = self._accidental_var.get()
         # v22ze-51 fix: previously this only checked whether the PITCH
@@ -9280,8 +11131,11 @@ class ScoreView(tk.Frame):
         # explicit natural sign shown even though the pitch is already a
         # plain natural). Comparing spelling too lets that through while
         # still treating a genuine repeat click as a no-op.
-        if new_pitch == old_note.pitch and getattr(old_note, 'spelling', '') == new_spelling:
-            return   # already exactly this accidental -- no-op, no undo step
+        if (
+            new_pitch == old_note.pitch
+            and getattr(old_note, "spelling", "") == new_spelling
+        ):
+            return  # already exactly this accidental -- no-op, no undo step
         new_note = _copy.copy(old_note)
         new_note.pitch = new_pitch
         # v22ze-51 fix: pin the spelling the user actually asked for, so
@@ -9294,9 +11148,14 @@ class ScoreView(tk.Frame):
         tr.notes[best] = new_note
         self.app.song.modified = True
         self.app._update_title()
-        self.app._push_undo(NoteEditAction(
-            description=f"Change accidental (pitch {old_note.pitch}\u2192{new_pitch})",
-            track_index=ti, before_note=old_note, after_note=new_note))
+        self.app._push_undo(
+            NoteEditAction(
+                description=f"Change accidental (pitch {old_note.pitch}\u2192{new_pitch})",
+                track_index=ti,
+                before_note=old_note,
+                after_note=new_note,
+            )
+        )
         self._draw()
 
     def _click_dynamics(self, cx, cy):
@@ -9307,16 +11166,21 @@ class ScoreView(tk.Frame):
         ti, _ = self._xy_to_pitch(cx, cy)
         if ti is None:
             return
-        tr   = self.app.song.tracks[ti]
+        tr = self.app.song.tracks[ti]
         tick = self._x_to_tick(cx)
         new_event = MidiEvent(tick, ("dynamic", self._dynamic_var.get()))
         tr.markings.append(new_event)
         tr.markings.sort(key=lambda e: e.tick)
         self.app.song.modified = True
         self.app._update_title()
-        self.app._push_undo(EventEditAction(
-            description=f"Add dynamic marking ({self._dynamic_var.get()})",
-            track_index=ti, before_event=None, after_event=new_event))
+        self.app._push_undo(
+            EventEditAction(
+                description=f"Add dynamic marking ({self._dynamic_var.get()})",
+                track_index=ti,
+                before_event=None,
+                after_event=new_event,
+            )
+        )
         self._draw()
 
     def _click_articulation(self, cx, cy):
@@ -9326,18 +11190,22 @@ class ScoreView(tk.Frame):
         ti, click_pitch = self._xy_to_pitch(cx, cy)
         if ti is None:
             return
-        tr  = self.app.song.tracks[ti]
+        tr = self.app.song.tracks[ti]
         tick = self._x_to_tick(cx)
-        tpb  = self.app.song.ticks_per_beat
+        tpb = self.app.song.ticks_per_beat
         best, bestd = None, 9999
         threshold = int(tpb * 1.5 + tpb // 4 * 3)
         for i, n in enumerate(tr.notes):
-            d = abs(self._display_tick(n.tick) - tick) + abs(n.pitch - click_pitch) * tpb // 8
+            d = (
+                abs(self._display_tick(n.tick) - tick)
+                + abs(n.pitch - click_pitch) * tpb // 8
+            )
             if d < bestd:
                 best, bestd = i, d
         if best is None or bestd >= threshold:
             return
         import copy as _copy
+
         old_note = tr.notes[best]
         chosen = self._articulation_var.get()
         # Toggle: clicking the same articulation again clears it back to none.
@@ -9348,17 +11216,22 @@ class ScoreView(tk.Frame):
         self.app.song.modified = True
         self.app._update_title()
         label = new_articulation if new_articulation else "none"
-        self.app._push_undo(NoteEditAction(
-            description=f"Set articulation ({label})",
-            track_index=ti, before_note=old_note, after_note=new_note))
+        self.app._push_undo(
+            NoteEditAction(
+                description=f"Set articulation ({label})",
+                track_index=ti,
+                before_note=old_note,
+                after_note=new_note,
+            )
+        )
         self._draw()
 
     def _on_right(self, event):
         cx, cy = self._cxy(event)
         ti, pitch = self._xy_to_pitch(cx, cy)
         tick = self._x_to_tick(cx)
-        tpb  = self.app.song.ticks_per_beat
-        tpm  = self.app.song.ticks_per_measure()
+        tpb = self.app.song.ticks_per_beat
+        tpm = self.app.song.ticks_per_measure()
         meas = int(tick // tpm)
 
         # v22ze-56 fix: was tk.Menu — see TkPopupMenu's docstring. This
@@ -9375,32 +11248,44 @@ class ScoreView(tk.Frame):
         # If nothing is actually sounding at the exact clicked tick, no
         # delete option is offered at all -- there's genuinely nothing
         # there to delete.
-        if ti is not None and self._active_tool == "note_rest" \
-                and self._entry_mode_var.get() == "rest":
+        if (
+            ti is not None
+            and self._active_tool == "note_rest"
+            and self._entry_mode_var.get() == "rest"
+        ):
             tr = self.app.song.tracks[ti]
-            precise_hit = [n for n in tr.notes
-                           if self._display_tick(n.tick) <= tick
-                           < self._display_tick(n.tick) + n.duration]
+            precise_hit = [
+                n
+                for n in tr.notes
+                if self._display_tick(n.tick)
+                <= tick
+                < self._display_tick(n.tick) + n.duration
+            ]
             if precise_hit:
                 n = precise_hit[0]
                 idx = tr.notes.index(n)
                 menu.add_command(
                     label=f"Delete note here (leaves a rest)  "
-                          f"(pitch {n.pitch}, meas {meas+1})",
-                    command=lambda i=idx, t=tr, tix=ti: self._del_note(t, i, tix))
+                    f"(pitch {n.pitch}, meas {meas+1})",
+                    command=lambda i=idx, t=tr, tix=ti: self._del_note(t, i, tix),
+                )
             menu.add_separator()
             menu.add_command(
                 label=f"Insert measure before {meas+1}",
-                command=lambda m=meas: self._insert_measure(m, after=False))
+                command=lambda m=meas: self._insert_measure(m, after=False),
+            )
             menu.add_command(
                 label=f"Insert measure after {meas+1}",
-                command=lambda m=meas: self._insert_measure(m, after=True))
+                command=lambda m=meas: self._insert_measure(m, after=True),
+            )
             menu.add_command(
                 label=f"Delete measure {meas+1}  (clear all tracks)",
-                command=lambda m=meas: self._delete_measure(m, close_gap=False))
+                command=lambda m=meas: self._delete_measure(m, close_gap=False),
+            )
             menu.add_command(
                 label=f"Cut measure {meas+1}  (delete & shift left)",
-                command=lambda m=meas: self._delete_measure(m, close_gap=True))
+                command=lambda m=meas: self._delete_measure(m, close_gap=True),
+            )
             _popup_menu_safe(menu, event.x_root, event.y_root)
             return
 
@@ -9412,7 +11297,10 @@ class ScoreView(tk.Frame):
             # Generous threshold: 1.5 beats in tick distance or 3 semitones
             threshold = int(tpb * 1.5 + tpb // 4 * 3)
             for i, n in enumerate(tr.notes):
-                d = abs(self._display_tick(n.tick) - tick) + abs(n.pitch - pitch) * tpb // 8
+                d = (
+                    abs(self._display_tick(n.tick) - tick)
+                    + abs(n.pitch - pitch) * tpb // 8
+                )
                 if d < bestd:
                     best, bestd = i, d
             if best is not None and bestd < threshold:
@@ -9427,37 +11315,47 @@ class ScoreView(tk.Frame):
                 # types stay perfectly consistent), with Delete note kept
                 # as an always-available secondary option.
                 if self._active_tool == "accidental":
-                    acc_label = {"double_flat": "\U0001D12B", "flat": "\u266D",
-                                "natural": "\u266E", "sharp": "\u266F",
-                                "double_sharp": "\U0001D12A"}.get(
-                                    self._accidental_var.get(), "?")
+                    acc_label = {
+                        "double_flat": "\U0001d12b",
+                        "flat": "\u266d",
+                        "natural": "\u266e",
+                        "sharp": "\u266f",
+                        "double_sharp": "\U0001d12a",
+                    }.get(self._accidental_var.get(), "?")
                     menu.add_command(
                         label=f"Apply {acc_label} to this note "
-                              f"(pitch {n.pitch}, meas {meas+1})",
-                        command=lambda cx=cx, cy=cy: self._click_accidental(cx, cy))
+                        f"(pitch {n.pitch}, meas {meas+1})",
+                        command=lambda cx=cx, cy=cy: self._click_accidental(cx, cy),
+                    )
                 elif self._active_tool == "articulation":
                     art = self._articulation_var.get()
                     menu.add_command(
                         label=f"Toggle {art} on this note "
-                              f"(pitch {n.pitch}, meas {meas+1})",
-                        command=lambda cx=cx, cy=cy: self._click_articulation(cx, cy))
+                        f"(pitch {n.pitch}, meas {meas+1})",
+                        command=lambda cx=cx, cy=cy: self._click_articulation(cx, cy),
+                    )
                 menu.add_command(
                     label=f"Delete note  (pitch {n.pitch}, meas {meas+1})",
-                    command=lambda i=best, t=tr, tix=ti: self._del_note(t, i, tix))
+                    command=lambda i=best, t=tr, tix=ti: self._del_note(t, i, tix),
+                )
 
         # Insert / Delete / Cut measure (all tracks)
         menu.add_command(
             label=f"Insert measure before {meas+1}",
-            command=lambda m=meas: self._insert_measure(m, after=False))
+            command=lambda m=meas: self._insert_measure(m, after=False),
+        )
         menu.add_command(
             label=f"Insert measure after {meas+1}",
-            command=lambda m=meas: self._insert_measure(m, after=True))
+            command=lambda m=meas: self._insert_measure(m, after=True),
+        )
         menu.add_command(
             label=f"Delete measure {meas+1}  (clear all tracks)",
-            command=lambda m=meas: self._delete_measure(m, close_gap=False))
+            command=lambda m=meas: self._delete_measure(m, close_gap=False),
+        )
         menu.add_command(
             label=f"Cut measure {meas+1}  (delete & shift left)",
-            command=lambda m=meas: self._delete_measure(m, close_gap=True))
+            command=lambda m=meas: self._delete_measure(m, close_gap=True),
+        )
 
         # v22ze-44 fix: this was missing the grab_release() that the
         # other popup menu in this app already does correctly (see
@@ -9476,22 +11374,25 @@ class ScoreView(tk.Frame):
         self.app.song.modified = True
         self.app._update_title()
         # v22ze-34: per-edit undo -- each deleted note is its own step.
-        self.app._push_undo(NoteEditAction(
-            description=f"Delete note (pitch {deleted_note.pitch})",
-            track_index=track_index,
-            before_note=deleted_note,
-            after_note=None,
-        ))
+        self.app._push_undo(
+            NoteEditAction(
+                description=f"Delete note (pitch {deleted_note.pitch})",
+                track_index=track_index,
+                before_note=deleted_note,
+                after_note=None,
+            )
+        )
         self._draw()
 
     def _delete_measure(self, meas_idx, close_gap=False):
         """Remove all notes in measure meas_idx from every track.
         If close_gap=True, shift all subsequent notes left by one measure."""
         import copy as _copy
-        song  = self.app.song
-        tpm   = song.ticks_per_measure()
-        ms    = meas_idx * tpm
-        me    = ms + tpm
+
+        song = self.app.song
+        tpm = song.ticks_per_measure()
+        ms = meas_idx * tpm
+        me = ms + tpm
 
         # v22ze-34: this touches every track at once (and can shift
         # tick positions with close_gap), so it uses the same bulk
@@ -9499,24 +11400,22 @@ class ScoreView(tk.Frame):
         # lightweight per-note NoteEditAction -- still one undo step,
         # just a heavier one, appropriate for a bulk operation.
         before_tracks = _copy.deepcopy(song.tracks)
-        before_map    = _copy.deepcopy(song.rationalized_measure_map)
+        before_map = _copy.deepcopy(song.rationalized_measure_map)
 
         for tr in song.tracks:
             # Remove notes that start in this measure
-            tr.notes = [n for n in tr.notes
-                        if not (ms <= n.tick < me)]
+            tr.notes = [n for n in tr.notes if not (ms <= n.tick < me)]
             # Also clip notes that start before and extend into the measure
             for n in tr.notes:
                 if n.tick < ms and n.tick + n.duration > ms:
-                    n.duration = ms - n.tick   # truncate at measure boundary
+                    n.duration = ms - n.tick  # truncate at measure boundary
             if close_gap:
                 # Shift everything after the deleted measure one measure left
                 for n in tr.notes:
                     if n.tick >= me:
                         n.tick -= tpm
             # Remove events in this measure too
-            tr.events = [ev for ev in tr.events
-                         if not (ms <= ev.tick < me)]
+            tr.events = [ev for ev in tr.events if not (ms <= ev.tick < me)]
             if close_gap:
                 for ev in tr.events:
                     if ev.tick >= me:
@@ -9524,14 +11423,19 @@ class ScoreView(tk.Frame):
 
         song.modified = True
         self.app._update_title()
-        self.app._push_undo(RationalizationAction(
-            description=(f"Cut measure {meas_idx + 1}" if close_gap
-                        else f"Delete measure {meas_idx + 1}"),
-            before_tracks=before_tracks,
-            after_tracks=_copy.deepcopy(song.tracks),
-            before_map=before_map,
-            after_map=_copy.deepcopy(song.rationalized_measure_map),
-        ))
+        self.app._push_undo(
+            RationalizationAction(
+                description=(
+                    f"Cut measure {meas_idx + 1}"
+                    if close_gap
+                    else f"Delete measure {meas_idx + 1}"
+                ),
+                before_tracks=before_tracks,
+                after_tracks=_copy.deepcopy(song.tracks),
+                before_map=before_map,
+                after_map=_copy.deepcopy(song.rationalized_measure_map),
+            )
+        )
         self._draw()
 
     def _insert_measure(self, meas_idx, after=False):
@@ -9539,12 +11443,13 @@ class ScoreView(tk.Frame):
         track. Everything at or past the insertion point shifts right by
         one measure's worth of ticks -- the exact inverse of Cut measure."""
         import copy as _copy
+
         song = self.app.song
-        tpm  = song.ticks_per_measure()
+        tpm = song.ticks_per_measure()
         cut_point = (meas_idx + 1) * tpm if after else meas_idx * tpm
 
         before_tracks = _copy.deepcopy(song.tracks)
-        before_map    = _copy.deepcopy(song.rationalized_measure_map)
+        before_map = _copy.deepcopy(song.rationalized_measure_map)
 
         for tr in song.tracks:
             for n in tr.notes:
@@ -9556,33 +11461,49 @@ class ScoreView(tk.Frame):
 
         song.modified = True
         self.app._update_title()
-        self.app._push_undo(RationalizationAction(
-            description=f"Insert measure {'after' if after else 'before'} {meas_idx + 1}",
-            before_tracks=before_tracks,
-            after_tracks=_copy.deepcopy(song.tracks),
-            before_map=before_map,
-            after_map=_copy.deepcopy(song.rationalized_measure_map),
-        ))
+        self.app._push_undo(
+            RationalizationAction(
+                description=f"Insert measure {'after' if after else 'before'} {meas_idx + 1}",
+                before_tracks=before_tracks,
+                after_tracks=_copy.deepcopy(song.tracks),
+                before_map=before_map,
+                after_map=_copy.deepcopy(song.rationalized_measure_map),
+            )
+        )
         self._draw()
 
     # ── Mini transport handlers (delegate to main app) ───────────────────────
-    def _t_rewind(self):      self.app._rewind_to_start()
-    def _t_stop(self):        self.app._stop(); self._sync_transport_btns()
-    def _t_play_pause(self):  self.app._toggle_play(); self._sync_transport_btns()
-    def _t_rec(self):         self.app._toggle_record(); self._sync_transport_btns()
+    def _t_rewind(self):
+        self.app._rewind_to_start()
+
+    def _t_stop(self):
+        self.app._stop()
+        self._sync_transport_btns()
+
+    def _t_play_pause(self):
+        self.app._toggle_play()
+        self._sync_transport_btns()
+
+    def _t_rec(self):
+        self.app._toggle_record()
+        self._sync_transport_btns()
+
     def _sync_transport_btns(self):
         # Keep mini buttons consistent with main transport state.
-        if not self.winfo_exists(): return
-        playing   = self.app.transport.is_playing()
+        if not self.winfo_exists():
+            return
+        playing = self.app.transport.is_playing()
         recording = self.app.transport.is_recording()
         self._score_play_btn.configure(text="⏸ Pause" if playing else "▶ Play")
         self._score_rec_btn.configure(
             bg="#880000" if recording else "#0f3320",
-            fg="#ff4444" if recording else "#3fb950")
+            fg="#ff4444" if recording else "#3fb950",
+        )
 
     # ── cursor update called from main thread ──────────────────────────────────
     def update_cursor(self, tick):
-        if not self.winfo_exists(): return
+        if not self.winfo_exists():
+            return
         c = self.canvas
         song = self.app.song
 
@@ -9627,9 +11548,18 @@ class ScoreView(tk.Frame):
         else:
             # Playhead tag was lost (e.g. after a resize) — restore it
             total_h = self._track_yo(len(song.tracks), song.tracks) + 20
-            c.create_line(cx, 0, cx, total_h, fill="#dd2222", width=2,
-                          dash=(5, 3), tags="playhead")
+            c.create_line(
+                cx,
+                0,
+                cx,
+                total_h,
+                fill="#dd2222",
+                width=2,
+                dash=(5, 3),
+                tags="playhead",
+            )
         self._scroll_to(cx, total_w)
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Main Application
@@ -9647,6 +11577,7 @@ class ToolTip:
     rationalize → cleanup → bake workflow accumulated enough controls that
     users need in-place explanations rather than hunting through menus.
     """
+
     def __init__(self, widget, text, delay=500, wraplength=280):
         self.widget = widget
         self.text = text
@@ -9687,10 +11618,19 @@ class ToolTip:
                 tw.attributes("-topmost", True)
             except Exception:
                 pass
-            tk.Label(tw, text=self.text, justify=tk.LEFT,
-                    bg="#1a1a1a", fg="#e8e8e0", relief=tk.SOLID, borderwidth=1,
-                    font=("TkDefaultFont", 8), wraplength=self.wraplength,
-                    padx=6, pady=4).pack()
+            tk.Label(
+                tw,
+                text=self.text,
+                justify=tk.LEFT,
+                bg="#1a1a1a",
+                fg="#e8e8e0",
+                relief=tk.SOLID,
+                borderwidth=1,
+                font=("TkDefaultFont", 8),
+                wraplength=self.wraplength,
+                padx=6,
+                pady=4,
+            ).pack()
         except Exception:
             self.tip_window = None
 
@@ -9713,15 +11653,24 @@ def _tt(widget, text, delay=500):
 # ── Rationalization undo/redo support ────────────────────────────────────────
 import copy as _copy
 
+
 class RationalizationAction:
     """Memento for a single rationalization edit (undo/redo)."""
-    __slots__ = ("description", "before_tracks", "after_tracks",
-                 "before_map", "after_map")
-    def __init__(self, description, before_tracks, after_tracks,
-                 before_map=None, after_map=None):
-        self.description   = description
-        self.before_tracks = before_tracks   # deep-copy of track list before
-        self.after_tracks  = after_tracks    # deep-copy of track list after
+
+    __slots__ = (
+        "description",
+        "before_tracks",
+        "after_tracks",
+        "before_map",
+        "after_map",
+    )
+
+    def __init__(
+        self, description, before_tracks, after_tracks, before_map=None, after_map=None
+    ):
+        self.description = description
+        self.before_tracks = before_tracks  # deep-copy of track list before
+        self.after_tracks = after_tracks  # deep-copy of track list after
         # v22ze-33 fix: song.rationalized_measure_map is a CACHE that can
         # be set independently of tracks (e.g. by an actual Rationalize
         # action) and stays valid across later, unrelated edits (e.g.
@@ -9734,8 +11683,8 @@ class RationalizationAction:
         # valid rationalized grid). Snapshotting it alongside tracks,
         # the same way, restores exactly what was actually there at
         # each point instead of guessing.
-        self.before_map    = before_map
-        self.after_map     = after_map
+        self.before_map = before_map
+        self.after_map = after_map
 
 
 @dataclass
@@ -9753,10 +11702,11 @@ class NoteEditAction:
     this is unambiguous even when several notes share the same tick
     and pitch (e.g. a doubled note in different voices).
     """
+
     description: str
     track_index: int
-    before_note: object   # MidiNote, or None if this action was an ADD
-    after_note:  object   # MidiNote, or None if this action was a DELETE
+    before_note: object  # MidiNote, or None if this action was an ADD
+    after_note: object  # MidiNote, or None if this action was a DELETE
 
 
 @dataclass
@@ -9768,10 +11718,11 @@ class EventEditAction:
     (and anything else event-based, e.g. pedal marks) that aren't
     attached to one specific note.
     """
+
     description: str
     track_index: int
-    before_event: object   # MidiEvent, or None if this action was an ADD
-    after_event:  object   # MidiEvent, or None if this action was a DELETE
+    before_event: object  # MidiEvent, or None if this action was an ADD
+    after_event: object  # MidiEvent, or None if this action was a DELETE
 
 
 @dataclass
@@ -9781,12 +11732,11 @@ class CalibrationAction:
     Stored on the same _undo_stack as RationalizationAction; _undo() and
     _redo() check the type to know which fields to restore.
     """
-    description:    str
-    before_tempo:   int    # microseconds-per-beat
-    after_tempo:    int
-    before_ts_num:  int    # time signature numerator
-    before_ts_den:  int
-    after_ts_num:   int
-    after_ts_den:   int
 
-
+    description: str
+    before_tempo: int  # microseconds-per-beat
+    after_tempo: int
+    before_ts_num: int  # time signature numerator
+    before_ts_den: int
+    after_ts_num: int
+    after_ts_den: int
