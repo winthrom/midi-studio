@@ -3,7 +3,7 @@ from setuptools import setup, find_packages
 
 setup(
     name="midi-studio",
-    version="22ze-73",
+    version="22.0.73",
     description="A Synthesizer in the Spirit of MidiSoft Studio4",
     author="Michael Winthrop",
     author_email="michael.f.winthrop@gmail.com",
