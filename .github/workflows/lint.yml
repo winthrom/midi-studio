@@ -1,0 +1,44 @@
+name: Lint
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v3
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install flake8 pylint black isort
+
+    - name: Check formatting with black
+      run: |
+        black --check platform.py theory.py midi_io.py synth.py export.py gui.py main.py
+      continue-on-error: true
+
+    - name: Check import sorting with isort
+      run: |
+        isort --check-only platform.py theory.py midi_io.py synth.py export.py gui.py main.py
+      continue-on-error: true
+
+    - name: Lint with flake8
+      run: |
+        flake8 platform.py theory.py midi_io.py synth.py export.py gui.py main.py --count --select=E9,F63,F7,F82 --show-source --statistics
+      continue-on-error: true
+
+    - name: Lint with pylint
+      run: |
+        pylint --disable=R,C,W platform.py theory.py midi_io.py synth.py export.py main.py
+      continue-on-error: true
