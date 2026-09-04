@@ -26,12 +26,12 @@ jobs:
       if: runner.os == 'Linux'
       run: |
         sudo apt-get update
-        sudo apt-get install -y python3-tk timidity fluidsynth fluid-soundfont-gm
+        sudo apt-get install -y python3-tk timidity fluidsynth fluid-soundfont-gm libportaudio2-dev
 
     - name: Install system dependencies (macOS)
       if: runner.os == 'macOS'
       run: |
-        brew install python-tk timidity fluidsynth
+        brew install python-tk timidity fluidsynth portaudio
 
     - name: Install Python dependencies
       run: |
