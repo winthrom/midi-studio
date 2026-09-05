@@ -6,8 +6,13 @@ import tkinter as tk
 from tkinter import messagebox
 
 from gui import MidisoftStudio, _maybe_show_no_synth_dialog
-from midi_io import (MIDI_OUT_OK, _fs_active, midi_input_subscribe,
-                     midi_input_unsubscribe)
+from midi_io import (
+    MIDI_OUT_OK,
+    _fs_active,
+    midi_input_subscribe,
+    midi_input_unsubscribe,
+)
+
 # Import modules
 from sys_platform import APP_FULL_NAME, APP_VERSION
 
