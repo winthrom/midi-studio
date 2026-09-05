@@ -9,6 +9,8 @@ import webbrowser
 import xml.etree.ElementTree as ET
 from tkinter import filedialog, messagebox, simpledialog, ttk
 
+from theory import key_sig_accidentals
+
 
 class TkPopupMenu(tk.Toplevel):
     """A dropdown/context menu built entirely from ordinary Tk widgets in

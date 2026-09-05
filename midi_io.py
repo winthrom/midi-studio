@@ -8,12 +8,13 @@ Provides:
 - FluidSynth initialization as a software synthesizer fallback
 """
 
+import json
+import os
+import platform
 import sys
 import threading
 import time
-import platform
-import os
-import json
+
 try:
     import mido
     import mido.backends.rtmidi
@@ -23,16 +24,18 @@ except ImportError:
 # MIDI I/O initialisation
 # ─────────────────────────────────────────────────────────────────────────────
 MIDI_OUT_OK = False
-MIDI_IN_OK  = False
-_midi_out   = None
-_midi_in    = None
-_unverified_out_port_name = None   # v22w: candidate port, not yet trusted
+MIDI_IN_OK = False
+_midi_out = None
+_midi_in = None
+_unverified_out_port_name = None  # v22w: candidate port, not yet trusted
 
 # ── Simple settings persistence (v22z-2) ────────────────────────────────────
 # Minimal, self-contained — just remembers the user's chosen MIDI output
 # port across sessions.  Not a general preferences system.
 import json as _settings_json
+
 _SETTINGS_PATH = os.path.expanduser("~/.midistudio_settings.json")
+
 
 def _load_settings():
     try:
@@ -41,12 +44,14 @@ def _load_settings():
     except Exception:
         return {}
 
+
 def _save_settings(d):
     try:
         with open(_SETTINGS_PATH, "w") as f:
             _settings_json.dump(d, f)
     except Exception as e:
         print(f"[Settings] Could not save: {e}", file=sys.stderr)
+
 
 # ── TiMidity launch flags ─────────────────────────────────────────────────────
 # -iA          : ALSA sequencer server mode
@@ -60,13 +65,14 @@ TIMIDITY_ARGS = [
     "-iA",
     "-B8,8",
     "-Os",
-    "-s", "44100",
+    "-s",
+    "44100",
     "--reverb=d",
     "--chorus=d",
 ]
 TIMIDITY_HINT = "timidity " + " ".join(TIMIDITY_ARGS)
 
-_timidity_proc = None    # subprocess.Popen handle if we launched it ourselves
+_timidity_proc = None  # subprocess.Popen handle if we launched it ourselves
 
 # ─────────────────────────────────────────────────────────────────────────────
 # FluidSynth soft-synth backend
@@ -77,9 +83,9 @@ _timidity_proc = None    # subprocess.Popen handle if we launched it ourselves
 # must be installed separately — we never bundle it.
 # ─────────────────────────────────────────────────────────────────────────────
 
-_fs_synth   = None   # fluidsynth.Synth instance, or None
-_fs_sfid    = None   # SoundFont ID returned by fs.sfload()
-_fs_active  = False  # True once FluidSynth is ready to receive notes
+_fs_synth = None  # fluidsynth.Synth instance, or None
+_fs_sfid = None  # SoundFont ID returned by fs.sfload()
+_fs_active = False  # True once FluidSynth is ready to receive notes
 
 # v22ze-31 (housekeeping: setup guidance): WHY FluidSynth wasn't set up,
 # in plain language for the GUI dialog -- not just the stderr prints,
@@ -93,8 +99,9 @@ _fs_active  = False  # True once FluidSynth is ready to receive notes
 #   "load_failed"  -- soundfont file found but fs.sfload() rejected it
 #   None           -- FluidSynth was never even attempted (shouldn't
 #                      happen in practice, but keeps the dialog logic simple)
-_fs_fail_reason  = None
-_fs_fail_detail  = ""   # the actual exception text, for the "Show details" expander
+_fs_fail_reason = None
+_fs_fail_detail = ""  # the actual exception text, for the "Show details" expander
+
 
 def _detect_linux_distro():
     """Best-effort Linux distro family, for showing ONE relevant install
@@ -111,14 +118,18 @@ def _detect_linux_distro():
     # id_like often carries the useful family info even on derivative
     # distros (e.g. Manjaro says ID=manjaro but ID_LIKE=arch).
     for family, needles in (
-        ("arch",   ("id=arch", "id_like=arch", "manjaro", "endeavouros")),
+        ("arch", ("id=arch", "id_like=arch", "manjaro", "endeavouros")),
         ("debian", ("id=debian", "id=ubuntu", "id_like=debian", "mint")),
-        ("fedora", ("id=fedora", "id=rhel", "id=centos", "id_like=fedora", "id_like=rhel")),
-        ("suse",   ("id=opensuse", "id_like=suse", "suse")),
+        (
+            "fedora",
+            ("id=fedora", "id=rhel", "id=centos", "id_like=fedora", "id_like=rhel"),
+        ),
+        ("suse", ("id=opensuse", "id_like=suse", "suse")),
     ):
         if any(n in text for n in needles):
             return family
     return None
+
 
 # Common SoundFont search paths, ordered by preference / file size
 _SF2_SEARCH_PATHS = [
@@ -141,9 +152,11 @@ _SF2_SEARCH_PATHS = [
     r"C:\Program Files\FluidSynth\FluidR3_GM.sf2",
 ]
 
+
 def _find_soundfont():
     """Return the first .sf2 file found on this machine, or None."""
     import glob
+
     for path in _SF2_SEARCH_PATHS:
         if os.path.isfile(path):
             return path
@@ -195,22 +208,26 @@ def _init_fluidsynth():
             for _drv in _drivers_to_try:
                 try:
                     fs.start(driver=_drv)
-                    print(f"[FluidSynth] Audio driver '{_drv}' started successfully",
-                          file=sys.stderr)
+                    print(
+                        f"[FluidSynth] Audio driver '{_drv}' started successfully",
+                        file=sys.stderr,
+                    )
                     _started = True
                     break
                 except Exception as _drv_exc:
                     _last_exc = _drv_exc
-                    print(f"[FluidSynth] Driver '{_drv}' failed: {_drv_exc}",
-                          file=sys.stderr)
+                    print(
+                        f"[FluidSynth] Driver '{_drv}' failed: {_drv_exc}",
+                        file=sys.stderr,
+                    )
                     continue
             if not _started:
                 _fs_fail_reason = "no_driver"
-                _fs_fail_detail = (
-                    f"tried {_drivers_to_try}; last error: {_last_exc}")
+                _fs_fail_detail = f"tried {_drivers_to_try}; last error: {_last_exc}"
                 raise RuntimeError(
                     f"No audio driver succeeded (tried {_drivers_to_try}); "
-                    f"last error: {_last_exc}")
+                    f"last error: {_last_exc}"
+                )
         elif _plat == "Darwin":
             fs.start(driver="coreaudio")
         elif _plat == "Windows":
@@ -227,18 +244,18 @@ def _init_fluidsynth():
         for ch in range(16):
             fs.program_select(ch, sfid, 0, 0)
 
-        _fs_synth  = fs
-        _fs_sfid   = sfid
+        _fs_synth = fs
+        _fs_sfid = sfid
         _fs_active = True
         print(f"[FluidSynth] Ready — SoundFont: {sf2}", file=sys.stderr)
         return True
 
     except Exception as exc:
         print(f"[FluidSynth] Init failed: {exc}", file=sys.stderr)
-        if _fs_fail_reason is None:   # more specific reason wasn't set upstream
+        if _fs_fail_reason is None:  # more specific reason wasn't set upstream
             _fs_fail_reason, _fs_fail_detail = "other", str(exc)
-        _fs_synth  = None
-        _fs_sfid   = None
+        _fs_synth = None
+        _fs_sfid = None
         _fs_active = False
         return False
 
@@ -270,58 +287,64 @@ def _maybe_show_no_synth_dialog(root):
 
     import webbrowser
 
-    distro = _detect_linux_distro()   # 'arch' / 'debian' / 'fedora' / 'suse' / None
+    distro = _detect_linux_distro()  # 'arch' / 'debian' / 'fedora' / 'suse' / None
     is_linux = platform.system() == "Linux"
-    is_mac   = platform.system() == "Darwin"
+    is_mac = platform.system() == "Darwin"
 
     # ── Build ONE relevant, complete, copy-pasteable command block ────────
     PIP_LINE = "pip install pyfluidsynth mido python-rtmidi --break-system-packages"
     if is_linux:
         _pkgs = {
-            "arch":   "sudo pacman -S fluidsynth timidity++ soundfont-fluid",
+            "arch": "sudo pacman -S fluidsynth timidity++ soundfont-fluid",
             "debian": "sudo apt install fluidsynth timidity fluid-soundfont-gm",
             "fedora": "sudo dnf install fluidsynth fluidsynth-utils timidity++ fluid-soundfont-gm",
-            "suse":   "sudo zypper install fluidsynth timidity",
+            "suse": "sudo zypper install fluidsynth timidity",
         }
         if distro in _pkgs:
             os_line = _pkgs[distro]
         else:
-            os_line = ("# Distro not auto-detected -- install your distro's\n"
-                       "# 'fluidsynth' and a General MIDI soundfont package,\n"
-                       "# e.g. one of:\n"
-                       "sudo pacman -S fluidsynth soundfont-fluid   # Arch/Manjaro\n"
-                       "sudo apt install fluidsynth fluid-soundfont-gm   # Debian/Ubuntu\n"
-                       "sudo dnf install fluidsynth fluid-soundfont-gm   # Fedora")
+            os_line = (
+                "# Distro not auto-detected -- install your distro's\n"
+                "# 'fluidsynth' and a General MIDI soundfont package,\n"
+                "# e.g. one of:\n"
+                "sudo pacman -S fluidsynth soundfont-fluid   # Arch/Manjaro\n"
+                "sudo apt install fluidsynth fluid-soundfont-gm   # Debian/Ubuntu\n"
+                "sudo dnf install fluidsynth fluid-soundfont-gm   # Fedora"
+            )
     elif is_mac:
         os_line = "brew install fluid-synth"
     else:  # Windows
-        os_line = ("# Download and run the FluidSynth installer from\n"
-                   "# fluidsynth.org, then download a .sf2 SoundFont\n"
-                   "# (e.g. FluidR3_GM.sf2) into C:\\soundfonts\\")
+        os_line = (
+            "# Download and run the FluidSynth installer from\n"
+            "# fluidsynth.org, then download a .sf2 SoundFont\n"
+            "# (e.g. FluidR3_GM.sf2) into C:\\soundfonts\\"
+        )
     full_command_block = f"{os_line}\n{PIP_LINE}"
 
     # ── Explain the SPECIFIC reason, if FluidSynth was actually attempted ──
     reason_text = {
-        "no_binding":   "The Python package \"pyfluidsynth\" isn't installed "
-                         "(this is separate from the system fluidsynth program).",
+        "no_binding": 'The Python package "pyfluidsynth" isn\'t installed '
+        "(this is separate from the system fluidsynth program).",
         "no_soundfont": "FluidSynth itself is installed correctly, but no "
-                         "SoundFont (.sf2 file) could be found anywhere on "
-                         "this system. FluidSynth needs one to know what any "
-                         "instrument actually sounds like.",
-        "no_driver":    "FluidSynth and a SoundFont were both found, but no "
-                         "audio driver could be started (tried PulseAudio, "
-                         "ALSA, JACK, and OSS in turn). This usually means "
-                         "your audio server isn't running or isn't reachable "
-                         "-- check that PipeWire/PulseAudio is active "
-                         "(\"systemctl --user status pipewire-pulse\").",
-        "load_failed":  "A SoundFont file was found, but FluidSynth rejected "
-                         "it -- it may be corrupt or not actually a valid "
-                         ".sf2 file.",
-        "other":        "FluidSynth failed to start for an unexpected reason "
-                         "(see details below).",
-    }.get(_fs_fail_reason,
-          "This application does not produce sound on its own, and no "
-          "synthesizer was detected.")
+        "SoundFont (.sf2 file) could be found anywhere on "
+        "this system. FluidSynth needs one to know what any "
+        "instrument actually sounds like.",
+        "no_driver": "FluidSynth and a SoundFont were both found, but no "
+        "audio driver could be started (tried PulseAudio, "
+        "ALSA, JACK, and OSS in turn). This usually means "
+        "your audio server isn't running or isn't reachable "
+        "-- check that PipeWire/PulseAudio is active "
+        '("systemctl --user status pipewire-pulse").',
+        "load_failed": "A SoundFont file was found, but FluidSynth rejected "
+        "it -- it may be corrupt or not actually a valid "
+        ".sf2 file.",
+        "other": "FluidSynth failed to start for an unexpected reason "
+        "(see details below).",
+    }.get(
+        _fs_fail_reason,
+        "This application does not produce sound on its own, and no "
+        "synthesizer was detected.",
+    )
 
     dlg = tk.Toplevel(root)
     dlg.title("No Music Synthesizer Found")
@@ -330,30 +353,62 @@ def _maybe_show_no_synth_dialog(root):
     dlg.grab_set()
     dlg.attributes("-topmost", True)
 
-    BG    = "#0d1117"
-    FG    = "#f0f6fc"
+    BG = "#0d1117"
+    FG = "#f0f6fc"
     MUTED = "#8b949e"
-    WARN  = "#d29922"
+    WARN = "#d29922"
 
-    tk.Label(dlg, text="⚠️  No Music Synthesizer Found",
-             bg=BG, fg=WARN, font=("TkDefaultFont", 13, "bold")).pack(pady=(22, 8))
+    tk.Label(
+        dlg,
+        text="⚠️  No Music Synthesizer Found",
+        bg=BG,
+        fg=WARN,
+        font=("TkDefaultFont", 13, "bold"),
+    ).pack(pady=(22, 8))
 
-    tk.Label(dlg, text=reason_text, bg=BG, fg=FG, font=("TkDefaultFont", 10),
-             wraplength=440, justify=tk.LEFT).pack(padx=28)
+    tk.Label(
+        dlg,
+        text=reason_text,
+        bg=BG,
+        fg=FG,
+        font=("TkDefaultFont", 10),
+        wraplength=440,
+        justify=tk.LEFT,
+    ).pack(padx=28)
 
     if _fs_fail_detail:
-        tk.Label(dlg, text=_fs_fail_detail, bg="#161b22", fg=MUTED,
-                 font=("TkFixedFont", 8), wraplength=420, justify=tk.LEFT,
-                 padx=10, pady=6).pack(fill=tk.X, padx=28, pady=(6, 0))
+        tk.Label(
+            dlg,
+            text=_fs_fail_detail,
+            bg="#161b22",
+            fg=MUTED,
+            font=("TkFixedFont", 8),
+            wraplength=420,
+            justify=tk.LEFT,
+            padx=10,
+            pady=6,
+        ).pack(fill=tk.X, padx=28, pady=(6, 0))
 
-    tk.Label(dlg, text="Run this to set everything up:",
-             bg=BG, fg=FG, font=("TkDefaultFont", 10, "bold")
-             ).pack(padx=28, pady=(16, 4), anchor="w")
+    tk.Label(
+        dlg,
+        text="Run this to set everything up:",
+        bg=BG,
+        fg=FG,
+        font=("TkDefaultFont", 10, "bold"),
+    ).pack(padx=28, pady=(16, 4), anchor="w")
 
-    cmd_box = tk.Text(dlg, height=full_command_block.count("\n") + 1,
-                       width=56, bg="#161b22", fg="#7ee787",
-                       font=("TkFixedFont", 9), relief=tk.FLAT,
-                       padx=10, pady=8, wrap=tk.NONE)
+    cmd_box = tk.Text(
+        dlg,
+        height=full_command_block.count("\n") + 1,
+        width=56,
+        bg="#161b22",
+        fg="#7ee787",
+        font=("TkFixedFont", 9),
+        relief=tk.FLAT,
+        padx=10,
+        pady=8,
+        wrap=tk.NONE,
+    )
     cmd_box.insert("1.0", full_command_block)
     cmd_box.configure(state=tk.DISABLED)
     cmd_box.pack(padx=28, pady=(0, 4))
@@ -366,29 +421,52 @@ def _maybe_show_no_synth_dialog(root):
 
     btn_frame = tk.Frame(dlg, bg=BG)
     btn_frame.pack(pady=(6, 12))
-    bs = dict(relief=tk.FLAT, padx=16, pady=6,
-              font=("TkDefaultFont", 10), cursor="hand2")
+    bs = dict(
+        relief=tk.FLAT, padx=16, pady=6, font=("TkDefaultFont", 10), cursor="hand2"
+    )
 
-    copy_btn = tk.Button(btn_frame, text="Copy Commands",
-              bg="#238636", fg="white", activebackground="#2ea043",
-              command=_copy_commands, **bs)
+    copy_btn = tk.Button(
+        btn_frame,
+        text="Copy Commands",
+        bg="#238636",
+        fg="white",
+        activebackground="#2ea043",
+        command=_copy_commands,
+        **bs,
+    )
     copy_btn.pack(side=tk.LEFT, padx=6)
 
     def _open_fs():
         webbrowser.open("https://www.fluidsynth.org")
 
-    tk.Button(btn_frame, text="Open FluidSynth Website",
-              bg="#21262d", fg=FG, activebackground="#30363d",
-              command=_open_fs, **bs).pack(side=tk.LEFT, padx=6)
-    tk.Button(btn_frame, text="Continue Without Sound",
-              bg="#21262d", fg=MUTED, activebackground="#30363d",
-              command=dlg.destroy, **bs).pack(side=tk.LEFT, padx=6)
+    tk.Button(
+        btn_frame,
+        text="Open FluidSynth Website",
+        bg="#21262d",
+        fg=FG,
+        activebackground="#30363d",
+        command=_open_fs,
+        **bs,
+    ).pack(side=tk.LEFT, padx=6)
+    tk.Button(
+        btn_frame,
+        text="Continue Without Sound",
+        bg="#21262d",
+        fg=MUTED,
+        activebackground="#30363d",
+        command=dlg.destroy,
+        **bs,
+    ).pack(side=tk.LEFT, padx=6)
 
-    tk.Label(dlg,
-             text="After running the commands above, just restart the app --\n"
-                  "it re-checks for a synthesizer every time it starts.",
-             bg=BG, fg=MUTED, font=("TkDefaultFont", 8),
-             justify=tk.CENTER).pack(pady=(0, 18))
+    tk.Label(
+        dlg,
+        text="After running the commands above, just restart the app --\n"
+        "it re-checks for a synthesizer every time it starts.",
+        bg=BG,
+        fg=MUTED,
+        font=("TkDefaultFont", 8),
+        justify=tk.CENTER,
+    ).pack(pady=(0, 18))
 
     root.wait_window(dlg)
 
@@ -396,12 +474,17 @@ def _maybe_show_no_synth_dialog(root):
 def _launch_timidity():
     """Start TiMidity in ALSA-server mode with buffer flags that prevent buzz.
     Returns True if launched successfully, False if already running or failed."""
-    import subprocess, shutil, re
+    import re
+    import shutil
+    import subprocess
+
     global _timidity_proc
 
     if not shutil.which("timidity"):
-        print("[TiMidity] Not found on PATH — install timidity or timidity++",
-              file=sys.stderr)
+        print(
+            "[TiMidity] Not found on PATH — install timidity or timidity++",
+            file=sys.stderr,
+        )
         return False
 
     # Check if a TiMidity port already exists — if so, nothing to do
@@ -419,8 +502,10 @@ def _launch_timidity():
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
         )
-        print(f"[TiMidity] Launched (PID {_timidity_proc.pid}): {TIMIDITY_HINT}",
-              file=sys.stderr)
+        print(
+            f"[TiMidity] Launched (PID {_timidity_proc.pid}): {TIMIDITY_HINT}",
+            file=sys.stderr,
+        )
         # Give the sequencer a moment to register its ALSA ports
         time.sleep(0.8)
         return True
@@ -451,29 +536,49 @@ def _prompt_midi_output_choice(trusted_ports):
     _dlg.resizable(False, False)
     _dlg.attributes("-topmost", True)
 
-    tk.Label(_dlg, text="Multiple synthesizers were found",
-             bg="#0d1117", fg="#58a6ff",
-             font=("TkDefaultFont", 11, "bold")).pack(padx=20, pady=(16, 4))
-    tk.Label(_dlg,
-             text="Choose which one this app should send MIDI to.\n"
-                  "You can change this later in Setup \u2192 MIDI Output Device.",
-             bg="#0d1117", fg="#8b949e",
-             font=("TkDefaultFont", 9), justify=tk.CENTER
-             ).pack(padx=20, pady=(0, 10))
+    tk.Label(
+        _dlg,
+        text="Multiple synthesizers were found",
+        bg="#0d1117",
+        fg="#58a6ff",
+        font=("TkDefaultFont", 11, "bold"),
+    ).pack(padx=20, pady=(16, 4))
+    tk.Label(
+        _dlg,
+        text="Choose which one this app should send MIDI to.\n"
+        "You can change this later in Setup \u2192 MIDI Output Device.",
+        bg="#0d1117",
+        fg="#8b949e",
+        font=("TkDefaultFont", 9),
+        justify=tk.CENTER,
+    ).pack(padx=20, pady=(0, 10))
 
     var = tk.StringVar(value=trusted_ports[0])
     for name in trusted_ports:
-        tk.Radiobutton(_dlg, text=name, variable=var, value=name,
-                       bg="#0d1117", fg="white", selectcolor="#21262d",
-                       activebackground="#0d1117", activeforeground="white",
-                       anchor="w").pack(fill=tk.X, padx=24, pady=2)
+        tk.Radiobutton(
+            _dlg,
+            text=name,
+            variable=var,
+            value=name,
+            bg="#0d1117",
+            fg="white",
+            selectcolor="#21262d",
+            activebackground="#0d1117",
+            activeforeground="white",
+            anchor="w",
+        ).pack(fill=tk.X, padx=24, pady=2)
 
-    remember_var = tk.BooleanVar(value=False)   # unchecked by default
-    tk.Checkbutton(_dlg, text="Remember this choice for next time",
-                  variable=remember_var, bg="#0d1117", fg="#8b949e",
-                  selectcolor="#21262d", activebackground="#0d1117",
-                  activeforeground="white"
-                  ).pack(padx=20, pady=(6, 0), anchor="w")
+    remember_var = tk.BooleanVar(value=False)  # unchecked by default
+    tk.Checkbutton(
+        _dlg,
+        text="Remember this choice for next time",
+        variable=remember_var,
+        bg="#0d1117",
+        fg="#8b949e",
+        selectcolor="#21262d",
+        activebackground="#0d1117",
+        activeforeground="white",
+    ).pack(padx=20, pady=(6, 0), anchor="w")
 
     result = [(trusted_ports[0], False)]
 
@@ -481,9 +586,16 @@ def _prompt_midi_output_choice(trusted_ports):
         result[0] = (var.get(), remember_var.get())
         _dlg.destroy()
 
-    tk.Button(_dlg, text="Use This", command=_confirm,
-             bg="#238636", fg="white", relief=tk.FLAT,
-             padx=12, pady=4).pack(pady=(10, 16))
+    tk.Button(
+        _dlg,
+        text="Use This",
+        command=_confirm,
+        bg="#238636",
+        fg="white",
+        relief=tk.FLAT,
+        padx=12,
+        pady=4,
+    ).pack(pady=(10, 16))
 
     _dlg.protocol("WM_DELETE_WINDOW", _confirm)
     _dlg.grab_set()
@@ -502,12 +614,19 @@ def _init_midi():
     # sequencer client, etc.) might not actually produce audio — reported:
     # an unrelated existing port silently satisfied MIDI_OUT_OK, so
     # FluidSynth was never even attempted, and the user heard nothing.
-    _TRUSTED_SYNTH_NAMES = ("timidity", "fluidsynth", "qsynth",
-                           "zynaddsubfx", "yoshimi", "pianoteq")
+    _TRUSTED_SYNTH_NAMES = (
+        "timidity",
+        "fluidsynth",
+        "qsynth",
+        "zynaddsubfx",
+        "yoshimi",
+        "pianoteq",
+    )
 
     def _port_key(name):
         import re
-        m = re.search(r'(\d+):(\d+)\s*$', name)
+
+        m = re.search(r"(\d+):(\d+)\s*$", name)
         return (int(m.group(1)), int(m.group(2))) if m else (9999, 0)
 
     # ── MIDI OUT ──────────────────────────────────────────────────────────────
@@ -518,12 +637,13 @@ def _init_midi():
         # If no TiMidity port visible yet, try to launch one
         if not any("timidity" in o.lower() for o in outs):
             if _launch_timidity():
-                outs = mido.get_output_names()   # refresh after launch
+                outs = mido.get_output_names()  # refresh after launch
                 print(f"[MIDI OUT] Available (post-launch): {outs}")
 
         if outs:
-            trusted = [o for o in outs
-                      if any(t in o.lower() for t in _TRUSTED_SYNTH_NAMES)]
+            trusted = [
+                o for o in outs if any(t in o.lower() for t in _TRUSTED_SYNTH_NAMES)
+            ]
             if trusted:
                 # v22z-2: check for a remembered choice from a previous
                 # session first — if it's still available, use it directly
@@ -543,9 +663,10 @@ def _init_midi():
                         _save_settings({"preferred_midi_port": pref})
                 else:
                     tim_ports = [o for o in trusted if "timidity" in o.lower()]
-                    pref = (sorted(tim_ports, key=_port_key)[0] if tim_ports
-                           else trusted[0])
-                _midi_out   = mido.open_output(pref)
+                    pref = (
+                        sorted(tim_ports, key=_port_key)[0] if tim_ports else trusted[0]
+                    )
+                _midi_out = mido.open_output(pref)
                 MIDI_OUT_OK = True
                 print(f"[MIDI OUT] Opened trusted port: {pref}")
             else:
@@ -553,12 +674,16 @@ def _init_midi():
                 # Remember the best candidate but let FluidSynth be tried
                 # first; only fall back to this unverified port afterward
                 # if FluidSynth also fails to initialise (see bottom of file).
-                candidates = [o for o in outs
-                             if not any(s in o.lower() for s in _SKIP_PORTS)]
+                candidates = [
+                    o for o in outs if not any(s in o.lower() for s in _SKIP_PORTS)
+                ]
                 _unverified_out_port_name = candidates[0] if candidates else outs[0]
-                print(f"[MIDI OUT] No trusted synth port found — "
-                      f"'{_unverified_out_port_name}' is unverified, "
-                      f"trying FluidSynth first", file=sys.stderr)
+                print(
+                    f"[MIDI OUT] No trusted synth port found — "
+                    f"'{_unverified_out_port_name}' is unverified, "
+                    f"trying FluidSynth first",
+                    file=sys.stderr,
+                )
     except Exception as e:
         print(f"[MIDI OUT] FAILED: {e}")
 
@@ -567,14 +692,16 @@ def _init_midi():
         ins = mido.get_input_names()
         print(f"[MIDI IN ] Available: {ins}")
         if ins:
-            hw = next((p for p in ins
-                       if not any(s in p.lower() for s in _SKIP_PORTS)), None)
+            hw = next(
+                (p for p in ins if not any(s in p.lower() for s in _SKIP_PORTS)), None
+            )
             chosen = hw if hw else ins[0]
-            _midi_in   = mido.open_input(chosen)
+            _midi_in = mido.open_input(chosen)
             MIDI_IN_OK = True
             print(f"[MIDI IN ] Opened: {chosen}")
     except Exception as e:
         print(f"[MIDI IN ] FAILED: {e}")
+
 
 def _send(msg):
     """Route a mido Message to the active output backend.
@@ -603,14 +730,22 @@ def _send(msg):
         except Exception:
             pass
 
+
 def _send_raw(status, d1, d2=0):
-    t = status & 0xF0; c = status & 0x0F
+    t = status & 0xF0
+    c = status & 0x0F
     try:
-        if   t == 0x90: _send(mido.Message("note_on",        channel=c, note=d1,    velocity=d2))
-        elif t == 0x80: _send(mido.Message("note_off",       channel=c, note=d1,    velocity=0))
-        elif t == 0xB0: _send(mido.Message("control_change", channel=c, control=d1, value=d2))
-        elif t == 0xC0: _send(mido.Message("program_change",  channel=c, program=d1))
-    except: pass
+        if t == 0x90:
+            _send(mido.Message("note_on", channel=c, note=d1, velocity=d2))
+        elif t == 0x80:
+            _send(mido.Message("note_off", channel=c, note=d1, velocity=0))
+        elif t == 0xB0:
+            _send(mido.Message("control_change", channel=c, control=d1, value=d2))
+        elif t == 0xC0:
+            _send(mido.Message("program_change", channel=c, program=d1))
+    except:
+        pass
+
 
 _init_midi()
 
@@ -625,13 +760,18 @@ if not MIDI_OUT_OK:
 # than silence, and it only gets used when nothing more reliable worked.
 if not MIDI_OUT_OK and not _fs_active and _unverified_out_port_name:
     try:
-        _midi_out   = mido.open_output(_unverified_out_port_name)
+        _midi_out = mido.open_output(_unverified_out_port_name)
         MIDI_OUT_OK = True
-        print(f"[MIDI OUT] Last-resort fallback: opened unverified port "
-              f"'{_unverified_out_port_name}'", file=sys.stderr)
+        print(
+            f"[MIDI OUT] Last-resort fallback: opened unverified port "
+            f"'{_unverified_out_port_name}'",
+            file=sys.stderr,
+        )
     except Exception as _fallback_exc:
-        print(f"[MIDI OUT] Last-resort fallback also failed: {_fallback_exc}",
-              file=sys.stderr)
+        print(
+            f"[MIDI OUT] Last-resort fallback also failed: {_fallback_exc}",
+            file=sys.stderr,
+        )
 # ─────────────────────────────────────────────────────────────────────────────
 
 

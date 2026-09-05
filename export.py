@@ -2,6 +2,7 @@
 """Export utilities for MusicXML, LilyPond, and MIDI formats."""
 
 import math
+import sys
 import xml.etree.ElementTree as ET
 from xml.dom import minidom
 
