@@ -9,7 +9,8 @@ import webbrowser
 import xml.etree.ElementTree as ET
 from tkinter import filedialog, messagebox, simpledialog, ttk
 
-from theory import key_sig_accidentals
+from theory import (_FLAT_ORDER_LETTERS, _SHARP_ORDER_LETTERS, GM_INSTRUMENTS,
+                    NOTE_NAMES, key_sig_accidentals, key_sig_to_ly)
 
 
 class TkPopupMenu(tk.Toplevel):
