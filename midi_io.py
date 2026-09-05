@@ -15,6 +15,9 @@ import sys
 import threading
 import time
 
+import mido
+import mido.backends.rtmidi
+
 try:
     import mido
     import mido.backends.rtmidi
