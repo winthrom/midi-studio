@@ -33,11 +33,6 @@ jobs:
       run: |
         brew install python-tk timidity fluidsynth portaudio
 
-    - name: Install system dependencies (Windows)
-      if: runner.os == 'Windows'
-      run: |
-        choco install python-tk timidity fluidsynth portaudio -y || true
-
     - name: Install Python dependencies
       run: |
         python -m pip install --upgrade pip
