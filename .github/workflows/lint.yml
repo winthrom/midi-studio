@@ -40,5 +40,5 @@ jobs:
 
     - name: Lint with pylint
       run: |
-        pylint --disable=R,C,W sys_platform.py theory.py midi_io.py synth.py export.py main.py
-      continue-on-error: true
+        pylint --disable=R,C,W sys_platform.py theory.py midi_io.py synth.py export.py main.py || true
+
