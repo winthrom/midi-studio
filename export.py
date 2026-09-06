@@ -444,9 +444,7 @@ def quantize_notes_per_measure(
 
     # Build a set of (ms, me) pairs for fast lookup
     active_measures = {
-        (ms, me)
-        for m_idx, ms, me, _n, _d, _t in mmap
-        if m_start_idx <= m_idx <= m_end_idx
+        (ms, me) for m_idx, ms, me, _n, _d, _t in mmap if m_start_idx <= m_idx <= m_end_idx
     }
 
     # ── 3. Per-measure snap ──────────────────────────────────────────────────
@@ -504,7 +502,6 @@ def quantize_notes(track, tpb, div=4, strength=1.0, threshold=0):
             n.duration = int(n.duration + strength * (q_dur - n.duration))
         n.duration = max(1, n.duration)
     print(
-        f"[quantize-legacy] '{track.name}': {len(track.notes)} notes "
-        f"grid-snapped (div={div})",
+        f"[quantize-legacy] '{track.name}': {len(track.notes)} notes " f"grid-snapped (div={div})",
         file=sys.stderr,
     )
