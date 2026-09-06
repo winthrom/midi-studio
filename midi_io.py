@@ -14,6 +14,7 @@ import platform
 import sys
 import threading
 import time
+import tkinter as tk
 
 import mido
 import mido.backends.rtmidi
@@ -31,6 +32,7 @@ MIDI_IN_OK = False
 _midi_out = None
 _midi_in = None
 _unverified_out_port_name = None  # v22w: candidate port, not yet trusted
+_midi_shutdown_evt = threading.Event()
 
 # ── Simple settings persistence (v22z-2) ────────────────────────────────────
 # Minimal, self-contained — just remembers the user's chosen MIDI output
@@ -778,8 +780,64 @@ if not MIDI_OUT_OK and not _fs_active and _unverified_out_port_name:
 # ─────────────────────────────────────────────────────────────────────────────
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# MIDI input dispatch (single reader thread, multiple listeners)
+# ─────────────────────────────────────────────────────────────────────────────
+_midi_listeners: dict = {}          # token → callback
+_midi_listener_lock = threading.Lock()
+_midi_dispatch_thread: threading.Thread | None = None
+
+
+def _midi_dispatch_loop():
+    """Single owner of _midi_in.  Reads messages and fans out to all listeners.
+    Runs as a daemon thread for the lifetime of the process."""
+    while not _midi_shutdown_evt.is_set():
+        if _midi_in is None:
+            time.sleep(0.05)
+            continue
+        try:
+            # iter_pending is non-blocking; sleep keeps CPU reasonable
+            for msg in _midi_in.iter_pending():
+                with _midi_listener_lock:
+                    cbs = list(_midi_listeners.values())
+                for cb in cbs:
+                    try:
+                        cb(msg)
+                    except Exception:
+                        pass
+            time.sleep(0.001)   # 1 ms — lowest practical latency without busy-spin
+        except Exception:
+            time.sleep(0.05)
+
+
+def _start_dispatch_thread():
+    global _midi_dispatch_thread
+    if _midi_dispatch_thread and _midi_dispatch_thread.is_alive():
+        return
+    _midi_dispatch_thread = threading.Thread(
+        target=_midi_dispatch_loop, daemon=True, name="MidiDispatch")
+    _midi_dispatch_thread.start()
+
+
+def midi_input_subscribe(callback) -> int:
+    """Register *callback(msg)* for all incoming MIDI messages.
+    Returns an integer token; pass it to midi_input_unsubscribe to remove."""
+    _start_dispatch_thread()
+    token = id(callback)
+    with _midi_listener_lock:
+        _midi_listeners[token] = callback
+    return token
+
+
+def midi_input_unsubscribe(token: int):
+    with _midi_listener_lock:
+        _midi_listeners.pop(token, None)
+
+
 # Initialize on module load
 if mido:
     _init_midi()
     if not MIDI_OUT_OK:
         _init_fluidsynth()
+
+_start_dispatch_thread()   # start immediately so thru works before any record

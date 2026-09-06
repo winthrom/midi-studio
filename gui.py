@@ -1,7 +1,10 @@
 #!/usr/bin/env python3
 """GUI components: menus, piano roll, MIDI list, transport."""
 
+import bisect
+import math
 import os
+import sys
 import threading
 import time
 import tkinter as tk
@@ -9,6 +12,9 @@ import webbrowser
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from tkinter import filedialog, messagebox, simpledialog, ttk
+from xml.dom import minidom
+
+import mido
 
 from theory import (
     _FLAT_ORDER_LETTERS,
@@ -17,6 +23,25 @@ from theory import (
     NOTE_NAMES,
     key_sig_accidentals,
     key_sig_to_ly,
+)
+import midi_io
+from midi_io import (
+    _init_fluidsynth,
+    _maybe_show_no_synth_dialog,
+    _midi_shutdown_evt,
+    _save_settings,
+    _send,
+    _send_raw,
+    midi_input_subscribe,
+    midi_input_unsubscribe,
+)
+from sys_platform import (
+    APP_FULL_NAME,
+    APP_TIMESTAMP,
+    APP_TITLE,
+    APP_VERSION,
+    LIONS_DONATE_URL,
+    LIONS_WEBSITE_URL,
 )
 
 
@@ -662,6 +687,51 @@ _KS_MINOR_PROFILE = [
 ]
 
 # MIDI key_signature strings for each of the 12 possible tonics, major/minor
+# ChatGPT patch: notation-only quantization settings
+NOTATION_DIVISION = 4  # 1=quarter,2=eighth,4=sixteenth,8=thirty-second
+                       # Default: sixteenth-note grid so 1/16 notes display on load.
+                       # _draw_inner() calls song.detect_notation_division() to
+                       # auto-refine this per-song when rendering.
+GRACE_NOISE_TICKS = 60  # legacy fixed value, calibrated at 480 ticks/beat.
+                       # DO NOT use this constant directly in new code —
+                       # use grace_ticks(tpb) instead, which scales
+                       # proportionally so the same MUSICAL duration
+                       # (1/8 of a beat = a 32nd-note deviation) is used
+                       # as the noise floor regardless of file resolution.
+
+
+def grace_ticks(tpb):
+    """Return the grace-note / onset-snap noise floor, scaled to tpb.
+
+    Fixes a resolution-dependence bug: GRACE_NOISE_TICKS=60 was calibrated
+    for 480 ticks/beat files (60/480 = 1/8 of a beat = a 32nd-note
+    deviation).  A 960 tpb file has twice the ticks per musical duration,
+    so the same raw 60-tick threshold represented HALF the musical
+    tolerance — grace notes and onset snapping were stricter on
+    higher-resolution files for no musical reason.  This function
+    preserves the same musical meaning (1/8 beat) at any resolution.
+    """
+    return max(1, tpb // 8)
+
+
+def _winfo_exists(widget) -> bool:
+    # Safe winfo_exists() — returns False if the widget has been destroyed.
+    try:
+        return bool(widget and widget.winfo_exists())
+    except Exception:
+        return False
+
+
+def _clear_topmost_safe(widget):
+    """Clear a widget's -topmost flag, tolerating the widget having already
+    been destroyed by the time a scheduled .after() callback fires."""
+    try:
+        if widget and widget.winfo_exists():
+            widget.attributes("-topmost", False)
+    except Exception:
+        pass
+
+
 _KEY_STR_MAJOR = ["C", "Db", "D", "Eb", "E", "F", "F#", "G", "Ab", "A", "Bb", "B"]
 _KEY_STR_MINOR = [
     "Cm",
@@ -5472,7 +5542,7 @@ class Transport:
         timeline.sort(key=lambda x: x[0])
         # ── Subscribe to MIDI input for recording ──────────────────────────
         rec_token = None
-        if self._recording and MIDI_IN_OK and self._rec_track_idx is not None:
+        if self._recording and midi_io.MIDI_IN_OK and self._rec_track_idx is not None:
             tr_rec = song.tracks[self._rec_track_idx]
             _send_raw(0xC0 | tr_rec.channel, tr_rec.program)
             rec_open = self._rec_open
@@ -5555,14 +5625,14 @@ class Transport:
 
     def close(self):
         self.stop()
-        if _midi_out:
+        if midi_io._midi_out:
             try:
-                _midi_out.close()
+                midi_io._midi_out.close()
             except:
                 pass
-        if _midi_in:
+        if midi_io._midi_in:
             try:
-                _midi_in.close()
+                midi_io._midi_in.close()
             except:
                 pass
 
@@ -6930,7 +7000,7 @@ class SplashScreen(tk.Toplevel):
 
         tk.Frame(inner, bg=BDCOL, height=1).pack(fill=tk.X, pady=(16, 8))
 
-        midi_ok = MIDI_OUT_OK
+        midi_ok = midi_io.MIDI_OUT_OK
         midi_txt = "MIDI ready" if midi_ok else "⚠  No MIDI output — start TiMidity"
         midi_col = GREEN if midi_ok else "#f78166"
         tk.Label(inner, text=midi_txt, bg=BG, fg=midi_col, font=("TkDefaultFont", 9)).pack()
@@ -11453,3 +11523,3384 @@ class CalibrationAction:
     before_ts_den: int
     after_ts_num: int
     after_ts_den: int
+class MidisoftStudio:
+    APP_NAME = APP_FULL_NAME
+
+    def visible_tracks(self):
+        """Return [(orig_idx, track, display_name), ...] for tracks with notes.
+
+        v22v: tracks with zero notes (typically a file's tempo/meta-only
+        track, or a leftover unused track) are excluded from every UI list
+        — track panel, mixer — matching the empty-track suppression the
+        score view has had since v22a.  Previously each of these three
+        places (score view, track list, mixer) had its own independent
+        "for i, tr in enumerate(song.tracks)" loop; the track list and
+        mixer had no filter at all, so a file whose note-bearing tracks
+        happened to be named "Track 2"/"Track 3" (because track 1 in the
+        source file was a meta-only track never even imported) displayed
+        those confusing original numbers with an empty "Track 3" cluttering
+        the list, while the score view alone quietly did the right thing.
+
+        Tracks whose name matches the generic auto-generated pattern
+        "Track N" are renumbered sequentially among the VISIBLE tracks
+        (so the first one showing notes is always "Track 1", regardless
+        of what number it happened to have in the source file).  Tracks
+        with a meaningful custom name (e.g. "Piano right", "Rachmaninoff")
+        are left completely untouched — only the generic placeholder
+        pattern is ever renamed.
+
+        Callers must use orig_idx (not the position in this returned list)
+        for any mutation of self.song.tracks[orig_idx] — display order and
+        storage order are related but not identical once tracks are
+        reordered or renamed elsewhere.
+        """
+        import re as _vt_re
+        result = []
+        seq = 0
+        for i, tr in enumerate(self.song.tracks):
+            if not tr.notes and not getattr(tr, 'always_show', False):
+                continue
+            seq += 1
+            if _vt_re.match(r'^Track\s+\d+$', tr.name or ''):
+                display_name = f"Track {seq}"
+            else:
+                display_name = tr.name
+            result.append((i, tr, display_name))
+        return result
+
+    def __init__(self,root:tk.Tk):
+        self.quantize_division = 0   # Off — user must explicitly choose a grid
+        self.grace_cleanup_ms = 40
+        self.midi_thru_enabled = tk.BooleanVar(value=True)
+        self.midi_thru_volume  = tk.IntVar(value=100)   # 0-127, matches track volume scale
+        # v22ze-58 fix: _thru_cb (see _start_midi_monitor) reads these two
+        # values, but it runs on the MIDI dispatcher's background thread —
+        # calling .get() on a Tk variable from any thread but the main one
+        # is the same class of cross-thread Tkinter bug fixed for playback
+        # ticks above. Cache plain-Python copies here, kept in sync via a
+        # trace that fires on the main thread whenever the real Tk
+        # variable changes (i.e. whenever the user actually toggles the
+        # UI control), so the background thread never touches a Tk
+        # variable at all.
+        self._midi_thru_enabled_val = True
+        self._midi_thru_volume_val  = 100
+        def _sync_thru_enabled(*_a):
+            self._midi_thru_enabled_val = self.midi_thru_enabled.get()
+        def _sync_thru_volume(*_a):
+            self._midi_thru_volume_val = self.midi_thru_volume.get()
+        self.midi_thru_enabled.trace_add('write', _sync_thru_enabled)
+        self.midi_thru_volume.trace_add('write', _sync_thru_volume)
+        self.root=root; self.song=Song(); self.transport=Transport(self.song)
+        self._original_song = None   # preserved when in rationalized mode
+        self._is_rationalized = False
+        self._undo_stack = []         # list of RationalizationAction
+        self._redo_stack = []
+        self._rationalize_dlg = None  # reference to open dialog (if any)
+        # Score Setup panel state
+        self._score_setup_dlg       = None   # reference to open ScoreSetup panel
+        self._selected_measure_idx  = None   # measure index last clicked in strip
+        self._accepted_measures     = set()  # measure indices the user has confirmed
+        self._measure_bpm_overrides = {}     # measure_idx → float BPM override
+        self._sel_from = tk.IntVar(value=1)
+        self._sel_to   = tk.IntVar(value=4)
+        self._score_view: ScoreView|None=None; self._open_windows=[]; self._rec_armed=0
+        self._overview_rolling=False; self._overview_row_heights={}; self._overview_drag=None
+        root.title(APP_TITLE)
+        sw, sh = root.winfo_screenwidth(), root.winfo_screenheight()
+        win_w, win_h = min(1280, sw - 60), min(960, sh - 80)
+        root.geometry(f"{win_w}x{win_h}")
+        root.configure(bg="#0d1117")
+        self._build_menu(); self._build_toolbar(); self._build_track_area()
+        self._build_status(); self._update_title(); self._update_status()
+        root.protocol("WM_DELETE_WINDOW",self._on_quit)
+        root.bind("<Control-r>", lambda e: self._rationalize_score())
+        root.bind("<Control-z>", lambda e: self._undo())
+        root.bind("<Control-y>", lambda e: self._redo())
+        self._shutting_down = False
+        self._tick_job = None
+        if len(sys.argv)>1 and os.path.isfile(sys.argv[1]): self._load_file(sys.argv[1])
+        self._tick_loop()
+        self._start_midi_monitor()
+        _maybe_show_no_synth_dialog(self.root)
+
+    # ── MIDI input monitor (always-on thru when NOT recording) ───────────────
+    def _start_midi_monitor(self):
+        """Echo MIDI input to output so keyboard is always audible.
+        Uses the single dispatcher thread — no port contention with recorder."""
+        if not midi_io.MIDI_IN_OK or not midi_io.MIDI_OUT_OK:
+            return
+        def _thru_cb(msg):
+            # Skip thru while recording — the recorder's _rec_cb handles echo
+            if self.transport.is_recording():
+                return
+            # v22ze-58 fix: read the plain-Python cached copies (see
+            # __init__), not the Tk variables directly — this callback
+            # runs on the MIDI dispatcher's background thread.
+            if not self._midi_thru_enabled_val:
+                return
+            try:
+                if msg.type == "note_on" and msg.velocity > 0:
+                    scale = self._midi_thru_volume_val / 127.0
+                    msg = msg.copy(velocity=max(1, min(127, int(msg.velocity * scale))))
+                _send(msg)
+            except Exception: pass
+        midi_input_subscribe(_thru_cb)   # runs for lifetime of app
+
+    # ── tick loop ─────────────────────────────────────────────────────────────
+    def _tick_loop(self):
+        # Prune dead windows so the list doesn't grow forever
+        self._open_windows = [w for w in self._open_windows
+                              if _winfo_exists(w)]
+
+        playing = self.transport.is_playing()
+        if playing:
+            # Interpolate the display tick from wall-clock time rather than
+            # polling self.transport.position_ticks directly.  position_ticks
+            # is updated by the playback thread at coarse intervals; reading it
+            # every 80 ms causes visible cursor lag at fast tempos (170 BPM+).
+            # Instead: record (position_ticks, wall_time) at playback start,
+            # then compute display_tick = start_tick + elapsed_sec * ticks_per_sec.
+            # This gives a smooth, accurate cursor at any tempo.
+            try:
+                tpb         = self.song.ticks_per_beat
+                tempo_us    = self.song.tempo
+                ticks_per_s = 1_000_000 / tempo_us * tpb
+                pos_now  = self.transport.position_ticks
+                wall_now = time.perf_counter()
+                prev = getattr(self, '_cursor_anchor', None)
+                if prev is None or pos_now != prev[0]:
+                    self._cursor_anchor = (pos_now, wall_now)
+                    tick = pos_now
+                else:
+                    anchor_tick, anchor_wall = prev
+                    elapsed = wall_now - anchor_wall
+                    tick = int(anchor_tick + elapsed * ticks_per_s)
+                    # Cap strictly at pos_now — never project ahead.
+                    # Forward projection caused cumulative drift to the right.
+                    tick = min(tick, pos_now)
+            except Exception:
+                tick = self.transport.position_ticks
+                self._cursor_anchor = None
+
+            if self._score_view and _winfo_exists(self._score_view):
+                self._score_view.update_cursor(tick)
+                self._score_view._sync_transport_btns()
+            tpm=self.song.ticks_per_measure()
+            meas=tick//tpm+1; beat=(tick%tpm)//self.song.ticks_per_beat+1
+            self._pos_var.set(f"Meas {meas}  Beat {beat}")
+            # Move overview playhead cheaply (canvas item move, not full redraw)
+            try: self._update_overview_playhead(tick)
+            except: pass
+            # Update active keys in any open piano roll windows
+            active = set()
+            tpb = self.song.ticks_per_beat
+            for tr in self.song.tracks:
+                if tr.mute: continue
+                for n in tr.notes:
+                    if n.tick <= tick < n.tick + n.duration:
+                        active.add(n.pitch)
+            for w in self._open_windows:
+                try:
+                    if isinstance(w, PianoRollView) and _winfo_exists(w):
+                        w.update_active_notes(active)
+                        w.update_playhead(tick)
+                except: pass
+        else:
+            self._cursor_anchor = None   # reset anchor when stopped
+
+        if not getattr(self, "_shutting_down", False):
+            self._tick_job = self.root.after(40, self._tick_loop)   # 40ms = ~25 fps
+
+    def _update_overview_playhead(self, tick):
+        # Move the overview playhead line without redrawing everything.
+        c = self.overview
+        W = c.winfo_width()
+        if W < 10: return
+        total = max(self.song.total_ticks(), 1)
+        if self._overview_rolling:
+            tpm = self.song.ticks_per_measure(); win = tpm * 4
+            t0  = max(0, tick - int(win * 0.75))
+            cx  = (tick - t0) / win * W
+        else:
+            cx = (tick / total) * W
+        tot_h = self._overview_total_h()
+        existing = c.find_withtag("ov_playhead")
+        if existing:
+            c.coords(existing[0], cx, 0, cx, tot_h)
+        else:
+            # First time: do a full draw to establish all track rows,
+            # then add the playhead on top
+            self._draw_overview()
+            c.create_line(cx, 0, cx, tot_h,
+                          fill="#ff3333", width=2, dash=(4,3), tags="ov_playhead")
+
+    # ── Menu ──────────────────────────────────────────────────────────────────
+    def _build_menu(self):
+        # v22ze-56 fix: replaced the native root.config(menu=...) menu bar
+        # (and every tk.Menu cascade under it) with TkMenuBar/TkPopupMenu —
+        # ordinary, fully WM-managed widgets — because the v22ze-55 FocusOut
+        # safety net below was NOT enough to fix the menu-bar sticking-
+        # across-virtual-desktops bug on the user's real KDE/KWin desktop
+        # (confirmed: the splash fix worked, this one didn't). See
+        # TkPopupMenu's docstring for the full story. TkMenuBar/TkPopupMenu
+        # manage their own dismiss lifecycle, so the old FocusOut-based
+        # safety net for the native menu bar is no longer needed here.
+        mb = TkMenuBar(self.root)
+        mb.pack(side="top", fill="x")
+        fm=TkPopupMenu(mb,tearoff=0); mb.add_cascade(label="File",menu=fm)
+        fm.add_command(label="New\tCtrl+N",command=self._new,accelerator="Ctrl+N")
+        fm.add_command(label="Open…\tCtrl+O",command=self._open,accelerator="Ctrl+O")
+        fm.add_command(label="Close Piece",command=self._close)
+        fm.add_separator()
+        fm.add_command(label="Save\tCtrl+S",command=self._save,accelerator="Ctrl+S")
+        fm.add_command(label="Save As…",command=self._save_as)
+        fm.add_separator()
+        fm.add_command(label="Export MIDI…",command=self._save_as)
+        fm.add_command(label="Save as .musicxml (standard)…",
+                       command=self._export_musicxml,
+                       tooltip="MuseScore/Sibelius/Finale can read this")
+        fm.add_command(label="Open in MuseScore (via MIDI)…",command=self._open_in_musescore)
+        fm.add_command(label="Export LilyPond (.ly)…",command=self._export_ly)
+        fm.add_command(label="Print Score (via LilyPond)…",command=self._print_score)
+        fm.add_separator()
+        fm.add_command(label="Undo Correction\tCtrl+Z",command=self._undo,
+                       accelerator="Ctrl+Z")
+        fm.add_command(label="Redo Correction\tCtrl+Y",command=self._redo,
+                       accelerator="Ctrl+Y")
+        fm.add_separator()
+        fm.add_command(label="Close Program",command=self._on_quit)
+        em=TkPopupMenu(mb,tearoff=0); mb.add_cascade(label="Edit",menu=em)
+        em.add_command(label="Add Track",command=self._add_track)
+        em.add_command(label="Delete Track",command=self._del_track)
+        em.add_separator()
+        em.add_command(label="Combine Tracks…",command=self._combine_tracks)
+        em.add_command(label="Separate Channels…",command=self._separate_channels)
+        em.add_separator()
+        em.add_command(label="Separate Hands…",command=self._separate_hands)
+        vm=TkPopupMenu(mb,tearoff=0); mb.add_cascade(label="View",menu=vm)
+        vm.add_command(label="Score View\tCtrl+1",command=self._open_score_view,accelerator="Ctrl+1")
+        vm.add_command(label="Piano Roll\tCtrl+2",command=self._open_piano_roll,accelerator="Ctrl+2")
+        vm.add_command(label="MIDI List\tCtrl+3",command=self._open_list_view,accelerator="Ctrl+3")
+        vm.add_command(label="Mixer",command=self._open_mixer)
+        sm=TkPopupMenu(mb,tearoff=0); mb.add_cascade(label="Setup",menu=sm)
+        sm.add_command(label="MIDI I/O Info",command=self._midi_info)
+        sm.add_command(label="MIDI Output Device…",command=self._choose_midi_output)
+        hm=TkPopupMenu(mb,tearoff=0); mb.add_cascade(label="Help",menu=hm)
+
+        nm=TkPopupMenu(mb,tearoff=0)
+        mb.add_cascade(label="Song Settings", menu=nm)
+
+        if not hasattr(self, "quantize_division"):
+            self.quantize_division = 0
+
+        self._quantize_var = tk.IntVar(value=self.quantize_division)
+
+        def _on_quantize_change(*_):
+            self.quantize_division = self._quantize_var.get()
+            # Immediately redraw score so the new grid is visible
+            try:
+                sv = self._score_view
+                if sv is not None and sv.winfo_exists():
+                    sv._draw()
+            except Exception:
+                pass
+        self._quantize_var.trace_add('write', _on_quantize_change)
+
+        qm = TkPopupMenu(nm, tearoff=0)
+        nm.add_cascade(label="Quantization", menu=qm)
+
+        qm.add_radiobutton(label="Off", value=0, variable=self._quantize_var,
+                           command=lambda: setattr(self, "quantize_division", 0))
+        qm.add_separator()
+
+        qm.add_radiobutton(label="Quarter Notes (1/4)", value=4, variable=self._quantize_var,
+                           command=lambda: setattr(self, "quantize_division", 4))
+        qm.add_radiobutton(label="Eighth Notes (1/8)", value=8, variable=self._quantize_var,
+                           command=lambda: setattr(self, "quantize_division", 8))
+        qm.add_radiobutton(label="Sixteenth Notes (1/16)", value=16, variable=self._quantize_var,
+                           command=lambda: setattr(self, "quantize_division", 16))
+        qm.add_radiobutton(label="Thirty-Second Notes (1/32)", value=32, variable=self._quantize_var,
+                           command=lambda: setattr(self, "quantize_division", 32))
+
+        if not hasattr(self, "grace_cleanup_ms"):
+            self.grace_cleanup_ms = 40
+
+        self._grace_var = tk.IntVar(value=self.grace_cleanup_ms)
+
+        gm = TkPopupMenu(nm, tearoff=0)
+        nm.add_cascade(label="Grace Cleanup", menu=gm)
+
+        for _ms in (0,20,40,60,80):
+            _label = "Off" if _ms == 0 else f"{_ms} ms"
+            gm.add_radiobutton(
+                label=_label,
+                value=_ms,
+                variable=self._grace_var,
+                command=lambda ms=_ms: setattr(self, "grace_cleanup_ms", ms)
+            )
+
+        nm.add_separator()
+        nm.add_command(label="Quantize…\tCtrl+Q", command=lambda: QuantizeDlg(self.root, self),
+                       accelerator="Ctrl+Q")
+        nm.add_command(label="Quantize Armed Track", command=self._quantize_armed_track)
+        nm.add_separator()
+        nm.add_command(label="Score Setup…\tCtrl+G", command=self._open_score_setup,
+                       accelerator="Ctrl+G")
+        nm.add_command(label="Song Elements…", command=self._song_settings)
+        nm.add_command(label="Set Key Signature…", command=self._set_key_signature)
+        nm.add_command(label="Rationalize Score…\tCtrl+R", command=self._rationalize_score,
+                       accelerator="Ctrl+R")
+        nm.add_separator()
+        nm.add_command(label="About Song Settings...", command=lambda: messagebox.showinfo(
+            "Song Settings",
+            f"Quantization: {'Off' if not self.quantize_division else '1/'+str(self.quantize_division)}\n"
+            f"Grace Cleanup: {self.grace_cleanup_ms} ms"))
+        hm.add_command(label="About…",command=self._about)
+        binds=[("<Control-n>",self._new),("<Control-o>",self._open),("<Control-s>",self._save),
+               ("<Control-1>",self._open_score_view),("<Control-2>",self._open_piano_roll),
+               ("<Control-3>",self._open_list_view),("<space>",self._toggle_play),
+               ("<Home>",self._rewind_to_start),
+               ("<Left>",lambda e=None:self._seek(-1)),("<Right>",lambda e=None:self._seek(1)),
+               ("<Control-q>",lambda: QuantizeDlg(self.root, self)),
+               ("<Control-g>",lambda e=None: self._open_score_setup())]
+        for key,fn in binds: self.root.bind(key,lambda e,f=fn:f())
+
+    # ── Toolbar ───────────────────────────────────────────────────────────────
+    def _build_toolbar(self):
+        tb=tk.Frame(self.root,bg="#161b22",pady=3); tb.pack(fill=tk.X)
+        bc=dict(bg="#21262d",fg="white",activebackground="#30363d",activeforeground="white",
+                relief=tk.FLAT,padx=7,pady=4,font=("TkDefaultFont",10))
+        tk.Button(tb,text="⏮",command=self._rewind_to_start,
+                  bg="#21262d",fg="white",activebackground="#30363d",activeforeground="white",
+                  relief=tk.FLAT,padx=7,pady=4,font=("TkDefaultFont",14)
+                  ).pack(side=tk.LEFT,padx=1)
+        tk.Button(tb,text="◀◀",command=lambda:self._seek(-1),**bc).pack(side=tk.LEFT,padx=1)
+        self.play_btn=tk.Button(tb,text="▶  Play",command=self._toggle_play,**bc)
+        self.play_btn.pack(side=tk.LEFT,padx=1)
+        tk.Button(tb,text="⏹  Stop",command=self._stop,**bc).pack(side=tk.LEFT,padx=1)
+        tk.Button(tb,text="▶▶",command=lambda:self._seek(+1),**bc).pack(side=tk.LEFT,padx=1)
+        self.rec_btn=tk.Button(tb,text="⏺  Rec",command=self._toggle_record,
+                               bg="#0f3320",fg="#3fb950",activebackground="#1a4a2a",
+                               activeforeground="#56d364",relief=tk.FLAT,padx=7,pady=4,
+                               font=("TkDefaultFont",10))
+        self.rec_btn.pack(side=tk.LEFT,padx=1)
+        self._metro_on=False
+        self.transport.set_metronome(False)
+        self._metro_btn=tk.Button(tb,text="Click: OFF",command=self._toggle_metronome,
+                                  bg="#21262d",fg="#666666",activebackground="#30363d",
+                                  activeforeground="white",relief=tk.FLAT,padx=7,pady=4,
+                                  font=("TkDefaultFont",10))
+        self._metro_btn.pack(side=tk.LEFT,padx=1)
+        _tt(self._metro_btn,
+            "Toggle a metronome click during playback — useful for "
+            "checking the cursor and score are tracking the beat "
+            "correctly at the current tempo.")
+        tk.Frame(tb,width=8,bg="#161b22").pack(side=tk.LEFT)
+        tk.Button(tb,text="+ Track",command=self._add_track,**bc).pack(side=tk.LEFT,padx=1)
+        tk.Button(tb,text="🎼 Score",command=self._open_score_view,**bc).pack(side=tk.LEFT,padx=1)
+        tk.Button(tb,text="🎹 Roll",command=self._open_piano_roll,**bc).pack(side=tk.LEFT,padx=1)
+        tk.Button(tb,text="📋 List",command=self._open_list_view,**bc).pack(side=tk.LEFT,padx=1)
+        tk.Button(tb,text="🎚 Mixer",command=self._open_mixer,**bc).pack(side=tk.LEFT,padx=1)
+        tk.Frame(tb,width=8,bg="#161b22").pack(side=tk.LEFT)
+        tk.Label(tb,text="BPM:",bg="#161b22",fg="white").pack(side=tk.LEFT)
+        self.bpm_var=tk.IntVar(value=self.song.bpm)
+        sp=tk.Spinbox(tb,from_=20,to=300,textvariable=self.bpm_var,width=5,
+                      bg="#21262d",fg="white",buttonbackground="#21262d",command=self._apply_bpm)
+        sp.pack(side=tk.LEFT,padx=2); sp.bind("<Return>",lambda e:self._apply_bpm())
+        self._pos_var=tk.StringVar(value="Meas 1  Beat 1")
+        tk.Label(tb,textvariable=self._pos_var,bg="#161b22",fg="#58a6ff",
+                 font=("TkFixedFont",9),width=14).pack(side=tk.LEFT,padx=4)
+        # ── Play Selection controls ──────────────────────────────────────
+        tk.Frame(tb,width=10,bg="#161b22").pack(side=tk.LEFT)
+        tk.Label(tb,text="Sel:",bg="#161b22",fg="#8b949e",
+                 font=("TkDefaultFont",9)).pack(side=tk.LEFT)
+        _tt(tk.Spinbox(tb,from_=1,to=9999,textvariable=self._sel_from,width=4,
+                   bg="#21262d",fg="white",buttonbackground="#21262d"),
+            "First measure to play with ▶ Sel."
+            ).pack(side=tk.LEFT,padx=1)
+        tk.Label(tb,text="–",bg="#161b22",fg="#8b949e").pack(side=tk.LEFT)
+        _tt(tk.Spinbox(tb,from_=1,to=9999,textvariable=self._sel_to,width=4,
+                   bg="#21262d",fg="white",buttonbackground="#21262d"),
+            "Last measure to play with ▶ Sel."
+            ).pack(side=tk.LEFT,padx=1)
+        _tt(tk.Button(tb,text="▶ Sel",command=self._play_selection,
+                  bg="#21262d",fg="#58a6ff",activebackground="#30363d",
+                  activeforeground="#79c0ff",relief=tk.FLAT,padx=6,pady=4,
+                  font=("TkDefaultFont",10)),
+            "Play only the measure range set by the two Sel spinboxes, "
+            "instead of the whole piece."
+            ).pack(side=tk.LEFT,padx=1)
+
+
+    # ═══════════════════════════════════════════════════════════════════════════
+    # RATIONALIZATION  —  Priority 1 implementation
+    # ═══════════════════════════════════════════════════════════════════════════
+
+    def _set_rationalized_song(self, song):
+        """Switch the app into or out of rationalized mode.
+
+        Passing a Song switches the app to rationalized mode:
+          • self._original_song is preserved
+          • self.song is swapped to the rationalized song
+          • Transport is updated to play the new song
+          • UI is refreshed
+
+        Passing None discards the rationalization and reverts to original.
+        """
+        import copy as _copy
+        if song is not None:
+            # Entering rationalized mode
+            if not self._is_rationalized:
+                # First time: save the original
+                self._original_song = self.song
+            else:
+                # Re-rationalizing: keep the already-saved original
+                pass
+            self.song = song
+            self.transport.song = song
+            self._is_rationalized = True
+            self._undo_stack.clear()
+            self._redo_stack.clear()
+        else:
+            # Discarding — revert to original
+            if self._original_song is not None:
+                self.song = self._original_song
+                self.transport.song = self._original_song
+            self._original_song = None
+            self._is_rationalized = False
+            self._undo_stack.clear()
+            self._redo_stack.clear()
+
+        self._update_status()
+        self._update_title()
+        self._refresh_views()
+        # Refresh Score Setup panel cleanup gate if it is open
+        if (self._score_setup_dlg is not None
+                and self._score_setup_dlg.winfo_exists()):
+            try:
+                self._score_setup_dlg._refresh_panel()
+            except Exception:
+                pass   # panel may be partially constructed
+
+    def _refresh_views(self):
+        """Redraw all open score/roll/list views after song data changes."""
+        if self._score_view and self._score_view.winfo_exists():
+            try: self._score_view._draw()
+            except Exception: pass
+        for w in list(self._open_windows):
+            if hasattr(w, '_draw') and w.winfo_exists():
+                try: w._draw()
+                except Exception: pass
+        self._refresh_track_list()
+        self._draw_overview()
+
+    # ── Undo / Redo ────────────────────────────────────────────────────────────
+
+    def _push_undo(self, action: RationalizationAction):
+        """Push a RationalizationAction onto the undo stack."""
+        self._undo_stack.append(action)
+        self._redo_stack.clear()
+        self._update_status()
+
+    def _undo(self, *_):
+        """Undo the most recent edit (quantize, rationalize, calibration, or manual edit)."""
+        if not self._undo_stack:
+            return
+        import copy as _copy
+        action = self._undo_stack.pop()
+
+        if isinstance(action, CalibrationAction):
+            # Restore song tempo and time signature
+            redo_action = CalibrationAction(
+                description=action.description,
+                before_tempo=action.after_tempo,
+                after_tempo=action.before_tempo,
+                before_ts_num=action.after_ts_num,
+                before_ts_den=action.after_ts_den,
+                after_ts_num=action.before_ts_num,
+                after_ts_den=action.before_ts_den,
+            )
+            self._redo_stack.append(redo_action)
+            self.song.tempo      = action.before_tempo
+            self.song.set_time_signature(action.before_ts_num, action.before_ts_den)
+            self.song.rationalized_measure_map = None   # v22l: force grid rebuild
+        elif isinstance(action, NoteEditAction):
+            # v22ze-34: lightweight per-note undo (add/delete/modify a
+            # single note) -- see NoteEditAction docstring. Undo always
+            # removes whatever this action's "after" state was and
+            # restores whatever its "before" state was; redo does the
+            # opposite. Notes are matched by object identity, not
+            # tick/pitch, so this is unambiguous even for doubled notes.
+            tr = self.song.tracks[action.track_index]
+            redo_action = NoteEditAction(
+                description=action.description,
+                track_index=action.track_index,
+                before_note=action.before_note,
+                after_note=action.after_note,
+            )
+            self._redo_stack.append(redo_action)
+            if action.after_note is not None:
+                tr.notes = [n for n in tr.notes if n is not action.after_note]
+            if action.before_note is not None:
+                tr.notes.append(action.before_note)
+                tr.notes.sort(key=lambda n: n.tick)
+        elif isinstance(action, EventEditAction):
+            # Same identity-based pattern as NoteEditAction, for
+            # Track.markings (dynamics, etc.) instead of notes.
+            tr = self.song.tracks[action.track_index]
+            redo_action = EventEditAction(
+                description=action.description,
+                track_index=action.track_index,
+                before_event=action.before_event,
+                after_event=action.after_event,
+            )
+            self._redo_stack.append(redo_action)
+            if action.after_event is not None:
+                tr.markings = [e for e in tr.markings if e is not action.after_event]
+            if action.before_event is not None:
+                tr.markings.append(action.before_event)
+                tr.markings.sort(key=lambda e: e.tick)
+        else:
+            redo_action = RationalizationAction(
+                description=action.description,
+                before_tracks=_copy.deepcopy(self.song.tracks),
+                after_tracks=action.after_tracks,
+                before_map=_copy.deepcopy(self.song.rationalized_measure_map),
+                after_map=action.after_map,
+            )
+            self._redo_stack.append(redo_action)
+            self.song.tracks = _copy.deepcopy(action.before_tracks)
+            self.song.rationalized_measure_map = _copy.deepcopy(action.before_map)
+
+        self.transport.song = self.song
+        self._update_status()
+        self._refresh_views()
+        # Refresh Score Setup panel undo label if open
+        if self._score_setup_dlg and self._score_setup_dlg.winfo_exists():
+            self._score_setup_dlg._refresh_undo_labels()
+
+    def _redo(self, *_):
+        """Redo the most recently undone edit."""
+        if not self._redo_stack:
+            return
+        import copy as _copy
+        action = self._redo_stack.pop()
+
+        if isinstance(action, CalibrationAction):
+            undo_action = CalibrationAction(
+                description=action.description,
+                before_tempo=action.after_tempo,
+                after_tempo=action.before_tempo,
+                before_ts_num=action.after_ts_num,
+                before_ts_den=action.after_ts_den,
+                after_ts_num=action.before_ts_num,
+                after_ts_den=action.before_ts_den,
+            )
+            self._undo_stack.append(undo_action)
+            self.song.tempo      = action.after_tempo
+            self.song.set_time_signature(action.after_ts_num, action.after_ts_den)
+            self.song.rationalized_measure_map = None   # v22l: force grid rebuild
+        elif isinstance(action, NoteEditAction):
+            tr = self.song.tracks[action.track_index]
+            undo_action = NoteEditAction(
+                description=action.description,
+                track_index=action.track_index,
+                before_note=action.before_note,
+                after_note=action.after_note,
+            )
+            self._undo_stack.append(undo_action)
+            if action.before_note is not None:
+                tr.notes = [n for n in tr.notes if n is not action.before_note]
+            if action.after_note is not None:
+                tr.notes.append(action.after_note)
+                tr.notes.sort(key=lambda n: n.tick)
+        elif isinstance(action, EventEditAction):
+            tr = self.song.tracks[action.track_index]
+            undo_action = EventEditAction(
+                description=action.description,
+                track_index=action.track_index,
+                before_event=action.before_event,
+                after_event=action.after_event,
+            )
+            self._undo_stack.append(undo_action)
+            if action.before_event is not None:
+                tr.markings = [e for e in tr.markings if e is not action.before_event]
+            if action.after_event is not None:
+                tr.markings.append(action.after_event)
+                tr.markings.sort(key=lambda e: e.tick)
+        else:
+            undo_action = RationalizationAction(
+                description=action.description,
+                before_tracks=_copy.deepcopy(self.song.tracks),
+                after_tracks=action.after_tracks,
+                before_map=_copy.deepcopy(self.song.rationalized_measure_map),
+                after_map=action.after_map,
+            )
+            self._undo_stack.append(undo_action)
+            self.song.tracks = _copy.deepcopy(action.after_tracks)
+            self.song.rationalized_measure_map = _copy.deepcopy(action.after_map)
+
+        self.transport.song = self.song
+        self._update_status()
+        self._refresh_views()
+        if self._score_setup_dlg and self._score_setup_dlg.winfo_exists():
+            self._score_setup_dlg._refresh_undo_labels()
+
+    # ── Play Selection ────────────────────────────────────────────────────────
+
+    def _play_selection(self):
+        """Play only the measures specified by the Sel: spinboxes."""
+        mmap = self.song.get_measure_map()
+        if not mmap:
+            return
+        m0 = max(0, self._sel_from.get() - 1)
+        m1 = min(len(mmap) - 1, self._sel_to.get() - 1)
+        if m0 > m1:
+            m0, m1 = m1, m0
+        start_tick = mmap[m0][1]
+        end_tick   = mmap[m1][2]
+
+        was_playing = self.transport.is_playing()
+        self.transport.stop()
+        self.transport.position_ticks = start_tick
+        self.transport.position_sec   = self.transport._t2s(start_tick)
+        self.transport._play_until_tick = end_tick
+
+        def _on_tick(tick):
+            self.transport.position_ticks = tick
+            # v22ze-58 fix: same cross-thread Tkinter bug as the main
+            # _play() path (see its detailed comment) -- this callback
+            # runs on Transport's background playback thread, so no Tk
+            # calls may happen directly here. Marshal onto the main
+            # thread via root.after(0, ...) instead.
+            if not getattr(self, '_tick_update_pending', False):
+                self._tick_update_pending = True
+                def _do_update(t=tick):
+                    self._tick_update_pending = False
+                    try:
+                        if self._score_view and self._score_view.winfo_exists():
+                            self._score_view._ui_tick_update(t)
+                    except Exception:
+                        pass
+                self.root.after(0, _do_update)
+
+        self._on_tick_cb = _on_tick
+        self.play_btn.configure(text="⏸  Pause")
+        self.transport.play(on_tick=_on_tick)
+
+        # Auto-clear end_tick after playback finishes so normal Play works
+        def _clear_end():
+            if not self.transport.is_playing():
+                self.transport._play_until_tick = None
+                self.play_btn.configure(text="▶  Play")
+            else:
+                self.root.after(200, _clear_end)
+        self.root.after(200, _clear_end)
+
+    # ── Score Setup Panel ────────────────────────────────────────────────────
+
+    def _apply_global_bpm(self, new_bpm, source="manual"):
+        """Change the song's global BPM, push to undo stack, refresh views."""
+        import mido as _mido_bpm
+        old_tempo  = self.song.tempo
+        old_ts_num = self.song.time_sig_num
+        old_ts_den = self.song.time_sig_den
+        new_tempo  = int(60_000_000 / max(1, new_bpm))
+        if new_tempo == old_tempo:
+            return
+        self._push_undo(CalibrationAction(
+            description=f"BPM {round(60_000_000/old_tempo)} → {round(new_bpm)} ({source})",
+            before_tempo=old_tempo,  after_tempo=new_tempo,
+            before_ts_num=old_ts_num, before_ts_den=old_ts_den,
+            after_ts_num=old_ts_num,  after_ts_den=old_ts_den,
+        ))
+        self.song.tempo = new_tempo
+        self.song.modified = True
+        self._update_title()
+        self._refresh_views()
+
+    def _apply_global_timesig(self, new_num, new_den, source="manual"):
+        """Change the song's time signature, push to undo stack, refresh views."""
+        old_tempo  = self.song.tempo
+        old_ts_num = self.song.time_sig_num
+        old_ts_den = self.song.time_sig_den
+        if new_num == old_ts_num and new_den == old_ts_den:
+            return
+        self._push_undo(CalibrationAction(
+            description=f"Time sig {old_ts_num}/{old_ts_den} → {new_num}/{new_den} ({source})",
+            before_tempo=old_tempo,  after_tempo=old_tempo,
+            before_ts_num=old_ts_num, before_ts_den=old_ts_den,
+            after_ts_num=new_num,     after_ts_den=new_den,
+        ))
+        self.song.set_time_signature(new_num, new_den)
+        # v22l: clear any cached rationalized measure map so get_measure_map()
+        # falls back to build_measure_map() which now uses the new sig_changes[0].
+        # Without this, the cached 6/4 (or whatever) rationalized_measure_map
+        # is returned by get_measure_map() regardless of what set_time_signature()
+        # just wrote, and the score redraws with the old grid.
+        # The baked note data is preserved — only the cached grid is discarded.
+        # The measure strip will flag any measures that now overflow or underflow
+        # under the new grid, guiding the user to re-rationalize or run cleanup.
+        self.song.rationalized_measure_map = None
+        self._update_title()
+        self._refresh_views()
+        # v22k: if the Rationalize dialog is open, push the new meter into
+        # its override spinboxes and uncheck Auto-detect so the user sees
+        # immediately that their Score Setup choice will be used.
+        if (self._rationalize_dlg is not None
+                and self._rationalize_dlg.winfo_exists()):
+            try:
+                self._rationalize_dlg._detect_ts_var.set(False)
+                self._rationalize_dlg._ts_num_var.set(new_num)
+                self._rationalize_dlg._ts_den_var.set(new_den)
+            except Exception:
+                pass   # dialog may be partially constructed
+
+    def _auto_detect_calibration(self):
+        """Run IOI detection and return a suggestion dict (never commits)."""
+        try:
+            return self.song.detect_calibration()
+        except Exception as exc:
+            return {'bpm': None, 'confidence': 0.0, 'note': str(exc)}
+
+    def _cleanup_measure(self, measure_idx):
+        """Apply Option-D barline clamping + re-quantize to a single measure."""
+        import copy as _cup
+        mmap = self.song.get_measure_map()
+        if measure_idx >= len(mmap):
+            return
+        _mi, ms, me, num, den, tpm = mmap[measure_idx]
+        tpb  = self.song.ticks_per_beat
+        grid = tpb // 8   # eighth-note grid as default cleanup resolution
+
+        before_tracks = _cup.deepcopy(self.song.tracks)
+        before_map    = _cup.deepcopy(self.song.rationalized_measure_map)
+
+        for tr in self.song.tracks:
+            for n in tr.notes:
+                if ms <= n.tick < me:
+                    # Clamp onset to measure
+                    if n.tick < ms:
+                        n.tick = ms
+                    # Snap onset to grid within measure
+                    rel    = n.tick - ms
+                    snapped = round(rel / grid) * grid
+                    snapped = max(0, min(int(tpm) - grid, snapped))
+                    n.tick  = ms + snapped
+                    # Clamp duration so note ends at or before barline
+                    if n.tick + n.duration > me:
+                        n.duration = me - n.tick
+                    if n.duration <= 0:
+                        n.duration = grid
+
+        self._push_undo(RationalizationAction(
+            description=f"Cleanup measure {measure_idx + 1}",
+            before_tracks=before_tracks,
+            after_tracks=_cup.deepcopy(self.song.tracks),
+            before_map=before_map,
+            after_map=_cup.deepcopy(self.song.rationalized_measure_map),
+        ))
+        self._accepted_measures.add(measure_idx)
+        self.song.modified = True
+        self._refresh_views()
+
+    def _cleanup_all_measures(self):
+        """Apply Option-D cleanup to every measure in the song."""
+        import copy as _cup
+        mmap = self.song.get_measure_map()
+        if not mmap:
+            return
+        before_tracks = _cup.deepcopy(self.song.tracks)
+        before_map    = _cup.deepcopy(self.song.rationalized_measure_map)
+        tpb  = self.song.ticks_per_beat
+        grid = tpb // 8
+
+        for _mi, ms, me, num, den, tpm in mmap:
+            for tr in self.song.tracks:
+                for n in tr.notes:
+                    if ms <= n.tick < me:
+                        if n.tick < ms:
+                            n.tick = ms
+                        rel     = n.tick - ms
+                        snapped = round(rel / grid) * grid
+                        snapped = max(0, min(int(tpm) - grid, snapped))
+                        n.tick  = ms + snapped
+                        if n.tick + n.duration > me:
+                            n.duration = me - n.tick
+                        if n.duration <= 0:
+                            n.duration = grid
+            self._accepted_measures.add(_mi)
+
+        self._push_undo(RationalizationAction(
+            description="Cleanup all measures",
+            before_tracks=before_tracks,
+            after_tracks=_cup.deepcopy(self.song.tracks),
+            before_map=before_map,
+            after_map=_cup.deepcopy(self.song.rationalized_measure_map),
+        ))
+        self.song.modified = True
+        self._refresh_views()
+
+    def _set_key_signature(self):
+        """Open a dialog to view/override the song's key signature.
+
+        Auto-detection (Krumhansl-Schmuckler, see detect_key_signature())
+        is offered as a suggestion only, never applied silently -- key-
+        finding from note content is inherently a best-guess heuristic
+        (modulation within a piece, heavy chromaticism, or non-tonal
+        writing can all fool it), so the user always confirms or picks
+        their own key from the full list rather than having one applied
+        automatically on load.
+        """
+        BG    = "#0d1117"
+        FG    = "#f0f6fc"
+        MUTED = "#8b949e"
+        BLUE  = "#58a6ff"
+        ENTRY = "#161b22"
+        bb    = dict(bg="#21262d", fg=FG, activebackground="#30363d",
+                     activeforeground=FG, relief=tk.FLAT, padx=8, pady=3)
+
+        dlg = tk.Toplevel(self.root)
+        dlg.title("Key Signature")
+        dlg.configure(bg=BG)
+        dlg.resizable(False, False)
+        # v22ze: transient()+lift() is the standard, safe way to keep a
+        # dialog above its parent -- a prior version of this also
+        # toggled -topmost on a timer, which turned out to be a real
+        # hazard (see _clear_topmost_safe's docstring for the full
+        # story: an intermittent, timing-dependent freeze). Dropped in
+        # favor of just the well-tested pattern.
+        dlg.transient(self.root)
+        dlg.lift()
+        dlg.focus_force()
+
+        current = getattr(self.song, 'key_sig', 'C') or 'C'
+        tk.Label(dlg, text="Key Signature", bg=BG, fg=FG,
+                 font=("Segoe UI", 11, "bold")).pack(padx=16, pady=(14, 4), anchor="w")
+        tk.Label(dlg, text=f"Current: {current}", bg=BG, fg=MUTED).pack(padx=16, anchor="w")
+
+        all_notes = [n for tr in self.song.tracks for n in tr.notes]
+        suggestion_var = tk.StringVar(value="(not checked yet)")
+        if all_notes:
+            sugg_key, sugg_conf = detect_key_signature(self.song)
+            conf_word = "confident" if sugg_conf > 0.15 else "uncertain — piece may modulate or be non-tonal"
+            suggestion_var.set(f"{sugg_key}  ({conf_word}, margin={sugg_conf:.2f})")
+        else:
+            sugg_key = current
+
+        tk.Label(dlg, text="Suggested (auto-detected):", bg=BG, fg=MUTED).pack(
+            padx=16, pady=(10, 0), anchor="w")
+        tk.Label(dlg, textvariable=suggestion_var, bg=BG, fg=BLUE).pack(padx=16, anchor="w")
+
+        # Deduplicated, major-then-minor key list for the dropdown
+        all_keys = list(dict.fromkeys(_KEY_STR_MAJOR + _KEY_STR_MINOR))
+
+        pick_var = tk.StringVar(value=current if current in all_keys else sugg_key)
+        row = tk.Frame(dlg, bg=BG)
+        row.pack(padx=16, pady=(10, 4), fill="x")
+        tk.Label(row, text="Set to:", bg=BG, fg=FG).pack(side=tk.LEFT)
+        combo = ttk.Combobox(row, textvariable=pick_var, values=all_keys,
+                              width=8, state="readonly")
+        combo.pack(side=tk.LEFT, padx=(8, 0))
+
+        def _use_suggestion():
+            pick_var.set(sugg_key)
+        tk.Button(dlg, text="Use Suggested", command=_use_suggestion, **bb).pack(
+            padx=16, pady=(2, 10), anchor="w")
+
+        def _apply():
+            self.song.key_sig = pick_var.get()
+            self.modified = True
+            self._update_title()
+            try:
+                if self._score_view and self._score_view.winfo_exists():
+                    self._score_view._draw(cursor_tick=0)
+            except Exception:
+                pass
+            dlg.destroy()
+
+        btn_row = tk.Frame(dlg, bg=BG)
+        btn_row.pack(padx=16, pady=(4, 14), anchor="e")
+        tk.Button(btn_row, text="Cancel", command=dlg.destroy, **bb).pack(side=tk.LEFT, padx=(0, 6))
+        tk.Button(btn_row, text="Apply", command=_apply, **bb).pack(side=tk.LEFT)
+
+    def _open_score_setup(self):
+        """Open (or raise) the Score Setup floating panel."""
+        # Only one instance
+        if self._score_setup_dlg and self._score_setup_dlg.winfo_exists():
+            self._score_setup_dlg.lift()
+            if self._selected_measure_idx is not None:
+                self._score_setup_dlg._populate_measure_detail(
+                    self._selected_measure_idx)
+            return
+
+        BG    = "#0d1117"
+        FG    = "#f0f6fc"
+        MUTED = "#8b949e"
+        BLUE  = "#58a6ff"
+        ENTRY = "#161b22"
+        SEP   = "#30363d"
+        sb    = dict(bg=ENTRY, fg=FG, buttonbackground="#30363d",
+                     relief=tk.FLAT, width=5)
+        bb    = dict(bg="#21262d", fg=FG, activebackground="#30363d",
+                     activeforeground=FG, relief=tk.FLAT, padx=8, pady=3)
+
+        dlg = tk.Toplevel(self.root)
+        dlg.title("Score Setup")
+        dlg.configure(bg=BG)
+        # v22ze-57 fix: this used to just make the window resizable, with
+        # no way to reach content once the window was shrunk below its
+        # natural height — a prior session flagged the full fix (wrap the
+        # content in a scrollable canvas) as too large to do safely in
+        # the same pass as everything else in this ~450-line function.
+        # Doing it now: dlg itself holds only the Canvas+Scrollbar
+        # (via _make_scrollable), and `content` — the actual parent every
+        # section below builds into — is the scrollable inner frame. A
+        # window shrunk below its content now shows a vertical scrollbar
+        # on the right edge instead of silently clipping controls with
+        # no way back to them.
+        dlg.resizable(True, True)
+        dlg.lift()
+        dlg.focus_force()
+        self._score_setup_dlg = dlg
+        content = _make_scrollable(dlg, bg=BG)
+
+        def _lbl(parent, text, fg=FG, font=None, **kw):
+            kw.setdefault('anchor', 'w')
+            f = font or ("TkDefaultFont", 9)
+            return tk.Label(parent, text=text, bg=BG, fg=fg, font=f, **kw)
+
+        def _sep(parent):
+            tk.Frame(parent, bg=SEP, height=1).pack(fill=tk.X, padx=10, pady=6)
+
+        # ── Header ────────────────────────────────────────────────────────
+        _lbl(content, "🎼  Score Setup",
+             fg=BLUE, font=("TkDefaultFont", 12, "bold"),
+             anchor="center").pack(pady=(14, 2))
+        _lbl(content,
+             "Calibrate BPM and time signature so measures contain "
+             "the correct number of beats, then apply cleanup.",
+             fg=MUTED, font=("TkDefaultFont", 9),
+             justify=tk.CENTER, anchor="center").pack(padx=20, pady=(0, 8))
+
+        # ══ SECTION A — Global calibration ═══════════════════════════════
+        _sep(content)
+        _lbl(content, "  Global Calibration",
+             fg=BLUE, font=("TkDefaultFont", 10, "bold")).pack(fill=tk.X)
+
+        gfrm = tk.Frame(content, bg=BG, padx=14, pady=4)
+        gfrm.pack(fill=tk.X)
+
+        # Time signature row
+        ts_num_var = tk.IntVar(value=self.song.time_sig_num)
+        ts_den_var = tk.IntVar(value=self.song.time_sig_den)
+
+        ts_row = tk.Frame(gfrm, bg=BG)
+        ts_row.pack(fill=tk.X, pady=3)
+        _lbl(ts_row, "Time Signature:", width=18).pack(side=tk.LEFT)
+        tk.Spinbox(ts_row, from_=1, to=16, textvariable=ts_num_var,                   **sb).pack(side=tk.LEFT, padx=(0, 2))
+        _lbl(ts_row, "/").pack(side=tk.LEFT)
+        den_menu = tk.OptionMenu(ts_row, ts_den_var, 1, 2, 4, 8, 16)
+        den_menu.configure(bg=ENTRY, fg=FG, activebackground="#30363d",
+                           relief=tk.FLAT, highlightthickness=0)
+        den_menu["menu"].configure(bg=ENTRY, fg=FG)
+        den_menu.pack(side=tk.LEFT, padx=(2, 8))
+        _tt(tk.Button(ts_row, text="Apply",
+                  command=lambda: self._apply_global_timesig(
+                      ts_num_var.get(), ts_den_var.get()),
+                  **bb),
+            "Redraw the whole score's measure grid at this time signature. "
+            "Existing notes keep their tick positions — measures that no "
+            "longer contain the right number of beats will be flagged in "
+            "the strip above the score.").pack(side=tk.LEFT)
+
+        # Key signature row -- lives here too (not just the Set Key
+        # Signature… menu item) since this is where a user calibrating
+        # the score naturally looks for it, alongside time signature/BPM.
+        key_row = tk.Frame(gfrm, bg=BG)
+        key_row.pack(fill=tk.X, pady=3)
+        _lbl(key_row, "Key Signature:", width=18).pack(side=tk.LEFT)
+        key_display_var = tk.StringVar(
+            value=getattr(self.song, 'key_sig', 'C') or 'C')
+
+        def _refresh_key_display():
+            key_display_var.set(getattr(self.song, 'key_sig', 'C') or 'C')
+
+        _lbl(key_row, "", textvariable=key_display_var, fg=BLUE,
+             font=("TkDefaultFont", 9, "bold"), width=6).pack(side=tk.LEFT)
+        _tt(tk.Button(key_row, text="Change…",
+                  command=lambda: (self._set_key_signature(), _refresh_key_display()),
+                  **bb),
+            "View the auto-detected suggestion and set the piece's key "
+            "signature -- affects both this app's own on-screen notation "
+            "and LilyPond export.").pack(side=tk.LEFT, padx=(4, 0))
+
+        # BPM row
+        bpm_var = tk.IntVar(value=round(self.song.bpm))
+        bpm_row = tk.Frame(gfrm, bg=BG)
+        bpm_row.pack(fill=tk.X, pady=3)
+        _lbl(bpm_row, "BPM:", width=18).pack(side=tk.LEFT)
+        tk.Spinbox(bpm_row, from_=20, to=300, textvariable=bpm_var,
+                   **sb).pack(side=tk.LEFT, padx=(0, 6))
+        bpm_scale = tk.Scale(bpm_row, from_=20, to=300, orient=tk.HORIZONTAL,
+                             variable=bpm_var, length=120, showvalue=False,
+                             bg=BG, fg=FG, troughcolor=ENTRY,
+                             highlightthickness=0, bd=0)
+        bpm_scale.pack(side=tk.LEFT, padx=(0, 8))
+        _tt(tk.Button(bpm_row, text="Apply",
+                  command=lambda: self._apply_global_bpm(bpm_var.get()),
+                  **bb),
+            "Set the song's tempo. This changes playback speed and how "
+            "wide each measure is on screen — it does not move or "
+            "requantize any notes by itself.").pack(side=tk.LEFT)
+
+        # Auto-detect row
+        detect_note_var = tk.StringVar(value="Not run yet")
+        det_row = tk.Frame(gfrm, bg=BG)
+        det_row.pack(fill=tk.X, pady=3)
+
+        def _run_autodetect():
+            # BPM detection
+            bpm_result = self._auto_detect_calibration()
+            if bpm_result['bpm'] is not None:
+                bpm_var.set(round(bpm_result['bpm']))
+
+            # Time signature detection (v22i — uses detect_time_signature())
+            ts_num, ts_den, ts_conf, ts_note = self.song.detect_time_signature()
+            if ts_conf >= 0.4:
+                ts_num_var.set(ts_num)
+                ts_den_var.set(ts_den)
+                ts_summary = f"  |  Meter: {ts_num}/{ts_den} ({ts_conf:.0%})"
+            else:
+                ts_summary = f"  |  Meter: low confidence ({ts_conf:.0%}), check manually"
+
+            if bpm_result['bpm'] is not None:
+                detect_note_var.set(
+                    f"BPM: {bpm_result['bpm']:.1f} ({bpm_result['confidence']:.0%})"
+                    f"{ts_summary} — click Apply to use")
+            else:
+                detect_note_var.set(f"{bpm_result['note']}{ts_summary}")
+
+        _tt(tk.Button(det_row, text="Auto-detect BPM + Meter",
+                  command=_run_autodetect, **bb),
+            "Analyse the recording to suggest a tempo and time signature. "
+            "Fills in the fields above but does not apply them — review "
+            "the suggestion, then click Apply if it looks right."
+            ).pack(side=tk.LEFT)
+        _lbl(det_row, "", fg=MUTED,
+             textvariable=detect_note_var,
+             font=("TkDefaultFont", 8),
+             wraplength=260).pack(side=tk.LEFT, padx=8)
+
+        # ══ SECTION B — Selected measure detail ══════════════════════════
+        _sep(content)
+        meas_title_var = tk.StringVar(value="  No measure selected — click a cell in the strip")
+        _lbl(content, "", fg=BLUE,
+             font=("TkDefaultFont", 10, "bold"),
+             textvariable=meas_title_var).pack(fill=tk.X)
+
+        mfrm = tk.Frame(content, bg=BG, padx=14, pady=4)
+        mfrm.pack(fill=tk.X)
+
+        beat_info_var  = tk.StringVar(value="")
+        local_bpm_var  = tk.StringVar(value="")
+        status_var     = tk.StringVar(value="")
+        m_bpm_var      = tk.IntVar(value=round(self.song.bpm))
+
+        _lbl(mfrm, "", fg=FG,
+             textvariable=beat_info_var).pack(fill=tk.X, pady=1)
+        _lbl(mfrm, "", fg=MUTED,
+             font=("TkDefaultFont", 8),
+             textvariable=local_bpm_var).pack(fill=tk.X, pady=1)
+        _lbl(mfrm, "", fg=MUTED,
+             font=("TkDefaultFont", 8),
+             textvariable=status_var).pack(fill=tk.X, pady=1)
+
+        m_bpm_row = tk.Frame(mfrm, bg=BG)
+        m_bpm_row.pack(fill=tk.X, pady=3)
+        _lbl(m_bpm_row, "BPM override:", width=18).pack(side=tk.LEFT)
+        tk.Spinbox(m_bpm_row, from_=20, to=300, textvariable=m_bpm_var,
+                   **sb).pack(side=tk.LEFT, padx=(0, 6))
+
+        def _apply_meas_bpm():
+            idx = self._selected_measure_idx
+            if idx is None:
+                return
+            self._measure_bpm_overrides[idx] = m_bpm_var.get()
+            self._accepted_measures.add(idx)
+            self._refresh_views()
+
+        def _apply_from_here():
+            idx = self._selected_measure_idx
+            if idx is None:
+                return
+            mmap = self.song.get_measure_map()
+            bpm  = m_bpm_var.get()
+            for mi in range(idx, len(mmap)):
+                self._measure_bpm_overrides[mi] = bpm
+                self._accepted_measures.add(mi)
+            self._refresh_views()
+
+        tk.Button(m_bpm_row, text="Apply to this measure",
+                  command=_apply_meas_bpm, **bb).pack(side=tk.LEFT, padx=(0, 4))
+        tk.Button(m_bpm_row, text="Apply from here to end",
+                  command=_apply_from_here, **bb).pack(side=tk.LEFT)
+
+        def _populate_measure_detail(idx):
+            """Fill Section B from the clicked measure index."""
+            self._selected_measure_idx = idx
+            mmap = self.song.get_measure_map()
+            if idx >= len(mmap):
+                return
+            _mi, ms, me, num, den, tpm = mmap[idx]
+            tpb = self.song.ticks_per_beat
+
+            # Compute beat content
+            latest_end = ms
+            for tr in self.song.tracks:
+                for n in tr.notes:
+                    if ms <= n.tick < me:
+                        latest_end = max(latest_end, n.tick + n.duration)
+            actual_ticks   = max(1, latest_end - ms)
+            expected_ticks = tpm
+            actual_q   = actual_ticks   / tpb
+            expected_q = expected_ticks / tpb
+            delta      = actual_q - expected_q
+
+            meas_title_var.set(f"  Measure {idx + 1}")
+            beat_info_var.set(
+                f"Beat count:  {actual_q:.2f} / {expected_q:.0f}  "
+                f"({'overflow' if delta > 0 else 'underfill'} "
+                f"by {abs(delta):.2f} beats)" if abs(delta) >= 0.1
+                else f"Beat count:  {actual_q:.2f} / {expected_q:.0f}  ✓ clean")
+
+            local_bpm = self.song.bpm * (expected_ticks / actual_ticks)
+            local_bpm_var.set(f"Derived local BPM:  {local_bpm:.1f}")
+
+            if abs(delta) < 0.15:
+                status_var.set("This measure looks clean.")
+            elif abs(delta) <= 1.0:
+                status_var.set(
+                    "Moderate overflow — likely rubato at barline. "
+                    "Try 'Clean up this measure'.")
+            else:
+                status_var.set(
+                    "Large discrepancy — check time signature or "
+                    "look for a missing/extra note.")
+
+            override = self._measure_bpm_overrides.get(idx, round(self.song.bpm))
+            m_bpm_var.set(round(override))
+
+        # Attach so _on_strip_click can call it via the panel reference
+        dlg._populate_measure_detail = _populate_measure_detail
+
+        # Populate immediately if a measure is already selected
+        if self._selected_measure_idx is not None:
+            _populate_measure_detail(self._selected_measure_idx)
+
+        # ══ SECTION C — Cleanup and Bake ═════════════════════════════════
+        _sep(content)
+        _lbl(content, "  Cleanup (Pass 3)",
+             fg=BLUE, font=("TkDefaultFont", 10, "bold")).pack(fill=tk.X)
+
+        cfrm = tk.Frame(content, bg=BG, padx=14, pady=4)
+        cfrm.pack(fill=tk.X)
+
+        cleanup_status_var = tk.StringVar(value="")
+
+        # Gate label — explains why cleanup is disabled when not rationalized
+        cleanup_gate_var = tk.StringVar(value="")
+        gate_lbl = _lbl(cfrm, "", fg="#e3b341",
+                        font=("TkDefaultFont", 8),
+                        textvariable=cleanup_gate_var)
+        gate_lbl.pack(fill=tk.X, pady=(0, 4))
+
+        def _cleanup_this():
+            idx = self._selected_measure_idx
+            if idx is None:
+                cleanup_status_var.set("Select a measure first.")
+                return
+            self._cleanup_measure(idx)
+            cleanup_status_var.set(f"✓  Cleaned measure {idx + 1}.")
+            _populate_measure_detail(idx)
+
+        def _cleanup_all():
+            self._cleanup_all_measures()
+            cleanup_status_var.set(
+                f"✓  Cleaned all {len(self.song.get_measure_map())} measures.")
+
+        def _step_through():
+            cleanup_status_var.set(
+                "Step-through mode coming in v22g. "
+                "Use 'Clean up this measure' one at a time for now.")
+
+        def _run_bake():
+            """Execute bake_to_score() and report result in the panel."""
+            try:
+                baked = self.song.bake_to_score()
+                self._set_rationalized_song(baked)
+                cleanup_status_var.set(
+                    "✓  Baked.  Playback and MIDI export now match the score.")
+            except Exception as exc:
+                import traceback; traceback.print_exc()
+                cleanup_status_var.set(f"Bake error: {exc}")
+
+        def _do_bake():
+            """Bake button handler — routes through rationalization if needed."""
+            if not self._is_rationalized:
+                # ── Three-button warning dialog ───────────────────────────
+                warn = tk.Toplevel(dlg)
+                warn.title("Bake — Rationalization Recommended")
+                warn.configure(bg=BG)
+                warn.resizable(False, False)
+                # v22ze: grab_set() alone makes this modal relative to `dlg`,
+                # but doesn't guarantee stacking order -- transient() ties
+                # it to dlg for the window manager's benefit and lift()
+                # raises it now. An earlier version of this also toggled
+                # -topmost on a timer for extra insurance; that turned out
+                # to be a real hazard in its own right (an intermittent,
+                # timing-dependent freeze -- see _clear_topmost_safe's
+                # docstring), so it's been dropped in favor of just the
+                # standard, well-tested transient()+lift()+grab_set()
+                # pattern, which should already be sufficient.
+                warn.transient(dlg)
+                warn.lift()
+                warn.grab_set()   # modal
+
+                tk.Label(warn,
+                         text="⚠  This song has not been rationalized.",
+                         bg=BG, fg="#e3b341",
+                         font=("TkDefaultFont", 11, "bold"),
+                         pady=10).pack(padx=20)
+                tk.Label(warn,
+                         text=(
+                             "Baking a raw MIDI file may collapse ornaments,\n"
+                             "remove fast notes, and alter chord voicings.\n\n"
+                             "Rationalize Score first for best results."),
+                         bg=BG, fg=FG,
+                         font=("TkDefaultFont", 9),
+                         justify=tk.CENTER).pack(padx=20, pady=(0, 12))
+
+                chosen = tk.StringVar(value="")
+
+                def _pick(val):
+                    chosen.set(val)
+                    warn.grab_release()
+                    warn.destroy()
+
+                btn_frm = tk.Frame(warn, bg=BG)
+                btn_frm.pack(pady=(0, 16), padx=16)
+
+                tk.Button(btn_frm,
+                          text="Rationalize then Bake",
+                          bg="#238636", fg="white",
+                          activebackground="#2ea043",
+                          relief=tk.FLAT, padx=8, pady=4,
+                          command=lambda: _pick("rationalize")).pack(
+                              side=tk.LEFT, padx=4)
+                tk.Button(btn_frm,
+                          text="Bake Anyway",
+                          bg="#6e4a00", fg="white",
+                          activebackground="#8a5c00",
+                          relief=tk.FLAT, padx=8, pady=4,
+                          command=lambda: _pick("bake")).pack(
+                              side=tk.LEFT, padx=4)
+                tk.Button(btn_frm,
+                          text="Cancel",
+                          **bb,
+                          command=lambda: _pick("cancel")).pack(
+                              side=tk.LEFT, padx=4)
+
+                dlg.wait_window(warn)   # block until user chooses
+
+                if chosen.get() == "cancel" or chosen.get() == "":
+                    return
+                elif chosen.get() == "rationalize":
+                    # Open the Rationalize Score dialog.  When the user clicks
+                    # Accept there, _accept() already calls bake_to_score()
+                    # internally, so no further action is needed here.
+                    cleanup_status_var.set(
+                        "Rationalize dialog opened — click Accept when done "
+                        "to complete the bake.")
+                    self._rationalize_score()
+                    return
+                # else: "bake" — fall through to _run_bake() below
+
+            # Final confirmation before committing (applies to both paths)
+            # v22ze: messagebox stacks relative to `parent` -- if dlg itself
+            # had fallen behind the main window, the messagebox would
+            # inherit that problem, so lift dlg first. (A -topmost toggle
+            # used to be added here too; dropped for the same reason as
+            # the warn dialog above -- see _clear_topmost_safe's docstring.)
+            dlg.lift()
+            if not messagebox.askyesno(
+                    "Bake",
+                    "Baking commits all cleanup into the note data.\n\n"
+                    "This cannot be undone once you save the file.\n\n"
+                    "Continue?",
+                    parent=dlg):
+                return
+            _run_bake()
+
+        btn_row1 = tk.Frame(cfrm, bg=BG)
+        btn_row1.pack(fill=tk.X, pady=2)
+        _btn_this = _tt(tk.Button(btn_row1, text="Clean up this measure",
+                              command=_cleanup_this, **bb),
+            "Snap this measure's notes onto the beat grid and clip any "
+            "note that overflows into the next measure. Only available "
+            "after rationalizing.")
+        _btn_this.pack(side=tk.LEFT, padx=(0, 4))
+        _btn_all = _tt(tk.Button(btn_row1, text="Clean up all measures",
+                             command=_cleanup_all, **bb),
+            "Apply the same measure-by-measure cleanup to the entire "
+            "piece in one step.")
+        _btn_all.pack(side=tk.LEFT, padx=(0, 4))
+        _btn_step = _tt(tk.Button(btn_row1, text="Step through…",
+                              command=_step_through, **bb),
+            "Walk through the piece one measure at a time, reviewing "
+            "and confirming each cleanup before moving to the next.")
+        _btn_step.pack(side=tk.LEFT)
+
+        # "Rationalize Now" shortcut — visible only when not yet rationalized
+        rat_row = tk.Frame(cfrm, bg=BG)
+        rat_row.pack(fill=tk.X, pady=2)
+        _btn_rat = _tt(tk.Button(rat_row,
+                             text="Rationalize Now…  (opens Rationalize dialog)",
+                             bg="#1f4a7a", fg="white",
+                             activebackground="#2a5f9e",
+                             relief=tk.FLAT, padx=8, pady=3,
+                             command=self._rationalize_score),
+            "Cleanup requires rationalizing first. Opens the Rationalize "
+            "Score dialog — once you Accept there, cleanup and Bake below "
+            "become available.")
+        _btn_rat.pack(side=tk.LEFT)
+
+        def _refresh_cleanup_state():
+            """Enable or disable cleanup controls based on rationalization state."""
+            rationalized = self._is_rationalized
+            state = tk.NORMAL if rationalized else tk.DISABLED
+            for btn in (_btn_this, _btn_all, _btn_step):
+                btn.configure(state=state)
+            if rationalized:
+                cleanup_gate_var.set("")
+                _btn_rat.pack_forget()
+            else:
+                cleanup_gate_var.set(
+                    "⚠  Cleanup is available after Rationalize Score has been run.")
+                _btn_rat.pack(side=tk.LEFT)
+
+        # Run immediately to set initial state
+        _refresh_cleanup_state()
+
+        btn_row2 = tk.Frame(cfrm, bg=BG)
+        btn_row2.pack(fill=tk.X, pady=2)
+        _tt(tk.Button(btn_row2, text="Bake",
+                  bg="#238636", fg="white",
+                  activebackground="#2ea043",
+                  relief=tk.FLAT, padx=8, pady=3,
+                  command=_do_bake),
+            "Commit all cleanup into the actual note data so playback and "
+            "MIDI export exactly match what the score shows. Cannot be "
+            "undone once you save the file.").pack(side=tk.LEFT, padx=(0, 8))
+        _lbl(btn_row2, "", fg=MUTED,
+             font=("TkDefaultFont", 8),
+             textvariable=cleanup_status_var).pack(side=tk.LEFT)
+
+        # ══ SECTION D — Undo / Redo ═══════════════════════════════════════
+        _sep(content)
+        undo_row = tk.Frame(content, bg=BG, padx=14, pady=6)
+        undo_row.pack(fill=tk.X)
+
+        undo_lbl_var = tk.StringVar(value="Nothing to undo")
+        redo_lbl_var = tk.StringVar(value="Nothing to redo")
+
+        def _refresh_undo_labels():
+            undo_lbl_var.set(
+                f"Undo: {self._undo_stack[-1].description}"
+                if self._undo_stack else "Nothing to undo")
+            redo_lbl_var.set(
+                f"Redo: {self._redo_stack[-1].description}"
+                if self._redo_stack else "Nothing to redo")
+
+        tk.Button(undo_row, text="↩  Undo",
+                  command=lambda: [self._undo(), _refresh_undo_labels()],
+                  **bb).pack(side=tk.LEFT, padx=(0, 6))
+        _lbl(undo_row, "", fg=MUTED,
+             font=("TkDefaultFont", 8),
+             textvariable=undo_lbl_var).pack(side=tk.LEFT)
+
+        redo_row = tk.Frame(content, bg=BG, padx=14, pady=2)
+        redo_row.pack(fill=tk.X)
+        tk.Button(redo_row, text="↪  Redo",
+                  command=lambda: [self._redo(), _refresh_undo_labels()],
+                  **bb).pack(side=tk.LEFT, padx=(0, 6))
+        _lbl(redo_row, "", fg=MUTED,
+             font=("TkDefaultFont", 8),
+             textvariable=redo_lbl_var).pack(side=tk.LEFT)
+
+        def _refresh_panel():
+            """Refresh all dynamic panel state: undo labels + cleanup gate."""
+            _refresh_undo_labels()
+            _refresh_cleanup_state()
+
+        # Attach so external callers (_undo, _redo, _set_rationalized_song)
+        # can update the panel without holding a reference to inner functions.
+        dlg._refresh_undo_labels = _refresh_panel   # keeps existing call sites working
+        dlg._refresh_panel       = _refresh_panel
+        _refresh_panel()
+
+        tk.Frame(content, bg=BG, height=10).pack()   # bottom padding
+
+        # v22ze: clamp the initial window to fit the screen. Without a
+        # scrollable content area (see note above), a window taller than
+        # the screen still can't show everything even with resizing
+        # enabled -- but at least sizing it to fit on open, positioned
+        # near the top of the screen, means it starts in a state the
+        # user can actually see and use, rather than opening already
+        # off-screen with no way to tell anything is missing.
+        dlg.update_idletasks()
+        req_w = dlg.winfo_reqwidth()
+        req_h = dlg.winfo_reqheight()
+        screen_h = dlg.winfo_screenheight()
+        margin = 80   # leave room for title bar / taskbar
+        fit_h = min(req_h, max(300, screen_h - margin))
+        dlg.geometry(f"{req_w}x{fit_h}+{dlg.winfo_x()}+20")
+
+    # ── Rationalization Dialog ────────────────────────────────────────────────
+
+    def _rationalize_score(self):
+        """Open the (non-modal) Rationalize Score dialog."""
+        # Only one instance allowed
+        if self._rationalize_dlg and self._rationalize_dlg.winfo_exists():
+            self._rationalize_dlg.lift()
+            return
+
+        if not self.song.tracks:
+            messagebox.showinfo("Rationalize", "No tracks to rationalize.",
+                                parent=self.root)
+            return
+
+        # Determine song length for measure range defaults
+        mmap = (self._original_song or self.song).get_measure_map()
+        total_measures = len(mmap) if mmap else 1
+
+        dlg = tk.Toplevel(self.root)
+        self._rationalize_dlg = dlg
+        dlg.title("Rationalize Score")
+        # v22ze-46: resizable + always-on-top per presentation request --
+        # this dialog in particular was reported as taller than the
+        # screen on some displays.
+        dlg.resizable(True, True)
+        dlg.attributes("-topmost", True)
+        dlg.configure(bg="#0d1117")
+        # Non-modal but always opens in front — user can move it
+        dlg.lift()
+        dlg.focus_force()
+
+        BG    = "#0d1117"
+        FG    = "#f0f6fc"
+        MUTED = "#8b949e"
+        BLUE  = "#58a6ff"
+        WARN  = "#d29922"
+        # v22ze-57: content lives in a scrollable inner frame (not `dlg`
+        # directly) — this dialog was specifically flagged as taller
+        # than the screen on some displays; a scrollbar means shrinking
+        # it no longer clips controls with no way back to them.
+        content = _make_scrollable(dlg, bg=BG)
+
+        tk.Label(content, text="🎼  Rationalize Score",
+                 bg=BG, fg=BLUE, font=("TkDefaultFont", 12, "bold")).pack(pady=(16, 4))
+        tk.Label(content,
+                 text="Convert a recorded performance into clean notation. "
+                      "Original MIDI is preserved — rationalization creates a separate copy.",
+                 bg=BG, fg=MUTED, font=("TkDefaultFont", 9),
+                 justify=tk.CENTER).pack(padx=20, pady=(0, 10))
+
+        # ── Parameters frame ─────────────────────────────────────────────────
+        pfrm = tk.LabelFrame(content, text=" Parameters ", bg=BG, fg=FG,
+                             font=("TkDefaultFont", 9), padx=14, pady=8)
+        pfrm.pack(fill=tk.X, padx=16, pady=4)
+
+        def _row(parent, label, widget_fn, row):
+            tk.Label(parent, text=label, bg=BG, fg=FG,
+                     font=("TkDefaultFont", 10), anchor="w",
+                     width=22).grid(row=row, column=0, sticky="w", pady=3)
+            w = widget_fn(parent)
+            w.grid(row=row, column=1, sticky="w", padx=8, pady=3)
+            return w
+
+        # Tempo correction
+        detect_var = tk.BooleanVar(value=True)
+        _tt(_row(pfrm, "Auto-detect tempo:", lambda p: tk.Checkbutton(
+            p, variable=detect_var, bg=BG, fg=FG,
+            selectcolor="#21262d", activebackground=BG), 0),
+            "Estimates the true performance tempo from the timing between "
+            "bass notes. Uncheck to type in a known tempo instead.")
+
+        # Tempo override (only active when detect=False)
+        tempo_var = tk.IntVar(value=self.song.bpm)
+        tempo_spin = _tt(tk.Spinbox(pfrm, from_=20, to=300, textvariable=tempo_var,
+                                width=5, bg="#21262d", fg=FG,
+                                buttonbackground="#30363d"),
+            "Manual tempo in beats per minute. Only used when Auto-detect "
+            "tempo is unchecked above.")
+        tk.Label(pfrm, text="Tempo override (BPM):", bg=BG, fg=FG,
+                 font=("TkDefaultFont", 10), anchor="w",
+                 width=22).grid(row=1, column=0, sticky="w", pady=3)
+        tempo_spin.grid(row=1, column=1, sticky="w", padx=8, pady=3)
+        def _update_tempo_state(*_):
+            tempo_spin.config(state="disabled" if detect_var.get() else "normal")
+        detect_var.trace_add("write", _update_tempo_state)
+        _update_tempo_state()
+
+        # Auto-detect time signature (v22i)
+        # v22ze-46 fix: this defaulted to True, silently running
+        # detection on file open even though the loaded file's own
+        # meter is right there and correct -- switched to default OFF
+        # (user opt-in) so the override field (which already correctly
+        # shows the file's own time signature below) is what's used
+        # unless the user deliberately asks for detection. Also renamed
+        # per request: "Auto-detect meter" -> "Time-Sig-auto-detect".
+        detect_ts_var = tk.BooleanVar(value=False)
+        _tt(_row(pfrm, "Time-Sig-auto-detect:", lambda p: tk.Checkbutton(
+            p, variable=detect_ts_var, bg=BG, fg=FG,
+            selectcolor="#21262d", activebackground=BG), 2),
+            "Guesses the time signature from accent patterns in the bass "
+            "line. If the piece is a well-known meter, verify the detected "
+            "result below before running Preview — uncheck to set it "
+            "manually if detection looks wrong.")
+
+        # Time signature override row (only active when detect_ts=False)
+        _ts_num_var = tk.IntVar(value=self.song.time_sig_num)
+        _ts_den_var = tk.IntVar(value=self.song.time_sig_den)
+        ts_row_r = tk.Frame(pfrm, bg=BG)
+        tk.Label(pfrm, text="Time-Sig override:", bg=BG, fg=FG,
+                 font=("TkDefaultFont", 10), anchor="w",
+                 width=22).grid(row=3, column=0, sticky="w", pady=3)
+        ts_row_r.grid(row=3, column=1, sticky="w", pady=3)
+        ts_num_spin = _tt(tk.Spinbox(ts_row_r, from_=1, to=16, textvariable=_ts_num_var,
+                                 width=3, bg="#21262d", fg=FG,
+                                 buttonbackground="#30363d"),
+            "Time signature numerator (beats per measure). Only used when "
+            "Time-Sig-auto-detect is unchecked.")
+        ts_num_spin.pack(side=tk.LEFT)
+        tk.Label(ts_row_r, text="/", bg=BG, fg=FG).pack(side=tk.LEFT)
+        ts_den_spin = tk.OptionMenu(ts_row_r, _ts_den_var, 1, 2, 4, 8, 16)
+        ts_den_spin.configure(bg="#21262d", fg=FG, relief=tk.FLAT,
+                              highlightthickness=0)
+        ts_den_spin["menu"].configure(bg="#21262d", fg=FG)
+        ts_den_spin.pack(side=tk.LEFT, padx=(2, 0))
+
+        def _update_ts_state(*_):
+            st = "disabled" if detect_ts_var.get() else "normal"
+            ts_num_spin.config(state=st)
+            ts_den_spin.config(state=st)
+        detect_ts_var.trace_add("write", _update_ts_state)
+        _update_ts_state()
+
+        # Prominent detected-meter display (v22k) ─────────────────────────
+        # Shows the result of auto-detection BEFORE Preview is clicked,
+        # so the user can override it without having to run Preview first.
+        detected_meter_var = tk.StringVar(value="")
+        detected_meter_lbl = tk.Label(
+            pfrm, textvariable=detected_meter_var,
+            bg=BG, fg="#e3b341",   # amber — informational, not an error
+            font=("TkDefaultFont", 9, "italic"), anchor="w", wraplength=340)
+        detected_meter_lbl.grid(row=4, column=0, columnspan=2,
+                                sticky="w", padx=4, pady=(0, 4))
+
+        def _refresh_detected_meter(*_):
+            """Run detection immediately when Auto-detect is checked."""
+            if not detect_ts_var.get():
+                detected_meter_var.set("")
+                return
+            try:
+                n, d, conf, note = self.song.detect_time_signature()
+                # v22ze-41 fix: this used to pre-populate the override
+                # spinboxes with the detected value UNCONDITIONALLY, same
+                # bug as the core rationalize logic (see v22ze-40) but in
+                # a second, parallel place -- so even with that fix,
+                # opening this dialog on already-rationalized data (where
+                # the flattened dynamics make detection unreliable) still
+                # silently overwrote the override fields with a weak,
+                # often-wrong guess like "2/4", which is what you'd see
+                # sitting in the field even before touching Preview.
+                MIN_TIMESIG_CONFIDENCE = 0.3
+                if conf < MIN_TIMESIG_CONFIDENCE:
+                    detected_meter_var.set(
+                        f"Auto-detect confidence too low ({conf:.0%}) to trust "
+                        f"— keeping existing {self.song.time_sig_num}/"
+                        f"{self.song.time_sig_den}. {note}")
+                    _ts_num_var.set(self.song.time_sig_num)
+                    _ts_den_var.set(self.song.time_sig_den)
+                else:
+                    detected_meter_var.set(
+                        f"Auto-detected: {n}/{d}  (confidence {conf:.0%})  "
+                        f"— uncheck to override")
+                    # Pre-populate override spinboxes with detected values so
+                    # unchecking gives the user a sensible starting point
+                    _ts_num_var.set(n)
+                    _ts_den_var.set(d)
+            except Exception as exc:
+                detected_meter_var.set(f"Detection error: {exc}")
+
+        detect_ts_var.trace_add("write", _refresh_detected_meter)
+        # Run immediately on dialog open
+        dlg.after(100, _refresh_detected_meter)
+
+        # Fingerprint of the meter used in the last Preview call (v22k).
+        # Accept uses this to detect if the meter changed since Preview
+        # and needs to re-run rationalize before baking.
+        _last_preview_meter = [None]   # mutable cell: [None | (num, den)]
+
+        # Expose references so _apply_global_timesig can push values in
+        # (v22k: Score Setup → Rationalize dialog synchronisation)
+        dlg._detect_ts_var  = detect_ts_var
+        dlg._ts_num_var     = _ts_num_var
+        dlg._ts_den_var     = _ts_den_var
+        dlg._refresh_detected_meter = _refresh_detected_meter
+
+        # ── Preserve existing hand tracks (v22t) ────────────────────────────
+        # Detected automatically: if the file already has exactly two
+        # note-bearing tracks (e.g. "Piano right" / "Piano left"), offer to
+        # skip the DP hand-separation re-derivation entirely and trust the
+        # file's own track assignment.  Re-running DP on already-correct
+        # data can reassign individual notes in fast interleaved passages
+        # where the file's ground truth and the DP's heuristics disagree —
+        # this was reported as "the rationalized version sounds nothing
+        # like the raw" on a well-prepared two-track file.
+        _hand_info = self.song.detect_separated_hands()
+        preserve_hands_var = tk.BooleanVar(value=_hand_info['separated'])
+        ph_row = tk.Frame(pfrm, bg=BG)
+        ph_row.grid(row=5, column=0, columnspan=2, sticky="w", pady=(4, 0))
+        ph_check = _tt(tk.Checkbutton(
+            ph_row, variable=preserve_hands_var, bg=BG, fg=FG,
+            selectcolor="#21262d", activebackground=BG,
+            state=("normal" if _hand_info['separated'] else "disabled")),
+            "When the file already has exactly two note-bearing tracks "
+            "(e.g. a piano piece already split into right-hand and "
+            "left-hand parts), keep that original split instead of "
+            "re-deriving it. Re-deriving can reassign individual notes in "
+            "fast passages where hands interleave, even when the file's "
+            "own separation was already correct.")
+        ph_check.pack(side=tk.LEFT)
+        if _hand_info['separated']:
+            ph_label_text = (
+                f"Preserve existing hand tracks  "
+                f"(detected: RH={_hand_info['rh_notes']} notes, "
+                f"LH={_hand_info['lh_notes']} notes)")
+            ph_fg = "#3fb950"
+        else:
+            ph_label_text = ("Preserve existing hand tracks  "
+                             "(not available — file has more or fewer than "
+                             "2 note-bearing tracks)")
+            ph_fg = MUTED
+        tk.Label(ph_row, text=ph_label_text, bg=BG, fg=ph_fg,
+                 font=("TkDefaultFont", 9)).pack(side=tk.LEFT, padx=4)
+
+        # Quantize strength
+        q_str_var = tk.IntVar(value=85)
+        _tt(_row(pfrm, "Quantize strength (%):", lambda p: tk.Spinbox(
+            p, from_=0, to=100, textvariable=q_str_var, width=5,
+            bg="#21262d", fg=FG, buttonbackground="#30363d"), 6),
+            "How firmly note onsets snap to the grid. 100% = hard snap "
+            "(mechanical); 0% = no snapping (keeps all rubato/timing "
+            "exactly as played). 85% is a good default for a human "
+            "performance.")
+
+        # Quantize grid
+        q_div_var = tk.StringVar(value="8th")
+        grid_opts = {"8th": 8, "16th": 16, "Quarter": 4, "32nd": 32}
+        _tt(_row(pfrm, "Quantize grid:", lambda p: tk.OptionMenu(
+            p, q_div_var, *grid_opts.keys()), 7),
+            "The finest note value onsets can snap to. Choose 16th for "
+            "pieces with fast ornamental notes; Quarter for simple slow "
+            "pieces; 8th is the common default.")
+
+        # Rest threshold
+        rest_var = tk.StringVar(value="16th")
+        # v22ze-68 fix: this used to be a hardcoded {30, 60, 120}, silently
+        # assuming ticks_per_beat=480. For a file at a different tpb (the
+        # user's own file uses 960 -- twice that), these values were HALF
+        # of a real 32nd/16th/8th note's actual duration, so the rest-
+        # removal threshold was roughly one note-value finer than its own
+        # label promised. A genuine 16th-note-long rest could easily be
+        # LONGER than what "16th" here actually cleared, so rests exactly
+        # the size the user asked to remove often weren't caught at all --
+        # matching a direct report of 1/8 and 1/16 rests surviving cleanup.
+        # Scale with the song's own tpb, the same way every other note-
+        # value-to-ticks conversion in this app already does.
+        _tpb_r = self.song.ticks_per_beat
+        rest_opts = {"Off": 0, "32nd": _tpb_r // 8,
+                     "16th": _tpb_r // 4, "8th": _tpb_r // 2}
+        _tt(_row(pfrm, "Remove rests shorter than:", lambda p: tk.OptionMenu(
+            p, rest_var, *rest_opts.keys()), 8),
+            "Gaps between notes shorter than this are merged away as "
+            "performance noise rather than notated as real rests. "
+            "'Off' preserves every gap exactly as played.")
+
+        # Hand span
+        span_var = tk.IntVar(value=14)
+        _tt(_row(pfrm, "Max hand span (semitones):", lambda p: tk.Spinbox(
+            p, from_=10, to=18, textvariable=span_var, width=4,
+            bg="#21262d", fg=FG, buttonbackground="#30363d"), 9),
+            "The widest interval one hand is assumed able to comfortably "
+            "play. Notes wider than this within one hand are penalised "
+            "during hand assignment. 14 semitones (a tenth) is a typical "
+            "adult hand span.")
+
+        # Arpeggio window (0 = auto-compute from song tempo)
+        arp_var = tk.IntVar(value=0)
+        _tt(_row(pfrm, "Arpeggio window (0=auto):", lambda p: tk.Spinbox(
+            p, from_=0, to=200, textvariable=arp_var, width=5,
+            bg="#21262d", fg=FG, buttonbackground="#30363d"), 10),
+            "Notes within this many ticks of each other are treated as a "
+            "rolled chord/arpeggio rather than sequential notes. 0 lets "
+            "the app compute a sensible value from the detected tempo.")
+
+        # ── Measure range ────────────────────────────────────────────────────
+        rfrm = tk.LabelFrame(content, text=" Measure Range ", bg=BG, fg=FG,
+                             font=("TkDefaultFont", 9), padx=14, pady=8)
+        rfrm.pack(fill=tk.X, padx=16, pady=4)
+
+        range_all = tk.BooleanVar(value=True)
+        rng_from  = tk.IntVar(value=1)
+        rng_to    = tk.IntVar(value=total_measures)
+
+        tk.Checkbutton(rfrm, text="Whole piece", variable=range_all,
+                       bg=BG, fg=FG, selectcolor="#21262d",
+                       activebackground=BG).grid(row=0, column=0, columnspan=4,
+                                                 sticky="w", pady=3)
+        tk.Label(rfrm, text="From measure:", bg=BG, fg=FG,
+                 font=("TkDefaultFont", 10)).grid(row=1, column=0, sticky="w", pady=3)
+        from_spin = tk.Spinbox(rfrm, from_=1, to=total_measures,
+                               textvariable=rng_from, width=5,
+                               bg="#21262d", fg=FG, buttonbackground="#30363d")
+        from_spin.grid(row=1, column=1, padx=6, pady=3)
+        tk.Label(rfrm, text="To:", bg=BG, fg=FG).grid(row=1, column=2, pady=3)
+        to_spin = tk.Spinbox(rfrm, from_=1, to=total_measures,
+                             textvariable=rng_to, width=5,
+                             bg="#21262d", fg=FG, buttonbackground="#30363d")
+        to_spin.grid(row=1, column=3, padx=6, pady=3)
+
+        def _update_range_state(*_):
+            s = "disabled" if range_all.get() else "normal"
+            from_spin.config(state=s); to_spin.config(state=s)
+        range_all.trace_add("write", _update_range_state)
+        _update_range_state()
+
+        # ── Result message ───────────────────────────────────────────────────
+        result_var = tk.StringVar(value="Press Preview to rationalize.")
+        tk.Label(content, textvariable=result_var, bg=BG, fg=WARN,
+                 font=("TkDefaultFont", 9), justify=tk.LEFT,
+                 wraplength=340).pack(padx=16, pady=6)
+
+        # ── Buttons ──────────────────────────────────────────────────────────
+        bfrm = tk.Frame(content, bg=BG); bfrm.pack(pady=(4, 16))
+        bs   = dict(relief=tk.FLAT, padx=12, pady=6,
+                    font=("TkDefaultFont", 10), cursor="hand2")
+
+        def _preview():
+            import copy as _copy
+            src = self._original_song if self._original_song else self.song
+            params = {
+                'arpeggio_window':   (arp_var.get() or None),  # 0 → None → auto
+                'quantize_div':      grid_opts[q_div_var.get()],
+                'quantize_strength': q_str_var.get() / 100.0,
+                'rest_threshold':    rest_opts[rest_var.get()],
+                'max_span':          span_var.get(),
+                'detect_tempo':      detect_var.get(),
+                'tempo_override':    None if detect_var.get() else tempo_var.get(),
+                'detect_timesig':    detect_ts_var.get(),
+                'timesig_override':  (None if detect_ts_var.get()
+                                      else (_ts_num_var.get(), _ts_den_var.get())),
+                'preserve_hands':    preserve_hands_var.get(),
+            }
+            m_range = None
+            if not range_all.get():
+                m_range = (rng_from.get(), rng_to.get())
+
+            try:
+                result_var.set("Running rationalization…")
+                dlg.update()
+                # Snapshot before-state for undo
+                _before_song = (self._original_song or self.song)
+                before = _copy.deepcopy(_before_song.tracks)
+                before_map = _copy.deepcopy(_before_song.rationalized_measure_map)
+                rationalized = src.rationalize(params=params,
+                                               measure_range=m_range)
+                # v22ze-47 fix: this used to show the RAW rationalize()
+                # result in Preview, while Accept separately ran
+                # bake_to_score() (duration-vocabulary snapping, tie
+                # merging, staccato detection) on top of it -- two
+                # independently-computed results, shown at different
+                # times, that could disagree. That's what caused "the
+                # result shown in Preview becomes something else when I
+                # Accept": Accept was never committing what Preview
+                # showed, it was computing something new. Bake HERE, so
+                # what Preview displays and plays IS byte-for-byte what
+                # Accept will commit -- no second, potentially-different
+                # computation.
+                rationalized = rationalized.bake_to_score()
+                after = _copy.deepcopy(rationalized.tracks)
+                after_map = _copy.deepcopy(rationalized.rationalized_measure_map)
+                # Push undo action
+                action = RationalizationAction(
+                    description="Rationalize",
+                    before_tracks=before,
+                    after_tracks=after,
+                    before_map=before_map,
+                    after_map=after_map)
+                self._push_undo(action)
+                self._set_rationalized_song(rationalized)
+                # Record which meter this Preview used (v22k)
+                _last_preview_meter[0] = (rationalized.time_sig_num,
+                                          rationalized.time_sig_den)
+                # Sync selection spinboxes for Play Selection
+                if m_range:
+                    self._sel_from.set(m_range[0])
+                    self._sel_to.set(m_range[1])
+                rh = rationalized.tracks[0] if rationalized.tracks else None
+                lh = rationalized.tracks[1] if len(rationalized.tracks) > 1 else None
+                rh_n = len(rh.notes) if rh else 0
+                lh_n = len(lh.notes) if lh else 0
+                _mode_note = ("  |  hands preserved from source"
+                              if preserve_hands_var.get() else "")
+                result_var.set(
+                    f"\u2713  Detected BPM: {rationalized.bpm}  |  "
+                    f"Meter: {rationalized.time_sig_num}/{rationalized.time_sig_den}  |  "
+                    f"RH: {rh_n} notes  LH: {lh_n} notes{_mode_note}\n"
+                    "Press \u25b6 Sel to audition, Accept to commit, Discard to revert."
+                )
+            except Exception as exc:
+                result_var.set(f"Error: {exc}")
+                import traceback; traceback.print_exc()
+
+        def _accept():
+            if not self._is_rationalized:
+                result_var.set("Nothing to accept — run Preview first.")
+                return
+            # v22k: if the meter has changed since Preview (user adjusted
+            # Score Setup or override spinboxes after seeing the result),
+            # re-run rationalize with the current meter before baking.
+            current_meter = (
+                (_ts_num_var.get(), _ts_den_var.get())
+                if not detect_ts_var.get()
+                else None   # auto-detect — no fixed override
+            )
+            preview_meter = _last_preview_meter[0]
+            if (current_meter is not None
+                    and preview_meter is not None
+                    and current_meter != preview_meter):
+                result_var.set(
+                    f"Meter changed to {current_meter[0]}/{current_meter[1]} "
+                    f"since Preview — re-running…")
+                dlg.update()
+                _preview()   # re-run with new meter
+                if not self._is_rationalized:
+                    return   # _preview hit an error
+
+            # v22ze-47 fix: this used to call self.song.bake_to_score()
+            # AGAIN here, on top of the already-baked result Preview
+            # already computed and displayed. Verified directly that
+            # bake_to_score() is NOT idempotent -- its staccato-detection
+            # logic can produce a DIFFERENT duration/articulation on a
+            # second pass over the same notes (confirmed: a baked eighth
+            # note re-baked came out inflated and staccato-flagged when
+            # it wasn't before). Re-baking here would have silently
+            # reintroduced the exact "Accept changes what Preview showed"
+            # bug this fix is for. self.song is already the fully baked
+            # result at this point (set by _preview()); just commit it.
+            self.song.modified = True
+            self._update_title()
+            result_var.set("✓  Accepted.  Playback and MIDI export match the score shown in Preview.")
+
+        def _discard():
+            self._set_rationalized_song(None)
+            result_var.set("Discarded.  Reverted to original.")
+
+        def _save_copy():
+            if not self._is_rationalized:
+                result_var.set("Nothing to save — run Preview first.")
+                return
+            import mido as _mido
+            path = filedialog.asksaveasfilename(
+                parent=dlg, title="Save Rationalized MIDI",
+                defaultextension=".mid",
+                filetypes=[("MIDI", "*.mid"), ("All", "*.*")])
+            if not path:
+                return
+            try:
+                self.song.to_mid(path)
+                result_var.set(f"✓  Saved: {os.path.basename(path)}")
+            except Exception as exc:
+                result_var.set(f"Save error: {exc}")
+
+        _tt(tk.Button(bfrm, text="Preview", bg="#1f6feb", fg="white",
+                  activebackground="#388bfd", command=_preview, **bs),
+            "Run the pipeline with the current settings and show/play the "
+            "result. Does not change your file yet.").pack(side=tk.LEFT, padx=4)
+        _tt(tk.Button(bfrm, text="Accept",  bg="#238636", fg="white",
+                  activebackground="#2ea043", command=_accept,  **bs),
+            "Commit the previewed result as your working score. "
+            "Requires Preview to have been run first.").pack(side=tk.LEFT, padx=4)
+        _tt(tk.Button(bfrm, text="Discard", bg="#21262d", fg=FG,
+                  activebackground="#30363d", command=_discard, **bs),
+            "Throw away the preview and go back to the original, "
+            "unrationalized song.").pack(side=tk.LEFT, padx=4)
+        _tt(tk.Button(bfrm, text="Save copy…", bg="#21262d", fg=MUTED,
+                  activebackground="#30363d", command=_save_copy, **bs),
+            "Save the previewed result as a new .mid file without "
+            "changing your currently open song.").pack(side=tk.LEFT, padx=4)
+        tk.Button(bfrm, text="Close",   bg="#21262d", fg=MUTED,
+                  activebackground="#30363d", command=dlg.destroy, **bs).pack(side=tk.LEFT, padx=4)
+
+        dlg.protocol("WM_DELETE_WINDOW", dlg.destroy)
+
+    def _apply_bpm(self):
+        self.song.bpm=self.bpm_var.get(); self.song.modified=True
+        self._update_title(); self._update_status()
+
+    # ── Track area ────────────────────────────────────────────────────────────
+    def _build_track_area(self):
+        # Vertical PanedWindow for three tiers — Score (dominant), Tracks,
+        # Mixer. PanedWindow gives drag-to-resize sashes, proportional
+        # defaults, and works correctly on any screen size. Previous grid +
+        # fixed-height + pack_propagate approach caused a ~120px gap (Mixer
+        # shell packing to bottom of its slot) and left Score with ~80px of
+        # canvas on a 720px screen.
+        container = tk.Frame(self.root, bg="#0d1117")
+        container.pack(fill=tk.BOTH, expand=True, padx=4, pady=4)
+
+        vpane = tk.PanedWindow(container, orient=tk.VERTICAL, bg="#2a2a3a",
+                               sashrelief=tk.FLAT, sashwidth=5,
+                               sashpad=1, showhandle=False)
+        vpane.pack(fill=tk.BOTH, expand=True)
+
+        # ── Score slot (top, dominant) ────────────────────────────────────────
+        self._score_dock_slot = tk.Frame(vpane, bg="#0d1117")
+        vpane.add(self._score_dock_slot, minsize=120, stretch="always")
+
+        # ── Tracks slot (middle, compact) ─────────────────────────────────────
+        self._tracks_dock_slot = tk.Frame(vpane, bg="#0d1117")
+        vpane.add(self._tracks_dock_slot, minsize=80, stretch="never")
+
+        # ── Mixer slot (bottom, compact) ──────────────────────────────────────
+        self._mixer_dock_slot = tk.Frame(vpane, bg="#0d1117")
+        vpane.add(self._mixer_dock_slot, minsize=80, stretch="never")
+
+        # Set initial pane sizes proportionally once the window is mapped.
+        # 55% Score / 20% Tracks / 25% Mixer — the sash can be dragged freely.
+        def _set_initial_sizes(event=None):
+            h = vpane.winfo_height()
+            if h < 50: return   # not yet laid out
+            vpane.paneconfigure(self._score_dock_slot, height=max(120, int(h * 0.55)))
+            vpane.paneconfigure(self._tracks_dock_slot, height=max(80,  int(h * 0.20)))
+            vpane.paneconfigure(self._mixer_dock_slot,  height=max(80,  int(h * 0.25)))
+            # Run once only
+            vpane.unbind("<Map>")
+        vpane.bind("<Map>", _set_initial_sizes)
+
+        # ── Score DockablePane ────────────────────────────────────────────────
+        def _score_factory(parent):
+            sv = ScoreView(parent, self)
+            self._score_view = sv
+            return sv
+
+        self._score_pane = DockablePane(
+            app=self, dock_parent=self._score_dock_slot,
+            content_factory=_score_factory,
+            title="🎼 Score", floated=False, min_w=1100, min_h=400)
+
+        # ── Tracks DockablePane ───────────────────────────────────────────────
+        self._tracks_pane = DockablePane(
+            app=self, dock_parent=self._tracks_dock_slot,
+            content_factory=lambda parent: TracksView(parent, self),
+            title="📋 Tracks", floated=False, min_w=700, min_h=200)
+
+        # ── Mixer DockablePane ────────────────────────────────────────────────
+        self._mixer_pane = DockablePane(
+            app=self, dock_parent=self._mixer_dock_slot,
+            content_factory=lambda parent: MixerView(parent, self),
+            title="🎚 Mixer", floated=False, min_w=900, min_h=200)
+
+    def _refresh_track_list(self):
+        # v22v: only show tracks with notes; generic "Track N" names are
+        # renumbered sequentially among visible tracks (see visible_tracks()
+        # docstring for why).  _track_list_map translates a Listbox row
+        # index back to the real self.song.tracks index — every consumer
+        # of _selected_track_idx() (delete/rename/mute/solo/record-arm)
+        # goes through that translation automatically, so none of them
+        # needed to change.
+        self.track_list.delete(0,tk.END)
+        visible = self.visible_tracks()
+        self._track_list_map = [orig_idx for orig_idx, tr, name in visible]
+        for orig_idx, tr, display_name in visible:
+            flags=("M" if tr.mute else " ")+("S" if tr.solo else " ")+("R" if orig_idx==self._rec_armed else " ")
+            self.track_list.insert(tk.END,f"[{flags}] {display_name:<14} Ch{tr.channel+1:>2}  {GM_INSTRUMENTS[tr.program][:12]}")
+        self._draw_overview()
+        if getattr(self, "_mixer_pane", None) is not None:
+            try: self._mixer_pane.refresh()
+            except Exception: pass
+        if self._score_view and self._score_view.winfo_exists():
+            self._score_view._score_dirty = True
+            if not self.transport.is_playing():
+                self._score_view._draw()
+
+    def _toggle_overview_mode(self):
+        self._overview_rolling=not self._overview_rolling
+        self._ov_mode_btn.configure(
+            text="↔ Rolling" if self._overview_rolling else "⊞ Minimap")
+        self._draw_overview()
+
+    def _overview_row_h(self,idx): return self._overview_row_heights.get(idx,40)
+    def _overview_y_of_row(self,idx):
+        return 2+sum(self._overview_row_h(i) for i in range(idx))
+    def _overview_total_h(self):
+        return 2+sum(self._overview_row_h(i) for i in range(len(self.song.tracks)))
+
+    def _overview_btn_press(self,event):
+        if not self.song.tracks: return
+        cy=self.overview.canvasy(event.y)
+        for i in range(len(self.song.tracks)):
+            y1=self._overview_y_of_row(i)+self._overview_row_h(i)
+            if y1-6<=cy<=y1+3:
+                self._overview_drag=(i,event.y_root,self._overview_row_h(i)); return
+
+    def _overview_drag_motion(self,event):
+        if self._overview_drag is None: return
+        idx,sy,sh=self._overview_drag
+        self._overview_row_heights[idx]=max(16,sh+event.y_root-sy)
+        self._draw_overview()
+
+    def _overview_btn_release(self,event): self._overview_drag=None
+
+    def _on_overview_configure(self, event=None):
+        """Debounced handler for the overview panel's <Configure> events.
+
+        v22ze-60 fix: this used to be bound directly with no debouncing
+        at all (unlike ScoreView's own <Configure> handler right next to
+        this code, which already has the v22ze-38 debounce fix). Dragging
+        to resize the MAIN window fires many rapid <Configure> events on
+        every child widget as the layout re-flows, and _draw_overview()
+        does a full, unthrottled redraw -- delete+recreate a line for
+        EVERY note in EVERY track -- on each one, with no debounce to
+        collapse a burst of resize events into a single repaint. For a
+        large multi-track piece, dragging a window edge could fire this
+        expensive O(total notes) redraw dozens of times per second,
+        completely independent of whether anything is playing -- which
+        matches a report of the whole system freezing during a plain
+        window resize, with no MIDI playback involved at all. Debouncing
+        this exactly like ScoreView's handler collapses a resize drag
+        into one redraw after the dragging actually stops.
+        """
+        job = getattr(self, '_overview_configure_job', None)
+        if job is not None:
+            try:
+                self.overview.after_cancel(job)
+            except Exception:
+                pass
+        self._overview_configure_job = self.overview.after(50, self._deferred_overview_redraw)
+
+    def _deferred_overview_redraw(self):
+        self._overview_configure_job = None
+        try:
+            if self.overview.winfo_exists():
+                self._draw_overview()
+        except Exception:
+            pass
+
+    def _draw_overview(self):
+        c=self.overview; c.delete("all")
+        if not self.song.tracks: return
+        W=c.winfo_width()
+        if W<10: return
+        total=max(self.song.total_ticks(),1)
+        cols=["#1f6feb","#388bfd","#58a6ff","#79c0ff","#56d364",
+              "#3fb950","#d29922","#f78166","#bc8cff","#79c0ff"]
+        cur_tick=self.transport.position_ticks
+        if self._overview_rolling:
+            tpm=self.song.ticks_per_measure(); win=tpm*4
+            t0=max(0,cur_tick-int(win*0.75)); t1=t0+win
+            def tx(t): return (t-t0)/win*W
+        else:
+            t0,t1=0,total
+            def tx(t): return (t/total)*W
+        tot_h=self._overview_total_h()
+        c.configure(scrollregion=(0,0,W,tot_h))
+        for i,tr in enumerate(self.song.tracks):
+            rh=self._overview_row_h(i); y=self._overview_y_of_row(i)
+            c.create_rectangle(0,y,W,y+rh-2,fill="#161b22",outline="")
+            c.create_rectangle(0,y+rh-3,W,y+rh-1,fill="#2d333b",outline="")
+            col=cols[i%len(cols)]
+            for note in tr.notes:
+                if note.tick>t1 or note.tick+note.duration<t0: continue
+                x1=tx(note.tick); x2=tx(note.tick+note.duration)
+                ny=y+(1-note.pitch/127)*(rh-6)+3
+                c.create_line(x1,ny,max(x1+2,x2),ny,fill=col,width=2)
+            c.create_text(4,y+rh/2,text=tr.name,fill="#8b949e",
+                          font=("TkDefaultFont",8),anchor="w")
+        cx=tx(cur_tick)
+        if 0<=cx<=W:
+            c.create_line(cx,0,cx,tot_h,fill="#ff3333",width=2,dash=(4,3),tags="ov_playhead")
+
+    def _overview_dbl_click(self,event):
+        if not self.song.tracks: return
+        H=self.overview.winfo_height(); n=len(self.song.tracks)
+        idx=min(int(event.y/H*n),n-1)
+        self.track_list.selection_clear(0,tk.END); self.track_list.selection_set(idx)
+        self._open_piano_roll()
+
+    def _track_ctx(self,event):
+        # v22ze-56 fix: was tk.Menu — see TkPopupMenu's docstring.
+        m=TkPopupMenu(self.root,tearoff=0)
+        m.add_command(label="Score View",command=self._open_score_view)
+        m.add_command(label="Piano Roll",command=self._open_piano_roll)
+        m.add_command(label="MIDI List",command=self._open_list_view)
+        m.add_separator()
+        m.add_command(label="Rename",command=self._rename_track)
+        m.add_command(label="Delete",command=self._del_track)
+        m.add_separator()
+        m.add_command(label="Mute/Unmute",command=self._toggle_mute)
+        m.add_command(label="Solo/Unsolo",command=self._toggle_solo)
+        m.add_command(label="Arm for Record", command=self._arm_record)
+        m.add_separator()
+        # Staff type — lets user change grand/single after initial choice
+        idx = self._selected_track_idx()
+        if idx is not None and idx < len(self.song.tracks):
+            tr   = self.song.tracks[idx]
+            mode = getattr(tr, "staff_mode", "auto")
+            cur  = {"grand": "Grand staff", "single": "Single staff",
+                    "auto":  "Auto (by program)"}.get(mode, mode)
+            m.add_command(
+                label=f"Staff type: {cur}  ▶ Change…",
+                command=lambda t=tr: (
+                    self._ask_staff_type(t),
+                    self._refresh_track_list(),
+                    self._score_view._draw() if self._score_view and
+                        self._score_view.winfo_exists() else None
+                ))
+        _popup_menu_safe(m, event.x_root, event.y_root)
+
+    # ── Status bar ────────────────────────────────────────────────────────────
+    def _build_status(self):
+        self.status_var=tk.StringVar()
+        self._ration_var=tk.StringVar(value="")
+        bar=tk.Frame(self.root,bg="#161b22"); bar.pack(fill=tk.X,side=tk.BOTTOM)
+        tk.Label(bar,textvariable=self.status_var,anchor="w",
+                 bg="#161b22",fg="#8b949e",font=("TkDefaultFont",9),padx=6,pady=3).pack(side=tk.LEFT,fill=tk.X,expand=True)
+        self._ration_lbl=tk.Label(bar,textvariable=self._ration_var,anchor="e",
+                 bg="#161b22",fg="#d29922",font=("TkDefaultFont",9,"bold"),padx=8,pady=3)
+        self._ration_lbl.pack(side=tk.RIGHT)
+
+    def _update_status(self):
+        s=self.song; bars=s.total_ticks()/s.ticks_per_measure()
+        out="MIDI OUT OK" if midi_io.MIDI_OUT_OK else "No MIDI out — run: timidity -B8,8 -Os -iA &"
+        inp=" | MIDI IN OK" if midi_io.MIDI_IN_OK else ""
+        self.status_var.set(f"BPM:{s.bpm}  {s.time_sig_num}/{s.time_sig_den}  "
+                            f"Tracks:{len(s.tracks)}  Bars:{bars:.0f}  TPB:{s.ticks_per_beat}  {out}{inp}")
+        # Rationalization indicator
+        if hasattr(self,'_ration_var'):
+            if self._is_rationalized:
+                u=len(self._undo_stack); r=len(self._redo_stack)
+                self._ration_var.set(f"🎵 Rationalized  ↩{u}  ↪{r}")
+            else:
+                self._ration_var.set("")
+
+    def _update_title(self):
+        nm  = os.path.basename(self.song.filename) if self.song.filename else "Untitled"
+        mod = "*" if self.song.modified else ""
+        self.root.title(f"{APP_TITLE}  —  {nm}{mod}")
+
+    # ── File ──────────────────────────────────────────────────────────────────
+    def _confirm_discard(self):
+        if not self.song.modified: return True
+        ans=messagebox.askyesnocancel("Unsaved Changes","Unsaved changes.\n\nSave before closing?",parent=self.root)
+        if ans is None: return False
+        if ans is True: self._save(); return not self.song.modified
+        return True
+
+    def _close_current(self):
+        self.transport.stop()
+        for w in list(self._open_windows):
+            try:
+                if w.winfo_exists(): w.destroy()
+            except: pass
+        self._open_windows.clear()
+        # v22ze-62 fix: the two non-modal "work windows" -- Rationalize
+        # Score and Score Setup -- are tracked in their own dedicated
+        # attributes (singleton pattern: only one instance of each is
+        # ever allowed open), not in self._open_windows, so the loop
+        # above never touched them. Both hold a live reference back to
+        # whatever song was open when they were created (rationalize
+        # params, preview/accept state, measure-detail panels all
+        # implicitly point at that song), so leaving either open across
+        # a file close/switch means acting on it afterward is acting on
+        # stale data tied to a song that's no longer current -- reported
+        # directly as the Rationalize Score window staying open through
+        # two subsequent file loads. A fresh file should mean a fresh
+        # set of work windows, same as it already means a fresh
+        # undo/redo stack (see below).
+        for _dlg_attr in ('_rationalize_dlg', '_score_setup_dlg'):
+            _dlg = getattr(self, _dlg_attr, None)
+            if _dlg is not None:
+                try:
+                    if _dlg.winfo_exists():
+                        _dlg.destroy()
+                except Exception:
+                    pass
+                setattr(self, _dlg_attr, None)
+        self.song=Song(); self.transport.song=self.song; self._rec_armed=0
+        # v22ze-46 fix (presentation request 3): switching to a new/
+        # different file left several pieces of state carried over from
+        # the PREVIOUS file -- most importantly the undo/redo stacks,
+        # which could let a stale RationalizationAction from the old
+        # file get applied against the new one's completely different
+        # note data. Also reset the rationalize preview/accept tracking
+        # state, which is specific to whatever file was being worked on.
+        self._undo_stack = []
+        self._redo_stack = []
+        self._original_song = None
+        self._accepted_measures = set()
+        self.play_btn.configure(text="▶  Play")
+        self.rec_btn.configure(bg="#0f3320",fg="#3fb950")
+        self._pos_var.set("Meas 1  Beat 1")
+        self._refresh_track_list(); self._update_title(); self._update_status()
+        # v22ze: closing a file without opening a new one previously left
+        # the score view showing stale content from whatever was open
+        # before -- same underlying cause as the open-file cursor/scroll
+        # bug above (nothing tells the ScoreView pane to redraw on close
+        # at all). Explicitly redraw against the new empty Song so it
+        # falls back to the placeholder staves instead of showing the
+        # old score.
+        try:
+            if self._score_view and self._score_view.winfo_exists():
+                self._score_view._draw(cursor_tick=0)
+        except Exception as _e:
+            # v22ze-61 fix: see the matching note in _load_file — a bare
+            # except here could hide a partial/inconsistent redraw and
+            # leave stale geometry from the closed song behind.
+            import sys as _sys
+            print(f"[close] WARNING: score view redraw after close failed: {_e!r}",
+                  file=_sys.stderr)
+
+    def _new(self):
+        if not self._confirm_discard(): return
+        self._close_current()
+
+    def _close(self):
+        if not self._confirm_discard(): return
+        self._close_current()
+
+    def _open(self):
+        if not self._confirm_discard(): return
+        path=filedialog.askopenfilename(parent=self.root,title="Open MIDI",
+            filetypes=[("MIDI","*.mid *.midi *.MID"),("All","*.*")])
+        if path: self._close_current(); self._load_file(path)
+
+    def _load_file(self,path):
+        try:
+            self.song=Song.from_mid(path); self.transport.song=self.song
+            # v22ze-61 fix: reassigning transport.song did NOT reset
+            # position_ticks/position_sec — a freshly loaded file inherited
+            # whatever playback position was left over from the PREVIOUS
+            # song (e.g. if the user stopped mid-piece, or closed a file
+            # without returning to the start). Best case this just started
+            # the new piece partway through unexpectedly; worst case the
+            # leftover position was beyond the new (possibly shorter)
+            # song's actual length entirely, which is also what let the
+            # playback cursor end up reporting tick values past what the
+            # new song's own total_ticks() covers -- exactly the "cursor
+            # runs off the edge of the score, audio and display disagree"
+            # symptom. A newly loaded file should always start at 0.
+            self.transport.position_ticks = 0
+            self.transport.position_sec   = 0.0
+            total_notes = sum(len(t.notes) for t in self.song.tracks)
+            print(f"[load] Loaded {len(self.song.tracks)} tracks, {total_notes} notes")
+            print("[load] Original MIDI timing preserved (no auto-quantize)")
+            self.bpm_var.set(self.song.bpm); self._refresh_track_list()
+            self._update_title(); self._update_status()
+            # Redraw score if open
+            try:
+                if self._score_view and self._score_view.winfo_exists():
+                    # v22ze fix: _draw() with no cursor_tick draws NO
+                    # playhead and never calls _scroll_to() -- both only
+                    # happen inside `if cursor_tick is not None`. Leaving
+                    # this as a bare _draw() meant opening a new file left
+                    # the canvas scrolled to wherever the PREVIOUS file
+                    # had been (or fully unscrolled with no cursor line
+                    # at all), which looked like "the cursor got lost and
+                    # there's no scrolling" when switching between scores.
+                    # Passing 0 explicitly resets both to the start of
+                    # the newly loaded song.
+                    self._score_view._draw(cursor_tick=0)
+                    # v22ze-65 fix: on the VERY FIRST file load of a fresh
+                    # program session, the ScoreView's canvas was created
+                    # during MidisoftStudio.__init__ -- before root.mainloop()
+                    # ever started, meaning before the window manager has
+                    # actually mapped the window. winfo_width()/height() can
+                    # still report placeholder values at that point (Tk only
+                    # settles real widget geometry once the window is truly
+                    # mapped, which happens once the event loop is running).
+                    # If the very first draw above computed cursor placement
+                    # against those not-yet-real dimensions, the cursor could
+                    # end up positioned somewhere never actually rendered --
+                    # invisible, not merely "at 0". Every SUBSEQUENT file
+                    # load in the same session doesn't have this problem,
+                    # since the window has been mapped and settled for a
+                    # while by then, matching the reported "only happens
+                    # once, on first startup" pattern exactly. A cheap,
+                    # low-risk self-heal: redraw again shortly after, once
+                    # geometry has definitely settled either way.
+                    self.root.after(150, lambda: (
+                        self._score_view._draw(cursor_tick=self.transport.position_ticks)
+                        if self._score_view and self._score_view.winfo_exists() else None))
+            except Exception as _e:
+                # v22ze-61 fix: this used to be a bare `except: pass` --
+                # if the redraw threw partway through (e.g. one internal
+                # cached value updated before the exception, another not),
+                # the failure was completely invisible and could leave the
+                # score view in a mixed, partially-stale state referencing
+                # dimensions from the PREVIOUS song. Printing at least
+                # means a failure here shows up instead of silently
+                # explaining a later "cursor runs off the score" report.
+                import sys as _sys
+                print(f"[load] WARNING: score view redraw after load failed: {_e!r}",
+                      file=_sys.stderr)
+            mt=getattr(self.song,"midi_type","?"); n=len(self.song.tracks)
+            self.root.title(f"{self.APP_NAME} — {os.path.basename(path)}  [Type {mt}, {n} tracks]")
+            self.root.after(4000,self._update_title)
+        except Exception as e: messagebox.showerror("Error",str(e),parent=self.root)
+
+    def _save(self):
+        if not self.song.filename: self._save_as()
+        else:
+            try: self.song.to_mid(self.song.filename); self._update_title()
+            except Exception as e: messagebox.showerror("Save Error",str(e),parent=self.root)
+
+    def _save_as(self):
+        path=filedialog.asksaveasfilename(parent=self.root,title="Save MIDI",
+            defaultextension=".mid",filetypes=[("MIDI","*.mid"),("All","*.*")])
+        if path:
+            try: self.song.to_mid(path); self._update_title()
+            except Exception as e: messagebox.showerror("Error",str(e),parent=self.root)
+
+    def _check_python_ly(self):
+        """Return the ly module, or None if python-ly isn't installed.
+        Shows a friendly 'not found' dialog if missing, matching
+        _check_lilypond's pattern.
+        """
+        try:
+            import ly.musicxml
+            return ly.musicxml
+        except ImportError:
+            pass
+        dlg = tk.Toplevel(self.root)
+        dlg.title("python-ly Not Found")
+        dlg.resizable(False, False)
+        dlg.configure(bg="#0d1117")
+        dlg.grab_set()
+        dlg.attributes("-topmost", True)
+        BG = "#0d1117"; FG = "#f0f6fc"; MUTED = "#8b949e"; WARN = "#d29922"
+        tk.Label(dlg, text="⚠️  python-ly Not Found",
+                 bg=BG, fg=WARN, font=("TkDefaultFont", 13, "bold")).pack(pady=(22, 8))
+        tk.Label(dlg,
+                 text="Saving as .musicxml requires the python-ly package,\n"
+                      "which was not found on your system. Install it with:",
+                 bg=BG, fg=FG, font=("TkDefaultFont", 10),
+                 justify=tk.CENTER).pack(padx=28, pady=(0, 8))
+        tk.Label(dlg, text="  pip install python-ly",
+                 bg="#161b22", fg=MUTED, font=("TkFixedFont", 9),
+                 justify=tk.LEFT, padx=12, pady=8).pack(fill=tk.X, padx=28, pady=(0, 14))
+        tk.Button(dlg, text="OK", relief=tk.FLAT, padx=14, pady=6,
+                  font=("TkDefaultFont", 10), cursor="hand2",
+                  bg="#21262d", fg=FG, activebackground="#30363d",
+                  command=dlg.destroy).pack(pady=(0, 18))
+        self.root.wait_window(dlg)
+        return None
+
+    def _export_musicxml(self):
+        """Save the current score as standard MusicXML, readable directly
+        by MuseScore, Sibelius, Finale, and most other notation software.
+
+        v22ze-69: routes through python-ly's musicxml writer, fed our own
+        LilyPond text (the same to_ly() this app already uses for PDF
+        export/printing) -- NOT a separate, from-scratch exporter. This
+        was tested directly against real, verified failure before being
+        used here: python-ly's parser does not implement the `\\absolute
+        {...}` block our to_ly() wraps every part in (LilyPond itself
+        treats bare pitches as absolute by default -- the wrapper is
+        this app's own explicit-safety choice, not something LilyPond
+        requires), and silently replaced un-parseable measures with
+        rests instead of erroring -- real data loss, confirmed with a
+        direct test before this feature existed. The fix is a narrow,
+        LOCAL text substitution applied ONLY to the temporary copy fed
+        to python-ly here (stripping "\\absolute {" -> "{"); the actual
+        .ly file to_ly() writes elsewhere (used for PDF/printing) is
+        completely untouched by this, so that path's already-verified
+        behavior can't be affected by this change. Verified after the
+        fix: real two-handed content with sharps, correct octaves, and
+        correct durations all survive the round trip correctly.
+        """
+        ly_mod = self._check_python_ly()
+        if ly_mod is None:
+            return
+        path = filedialog.asksaveasfilename(
+            parent=self.root,
+            title="Save as MusicXML",
+            defaultextension=".musicxml",
+            filetypes=[("MusicXML", "*.musicxml *.xml"), ("All", "*.*")])
+        if not path:
+            return
+        import tempfile
+        try:
+            with tempfile.TemporaryDirectory() as tmpdir:
+                ly_path = os.path.join(tmpdir, "score.ly")
+                self.song.to_ly(ly_path)   # same generator PDF export uses
+                with open(ly_path, encoding="utf-8") as f:
+                    ly_text = f.read()
+            # Local-only substitutions -- see docstrings. Only affect this
+            # in-memory copy fed to python-ly, never the file to_ly() wrote.
+            ly_text_for_xml = ly_text.replace("\\absolute {", "{")
+            ly_text_for_xml = _strip_ly_block(ly_text_for_xml, "layout")
+            writer = ly_mod.writer()
+            writer.parse_text(ly_text_for_xml)
+            xml_doc = writer.musicxml()
+            # v22ze-70 fix: python-ly's writer emits <score-partwise
+            # version="3.0"> but pairs it with a DOCTYPE declaring the
+            # MusicXML 2.0 Partwise DTD -- a real internal mismatch (the
+            # DOCTYPE says one schema, the root element claims another),
+            # which is exactly the kind of inconsistency a strict
+            # validating reader flags a file as invalid/corrupted over.
+            # Correct the version attribute to match what the DOCTYPE
+            # this library actually emits declares, rather than the
+            # riskier alternative of trying to upgrade the DOCTYPE to a
+            # newer DTD this library's output isn't verified to satisfy.
+            xml_doc.tree.getroot().set("version", "2.0")
+            _backfill_musicxml_staff_tags(xml_doc)
+            xml_doc.write(path)
+        except Exception as e:
+            messagebox.showerror("MusicXML Export Failed", str(e), parent=self.root)
+            return
+        messagebox.showinfo(
+            "MusicXML Saved",
+            f"Saved to:\n{path}\n\n"
+            "This is a standard .musicxml file — open it directly in "
+            "MuseScore, Sibelius, Finale, or most other notation software.",
+            parent=self.root)
+
+    def _open_in_musescore(self):
+        """Save a .mid file and instruct the user to open it in MuseScore.
+        MuseScore's own MIDI importer produces better notation than we can
+        generate directly, so we hand off rather than write .mscx ourselves.
+        Kept as a secondary option alongside the direct .musicxml export
+        (see _export_musicxml), since it's a genuinely different path --
+        MuseScore's own MIDI import heuristics, rather than this app's own
+        rationalized notation round-tripped through MusicXML.
+        """
+        import os, subprocess
+        path = filedialog.asksaveasfilename(
+            parent=self.root,
+            title="Save MIDI for MuseScore",
+            defaultextension=".mid",
+            filetypes=[("MIDI", "*.mid *.midi"), ("All", "*.*")])
+        if not path:
+            return
+        try:
+            self.song.to_mid(path)
+        except Exception as e:
+            messagebox.showerror("Export failed", str(e), parent=self.root)
+            return
+
+        # Try to open MuseScore automatically; fall back to instructions.
+        musescore_bins = ["mscore4", "musescore4", "mscore", "musescore", "MuseScore4"]
+        launched = False
+        for bin_name in musescore_bins:
+            try:
+                subprocess.Popen([bin_name, path])
+                launched = True
+                break
+            except FileNotFoundError:
+                continue
+
+        if launched:
+            messagebox.showinfo(
+                "Opening in MuseScore",
+                f"MuseScore is opening:\n{path}\n\n"
+                "Use File → Export in MuseScore to save as .mscz if needed.",
+                parent=self.root)
+        else:
+            messagebox.showinfo(
+                "Open in MuseScore",
+                f"MIDI saved to:\n{path}\n\n"
+                "To open in MuseScore:\n"
+                "  1. Launch MuseScore\n"
+                "  2. File → Open → select the .mid file above\n"
+                "  3. MuseScore will import and display the notation\n"
+                "  4. File → Export to save as .mscz if needed\n\n"
+                "(MuseScore was not found on PATH — you may need to open it manually.)",
+                parent=self.root)
+
+    def _check_lilypond(self):
+        """Return the lilypond executable path, or None if not found.
+        Shows the 'not found' dialog if missing.
+        """
+        import shutil, webbrowser
+        lp = shutil.which("lilypond")
+        if lp:
+            return lp
+        # Not found — show friendly dialog
+        dlg = tk.Toplevel(self.root)
+        dlg.title("LilyPond Not Found")
+        dlg.resizable(False, False)
+        dlg.configure(bg="#0d1117")
+        dlg.grab_set()
+        dlg.attributes("-topmost", True)
+        BG = "#0d1117"; FG = "#f0f6fc"; MUTED = "#8b949e"; WARN = "#d29922"
+        tk.Label(dlg, text="⚠️  LilyPond Not Found",
+                 bg=BG, fg=WARN, font=("TkDefaultFont", 13, "bold")).pack(pady=(22, 8))
+        tk.Label(dlg,
+                 text="Printing and PDF export require LilyPond, a free\n"
+                      "music engraving program, which was not found on\n"
+                      "your system.  Would you like to download it?",
+                 bg=BG, fg=FG, font=("TkDefaultFont", 10),
+                 justify=tk.CENTER).pack(padx=28, pady=(0, 8))
+        tk.Label(dlg,
+                 text="  Linux  : pacman -S lilypond  /  apt install lilypond\n"
+                      "  Windows: installer at lilypond.org\n"
+                      "  macOS  : brew install lilypond",
+                 bg="#161b22", fg=MUTED, font=("TkFixedFont", 9),
+                 justify=tk.LEFT, padx=12, pady=8).pack(fill=tk.X, padx=28, pady=(0, 14))
+        btn_frame = tk.Frame(dlg, bg=BG); btn_frame.pack(pady=(0, 18))
+        bs = dict(relief=tk.FLAT, padx=14, pady=6,
+                  font=("TkDefaultFont", 10), cursor="hand2")
+        tk.Button(btn_frame, text="Open LilyPond Website",
+                  bg="#238636", fg="white", activebackground="#2ea043",
+                  command=lambda: [webbrowser.open("https://lilypond.org"), dlg.destroy()],
+                  **bs).pack(side=tk.LEFT, padx=6)
+        tk.Button(btn_frame, text="I'll Install It Myself",
+                  bg="#21262d", fg=FG, activebackground="#30363d",
+                  command=dlg.destroy, **bs).pack(side=tk.LEFT, padx=6)
+        self.root.wait_window(dlg)
+        return None
+
+    def _ly_options_dialog(self):
+        """Show export options dialog.  Returns (show_bar_numbers, staff_size)
+        or None if the user cancelled.
+        """
+        dlg = tk.Toplevel(self.root)
+        dlg.title("LilyPond Export Options")
+        dlg.resizable(False, False)
+        dlg.configure(bg="#0d1117")
+        dlg.grab_set()
+        BG = "#0d1117"; FG = "#f0f6fc"; MUTED = "#8b949e"
+
+        tk.Label(dlg, text="🎼  LilyPond Export Options",
+                 bg=BG, fg="#58a6ff",
+                 font=("TkDefaultFont", 12, "bold")).pack(pady=(18, 12))
+
+        frm = tk.Frame(dlg, bg=BG); frm.pack(padx=28, pady=4, anchor="w")
+
+        # Bar numbers toggle
+        bar_var = tk.BooleanVar(value=True)
+        tk.Checkbutton(frm, text="Show bar numbers (at each system start)",
+                       variable=bar_var,
+                       bg=BG, fg=FG, selectcolor="#21262d",
+                       activebackground=BG, activeforeground=FG,
+                       font=("TkDefaultFont", 10)).pack(anchor="w", pady=4)
+
+        # Staff size
+        sfrm = tk.Frame(frm, bg=BG); sfrm.pack(anchor="w", pady=4)
+        tk.Label(sfrm, text="Staff size (points):  ", bg=BG, fg=FG,
+                 font=("TkDefaultFont", 10)).pack(side=tk.LEFT)
+        size_var = tk.IntVar(value=16)
+        size_spin = tk.Spinbox(sfrm, from_=12, to=20, increment=1,
+                               textvariable=size_var, width=4,
+                               bg="#21262d", fg=FG, buttonbackground="#30363d",
+                               font=("TkDefaultFont", 10))
+        size_spin.pack(side=tk.LEFT)
+        tk.Label(sfrm,
+                 text="  (16 = compact, 20 = LilyPond default)",
+                 bg=BG, fg=MUTED, font=("TkDefaultFont", 9)).pack(side=tk.LEFT)
+
+        tk.Frame(dlg, bg="#21262d", height=1).pack(fill=tk.X, padx=20, pady=12)
+
+        result = [None]
+        def _ok():
+            result[0] = (bar_var.get(), size_var.get())
+            dlg.destroy()
+        def _cancel():
+            dlg.destroy()
+
+        btn_frame = tk.Frame(dlg, bg=BG); btn_frame.pack(pady=(0, 16))
+        bs = dict(relief=tk.FLAT, padx=16, pady=6, font=("TkDefaultFont", 10))
+        tk.Button(btn_frame, text="Export", bg="#238636", fg="white",
+                  activebackground="#2ea043", command=_ok, **bs).pack(side=tk.LEFT, padx=6)
+        tk.Button(btn_frame, text="Cancel", bg="#21262d", fg=FG,
+                  activebackground="#30363d", command=_cancel, **bs).pack(side=tk.LEFT, padx=6)
+
+        self.root.wait_window(dlg)
+        return result[0]
+
+    def _export_ly(self):
+        if not self._check_lilypond():
+            return
+        opts = self._ly_options_dialog()
+        if opts is None:
+            return
+        show_bar_numbers, staff_size = opts
+        path = filedialog.asksaveasfilename(
+            parent=self.root, title="Export LilyPond",
+            defaultextension=".ly",
+            filetypes=[("LilyPond", "*.ly"), ("All", "*.*")])
+        if path:
+            try:
+                _src = self.song   # already swapped to rationalized version when active
+                _src.to_ly(path,
+                           show_bar_numbers=show_bar_numbers,
+                           staff_size=staff_size)
+                messagebox.showinfo("Exported",
+                    f"Saved {os.path.basename(path)}\n\n"
+                    f"Compile to PDF with:\n  lilypond {os.path.basename(path)!r}",
+                    parent=self.root)
+            except Exception as e:
+                messagebox.showerror("Error", str(e), parent=self.root)
+
+    def _print_score(self):
+        """Export a temporary .ly file, compile to PDF with LilyPond,
+        then open the PDF in the system viewer.  No file dialog — the
+        temp files are cleaned up automatically.
+        """
+        import shutil, subprocess, tempfile, platform
+        lp = self._check_lilypond()
+        if not lp:
+            return
+        opts = self._ly_options_dialog()
+        if opts is None:
+            return
+        show_bar_numbers, staff_size = opts
+        try:
+            with tempfile.TemporaryDirectory() as tmpdir:
+                ly_path  = os.path.join(tmpdir, "score.ly")
+                pdf_path = os.path.join(tmpdir, "score.pdf")
+                self.song.to_ly(ly_path,
+                                show_bar_numbers=show_bar_numbers,
+                                staff_size=staff_size)  # uses active song
+                result = subprocess.run(
+                    [lp, "--pdf", "-o", os.path.join(tmpdir, "score"), ly_path],
+                    capture_output=True, text=True)
+                if result.returncode != 0 or not os.path.isfile(pdf_path):
+                    err = result.stderr[-800:] if result.stderr else "(no output)"
+                    messagebox.showerror("LilyPond Error",
+                        f"LilyPond failed to compile the score:\n\n{err}",
+                        parent=self.root)
+                    return
+                # Copy PDF to a stable temp location so the viewer can open it
+                # after tmpdir context exits
+                import shutil as _sh
+                stable = tempfile.NamedTemporaryFile(
+                    suffix=".pdf", delete=False,
+                    prefix="midistudio_score_")
+                stable.close()
+                _sh.copy2(pdf_path, stable.name)
+
+            # Open with system PDF viewer
+            _plat = platform.system()
+            if _plat == "Linux":
+                subprocess.Popen(["xdg-open", stable.name])
+            elif _plat == "Darwin":
+                subprocess.Popen(["open", stable.name])
+            elif _plat == "Windows":
+                os.startfile(stable.name)
+            else:
+                subprocess.Popen(["xdg-open", stable.name])
+
+        except Exception as exc:
+            messagebox.showerror("Print Error", str(exc), parent=self.root)
+
+    # ── Track ops ─────────────────────────────────────────────────────────────
+    def _selected_track_idx(self):
+        # v22v: track_list rows are now filtered/renumbered display rows
+        # (see _refresh_track_list / visible_tracks) — translate the
+        # Listbox row index through _track_list_map to get the real
+        # index into self.song.tracks.  Falls back gracefully if the map
+        # doesn't exist yet or is stale.
+        sel = self.track_list.curselection()
+        tmap = getattr(self, '_track_list_map', None)
+        if sel:
+            row = sel[0]
+            if tmap and 0 <= row < len(tmap):
+                return tmap[row]
+            return row   # map unavailable — best effort, old behavior
+        if tmap:
+            return tmap[-1] if tmap else None
+        return len(self.song.tracks) - 1 if self.song.tracks else None
+
+    def _add_track(self):
+        self.song.add_track(); self._refresh_track_list()
+        self.track_list.selection_set(len(self.song.tracks)-1)
+        self._update_title(); self._update_status()
+
+    def _del_track(self):
+        idx=self._selected_track_idx()
+        if idx is None: return
+        if messagebox.askyesno("Delete",f"Delete '{self.song.tracks[idx].name}'?",parent=self.root):
+            self.song.delete_track(idx); self._refresh_track_list()
+            self._update_title(); self._update_status()
+
+    def _rename_track(self):
+        idx=self._selected_track_idx()
+        if idx is None: return
+        v=simpledialog.askstring("Rename","New name:",parent=self.root,
+                                  initialvalue=self.song.tracks[idx].name)
+        if v: self.song.tracks[idx].name=v; self.song.modified=True; self._refresh_track_list(); self._update_title()
+
+    def _toggle_mute(self):
+        idx=self._selected_track_idx()
+        if idx is not None: self.song.tracks[idx].mute=not self.song.tracks[idx].mute; self._refresh_track_list()
+
+    def _toggle_solo(self):
+        idx=self._selected_track_idx()
+        if idx is not None: self.song.tracks[idx].solo=not self.song.tracks[idx].solo; self._refresh_track_list()
+
+    def _arm_record(self):
+        """Arm a track for MIDI recording.
+
+        If the selected track has never had its staff type explicitly set
+        (staff_mode == "auto" AND program number is 0, i.e. a blank new
+        track), ask the user whether it is a keyboard instrument (grand
+        staff) or a single-line instrument (single staff).  Tracks loaded
+        from existing MIDI files already have a meaningful program number
+        and are left on "auto" so that _uses_grand_staff() can decide.
+        """
+        idx = self._selected_track_idx()
+        if idx is None:
+            return
+        tr = self.song.tracks[idx]
+        # v22v: the record-armed track must remain visible in the list even
+        # if it currently has zero notes (e.g. re-arming an existing but
+        # empty track to record into) — otherwise arming it could make its
+        # own row disappear from the list that was used to select it.
+        tr.always_show = True
+        # Ask for staff type only for blank tracks that have not been
+        # explicitly set yet.  "auto" + program 0 means "freshly created".
+        if getattr(tr, "staff_mode", "auto") == "auto" and tr.program == 0:
+            self._ask_staff_type(tr)
+        self._rec_armed = idx
+        self._refresh_track_list()
+        if self._score_view and self._score_view.winfo_exists():
+            self._score_view._last_sr = None   # staff height may have changed
+            self._score_view._draw()
+
+    def _ask_staff_type(self, tr):
+        """Show a small dialog to choose grand staff or single staff.
+
+        Sets tr.staff_mode to "grand" or "single".  Called when arming a
+        blank recording track whose staff type has not yet been decided.
+        """
+        dlg = tk.Toplevel(self.root)
+        dlg.title("Staff Type")
+        dlg.resizable(False, False)
+        dlg.grab_set()
+        dlg.transient(self.root)
+
+        tk.Label(dlg,
+            text="Choose staff layout for recording:",
+            font=("TkDefaultFont", 10, "bold"),
+            pady=8).pack(padx=16)
+
+        choice = tk.StringVar(value="grand")
+
+        opts = [
+            ("grand",
+             "Grand staff  (keyboard, piano, organ)",
+             "Treble + Bass clef — two staves joined by a brace.\n"
+             "Use for any two-handed keyboard instrument."),
+            ("single",
+             "Single staff  (guitar, violin, flute, voice …)",
+             "One treble-clef staff.\n"
+             "Use for any single-line or single-hand instrument."),
+        ]
+        for val, label, tip in opts:
+            frm = tk.Frame(dlg)
+            frm.pack(fill=tk.X, padx=16, pady=4)
+            tk.Radiobutton(
+                frm, text=label, variable=choice, value=val,
+                font=("TkDefaultFont", 10),
+                anchor="w").pack(anchor="w")
+            tk.Label(
+                frm, text=tip,
+                font=("TkDefaultFont", 8), fg="#666",
+                justify=tk.LEFT, anchor="w").pack(anchor="w", padx=20)
+
+        def _ok():
+            tr.staff_mode = choice.get()
+            dlg.destroy()
+
+        tk.Button(dlg, text="OK", command=_ok,
+                  width=10).pack(pady=10)
+        dlg.bind("<Return>", lambda e: _ok())
+        dlg.bind("<Escape>", lambda e: dlg.destroy())
+
+        # Centre dialog on main window
+        dlg.update_idletasks()
+        rx = self.root.winfo_rootx() + (self.root.winfo_width()  - dlg.winfo_width())  // 2
+        ry = self.root.winfo_rooty() + (self.root.winfo_height() - dlg.winfo_height()) // 2
+        dlg.geometry(f"+{rx}+{ry}")
+        self.root.wait_window(dlg)
+
+    def _quantize_armed_track(self):
+        QuantizeDlg(self.root, self)
+
+    def _separate_hands(self):
+        """Standalone one-click hand separation.
+
+        v22ze-65: user-requested standalone Edit menu action -- previously
+        the DP hand-split algorithm was only reachable buried inside the
+        full Rationalize Score dialog, mixed in with tempo detection,
+        quantization, and cleanup the user might not want to touch just
+        to split hands. Runs the SAME rationalize() pipeline with the
+        timing-altering steps turned off (quantize_strength=0 -- 0=none
+        per its own docstring -- plus tempo/timesig detection off), so
+        this reassigns notes between Right Hand / Left Hand staves and
+        nothing else changes. Reuses the exact apply/undo mechanism the
+        Rationalize dialog's own Preview button already uses
+        (_set_rationalized_song + RationalizationAction), so the
+        Rationalize dialog's Discard button can still revert this too,
+        and everything downstream (undo stack semantics, Score Setup's
+        cleanup gate refresh) behaves exactly as it already does for a
+        regular rationalization -- no new, parallel state-management
+        path to keep in sync with that one.
+        """
+        if not self.song.tracks:
+            messagebox.showinfo("Separate Hands", "No tracks to separate.",
+                                parent=self.root)
+            return
+        if not messagebox.askyesno(
+                "Separate Hands",
+                "This will reassign notes between Right Hand and Left "
+                "Hand staves based on pitch and hand span, without "
+                "changing note timing. Continue?",
+                parent=self.root):
+            return
+        import copy as _copy
+        try:
+            before = _copy.deepcopy(self.song.tracks)
+            before_map = _copy.deepcopy(self.song.rationalized_measure_map)
+            params = {
+                'quantize_strength': 0,      # 0 = none -- timing untouched
+                'detect_tempo':      False,
+                'detect_timesig':    False,
+                'preserve_hands':    False,  # actually run the DP split
+            }
+            result = self.song.rationalize(params=params)
+            result = result.bake_to_score()
+            after = _copy.deepcopy(result.tracks)
+            after_map = _copy.deepcopy(result.rationalized_measure_map)
+            action = RationalizationAction(
+                description="Separate Hands",
+                before_tracks=before, after_tracks=after,
+                before_map=before_map, after_map=after_map)
+            self._push_undo(action)
+            self._set_rationalized_song(result)
+            self.song.modified = True
+            self._update_title()
+            rh = result.tracks[0] if result.tracks else None
+            lh = result.tracks[1] if len(result.tracks) > 1 else None
+            rh_n = len(rh.notes) if rh else 0
+            lh_n = len(lh.notes) if lh else 0
+            messagebox.showinfo(
+                "Separate Hands",
+                f"Done.  RH: {rh_n} notes   LH: {lh_n} notes\n\n"
+                "Open Setup \u25b8 Rationalize Score if you'd like to "
+                "Discard and revert to the original.",
+                parent=self.root)
+        except Exception as exc:
+            messagebox.showerror("Separate Hands", f"Error: {exc}",
+                                 parent=self.root)
+
+    def _combine_tracks(self):
+        if len(self.song.tracks)<2:
+            messagebox.showinfo("Combine","Need ≥2 tracks.",parent=self.root); return
+        dlg=tk.Toplevel(self.root); dlg.title("Combine Tracks"); dlg.grab_set()
+        tk.Label(dlg,text="Select tracks to combine:").pack(padx=10,pady=4)
+        lb=tk.Listbox(dlg,selectmode=tk.MULTIPLE,height=min(10,len(self.song.tracks)))
+        for t in self.song.tracks: lb.insert(tk.END,t.name)
+        lb.pack(padx=10)
+        def do():
+            sel=lb.curselection()
+            if len(sel)<2: messagebox.showwarning("Combine","Select ≥2.",parent=dlg); return
+            base=self.song.tracks[sel[0]]
+            for i in sorted(sel[1:],reverse=True):
+                base.notes.extend(self.song.tracks[i].notes); self.song.tracks.pop(i)
+            base.notes.sort(key=lambda n:n.tick); self.song.modified=True
+            self._refresh_track_list(); self._update_title(); dlg.destroy()
+        tk.Button(dlg,text="Combine",command=do).pack(pady=6)
+
+    def _separate_channels(self):
+        idx=self._selected_track_idx()
+        if idx is None: return
+        tr=self.song.tracks[idx]; chs={}
+        for n in tr.notes: chs.setdefault(n.channel,[]).append(n)
+        if len(chs)<=1: messagebox.showinfo("Separate","Only one channel.",parent=self.root); return
+        ch0=sorted(chs)[0]; tr.notes=chs[ch0]; tr.channel=ch0
+        for ch in sorted(chs)[1:]:
+            nt=Track(name=f"{tr.name} Ch{ch+1}",channel=ch,program=tr.program); nt.notes=chs[ch]
+            self.song.tracks.insert(idx+1,nt)
+        self.song.modified=True; self._refresh_track_list(); self._update_title()
+
+    # ── Transport ─────────────────────────────────────────────────────────────
+    def _toggle_play(self):
+        if self.transport.is_playing(): self._stop()
+        else: self._play()
+
+    def _play(self):
+        if not self.song.tracks:
+            messagebox.showinfo("Play","No tracks.",parent=self.root); return
+        if not midi_io.MIDI_OUT_OK:
+            messagebox.showwarning("No MIDI","Run: timidity -B8,8 -Os -iA &\nthen restart. (-B8,8 prevents audio buzz)",parent=self.root); return
+        if self.transport.is_playing():
+            self._stop(); return
+        self.play_btn.configure(text="⏸  Pause")
+        def _on_tick(tick):
+            self.transport.position_ticks = tick
+            # v22ze-58 fix: this used to call self._score_view._ui_tick_update
+            # (and check .winfo_exists()) DIRECTLY -- but _on_tick_cb is
+            # invoked from inside Transport._run_body()'s loop, which runs
+            # on a BACKGROUND thread (see Transport.play/_run: a daemon
+            # threading.Thread). Tkinter is not thread-safe; touching a
+            # Canvas (winfo_exists, itemconfig -- both of which
+            # _ui_tick_update does, to flash struck noteheads) from any
+            # thread but the main Tk event-loop thread is undefined
+            # behavior. This is the likely root cause of playback that
+            # stutters for several beats, sometimes recovers, and can
+            # eventually freeze the whole system hard enough to survive
+            # Ctrl+Alt+Del: concurrent unsynchronized access to Tcl's
+            # interpreter state from two threads can corrupt it badly
+            # enough to wedge the X11 connection itself, not just this
+            # process. Fix: do NOTHING Tk-related on the background
+            # thread -- only schedule the real update via root.after(0,
+            # ...), which marshals it onto the main thread the way
+            # Tkinter actually expects. A pending-flag means a burst of
+            # ticks during a dense passage collapses into at most one
+            # queued update rather than flooding the main thread's event
+            # queue with a growing backlog of stale ones.
+            if not getattr(self, '_tick_update_pending', False):
+                self._tick_update_pending = True
+                def _do_update(t=tick):
+                    self._tick_update_pending = False
+                    try:
+                        if self._score_view and self._score_view.winfo_exists():
+                            self._score_view._ui_tick_update(t)
+                    except Exception:
+                        pass
+                self.root.after(0, _do_update)
+        self._on_tick_cb = _on_tick
+        self.transport.play(on_tick=_on_tick)
+    #=======================================
+
+    def _stop(self):
+        self.transport.stop()
+        self.play_btn.configure(text="▶  Play")
+        self.rec_btn.configure(bg="#0f3320", fg="#3fb950")   # green = idle
+        # v22ze-25 (housekeeping item 5): don't leave a note stuck neon
+        # green after stopping mid-flash.
+        if self._score_view and self._score_view.winfo_exists():
+            self._score_view.clear_flash_highlights()
+
+    def _rewind_to_start(self):
+        was_playing = self.transport.is_playing()
+        self.transport.rewind()
+        self._pos_var.set("Meas 1  Beat 1")
+        if self._score_view and self._score_view.winfo_exists():
+            self._score_view.update_cursor(0)
+            self._score_view.clear_flash_highlights()
+        try: self._draw_overview()
+        except: pass
+        if was_playing:
+            # Resume playback from the start
+            self.play_btn.configure(text="⏸  Pause")
+            self.transport.play(self._on_tick_cb if hasattr(self,"_on_tick_cb") else None)
+        else:
+            self.play_btn.configure(text="▶  Play")
+
+    def _seek(self,delta):
+        self.transport.seek_measures(delta)
+        if not self.transport.is_playing():
+            meas=self.transport.position_ticks//self.song.ticks_per_measure()+1
+            self._pos_var.set(f"Meas {meas}  Beat 1")
+
+    def _offer_trim_leading_measures(self):
+        # After recording, detect empty leading measures and offer to remove them.
+        song = self.song
+        if not song.tracks: return
+        tpm = song.ticks_per_measure()
+        # Find the tick of the very first note across all tracks
+        first_tick = None
+        for tr in song.tracks:
+            for n in tr.notes:
+                if first_tick is None or n.tick < first_tick:
+                    first_tick = n.tick
+        if first_tick is None: return   # nothing recorded
+        empty_measures = int(first_tick // tpm)
+        if empty_measures < 1: return   # first note is already in measure 1
+        shift = empty_measures * tpm
+        ans = messagebox.askyesno(
+            "Trim leading silence",
+            f"Recording starts {empty_measures} empty measure(s) before the first note.\n\n"
+            f"Remove the {empty_measures} empty measure(s) and shift everything left?",
+            parent=self.root)
+        if not ans: return
+        for tr in song.tracks:
+            for n in tr.notes:
+                n.tick = max(0, n.tick - shift)
+            for ev in tr.events:
+                ev.tick = max(0, ev.tick - shift)
+        song.modified = True
+        self._update_title()
+        self._refresh_track_list()
+
+    def _toggle_metronome(self):
+        self._metro_on = not self._metro_on
+        self.transport.set_metronome(self._metro_on)
+        if self._metro_on:
+            self._metro_btn.configure(text="Click: ON",  fg="#ffcc00", bg="#2a2a10")
+        else:
+            self._metro_btn.configure(text="Click: OFF", fg="#666666", bg="#21262d")
+
+    def _toggle_record(self):
+        if self.transport.is_recording():
+            self._stop()
+            self.rec_btn.configure(bg="#0f3320", fg="#3fb950")
+            # Restore MIDI Thru to its pre-recording state
+            if hasattr(self, '_thru_before_rec') and self._thru_before_rec:
+                self.midi_thru_enabled.set(True)
+                self._thru_before_rec = None
+            self._refresh_track_list()
+            # Offer to trim empty leading measures created by walk-to-piano delay
+            self._offer_trim_leading_measures()
+        else:
+            if not self.song.tracks: messagebox.showinfo("Record","Add a track first.",parent=self.root); return
+            if not midi_io.MIDI_OUT_OK: messagebox.showwarning("No MIDI","Run: timidity -B8,8 -Os -iA &",parent=self.root); return
+            if not midi_io.MIDI_IN_OK:
+                messagebox.showwarning("No MIDI Input",
+                    "No MIDI input port found.\n\n"
+                    "Check that your keyboard is connected, then\n"
+                    "use Help → MIDI Info to verify ports.",
+                    parent=self.root); return
+            # Auto-arm the selected track if none armed yet
+            if self._rec_armed is None or self._rec_armed >= len(self.song.tracks):
+                idx = self._selected_track_idx()
+                self._rec_armed = idx if idx is not None else 0
+            # Auto-disable MIDI Thru during recording to prevent the
+            # keyboard's app-side echo (keyboard local sound + TiMidity).
+            # Restore the user's thru setting when recording stops.
+            self._thru_before_rec = self.midi_thru_enabled.get()
+            if self._thru_before_rec:
+                self.midi_thru_enabled.set(False)
+            self.play_btn.configure(text="⏸  Pause")
+            self.rec_btn.configure(bg="#880000", fg="#ff4444")   # red = recording
+            self.transport.record(self._rec_armed)
+
+    # ── Windows ───────────────────────────────────────────────────────────────
+    def _open_score_view(self):
+        # Dismiss any open menu (File/Notation/…) by returning focus to the
+        # root window — fixes the "File menu ghost" on Linux/X11.
+        self.root.focus_set()
+        # Score is a permanent dockable pane, built automatically at startup.
+        # When docked it's already visible — clicking "Score View" must never
+        # relocate it unexpectedly. Only act when it's floated, to bring the
+        # existing window forward.
+        if self._score_pane.floated:
+            try:
+                self._score_pane.shell.lift()
+                self._score_pane.shell.focus_force()
+            except Exception:
+                pass
+        # else: already docked and visible — nothing to do.
+
+    def _open_piano_roll(self):
+        self.root.focus_set()   # dismiss any open menu
+        idx=self._selected_track_idx()
+        if idx is None: messagebox.showinfo("Piano Roll","Select a track first.",parent=self.root); return
+        # Bring existing window to front if already open for this track
+        for w in self._open_windows:
+            try:
+                if isinstance(w, PianoRollView) and w.track_idx==idx and w.winfo_exists():
+                    w.lift(); w.focus_force(); return
+            except: pass
+        pr = PianoRollView(self.root,self,idx)
+        self._open_windows.append(pr)
+
+    def _open_list_view(self):
+        self.root.focus_set()   # dismiss any open menu
+        idx = self._selected_track_idx()
+        if idx is None:
+            messagebox.showinfo("MIDI List", "Select a track first.",
+                                parent=self.root); return
+        # Clamp to valid range — guards against off-by-one on multi-track files
+        n = len(self.song.tracks)
+        idx = max(0, min(idx, n - 1)) if n else 0
+        # If a List window is already open, bring it forward and
+        # switch its track selector to the requested track.
+        for w in self._open_windows:
+            try:
+                if isinstance(w, MidiListView) and w.winfo_exists():
+                    w.track_idx = idx
+                    w._refresh_track_list()
+                    w._populate()
+                    w._populate_events()
+                    w.lift(); w.focus_force(); return
+            except Exception:
+                pass
+        lv = MidiListView(self.root, self, idx)
+        self._open_windows.append(lv)
+
+    def _open_mixer(self):
+        # The Mixer is now a permanent dockable pane (built at startup).
+        # "Open Mixer" floats it out if docked, or brings it forward if
+        # already floated — it can no longer be duplicated or fully closed.
+        if self._mixer_pane.floated:
+            try:
+                self._mixer_pane.shell.lift()
+                self._mixer_pane.shell.focus_force()
+            except Exception:
+                pass
+        else:
+            self._mixer_pane.toggle()
+
+    def _song_settings(self): SongSettingsDlg(self.root,self)
+
+    def _choose_midi_output(self):
+        """Let the user switch MIDI output device without restarting.
+
+        Lists all currently visible MIDI ports plus "FluidSynth (built-in)"
+        if the fluidsynth module is available, regardless of whether each
+        one was auto-detected as "trusted" — this is an explicit user
+        action, so we don't second-guess their choice the way startup
+        auto-detection does.
+        """
+        try:
+            outs = mido.get_output_names()
+        except Exception:
+            outs = []
+
+        options = list(outs)
+        fs_available = False
+        try:
+            import fluidsynth
+            fs_available = True
+            options.append("FluidSynth (built-in)")
+        except ImportError:
+            pass
+
+        if not options:
+            messagebox.showinfo("MIDI Output Device",
+                "No MIDI output ports were found, and FluidSynth is not "
+                "available either.", parent=self.root)
+            return
+
+        dlg = tk.Toplevel(self.root)
+        dlg.title("MIDI Output Device")
+        dlg.configure(bg="#0d1117")
+        dlg.resizable(False, False)
+        dlg.lift(); dlg.focus_force()
+
+        tk.Label(dlg, text="Choose MIDI Output Device",
+                 bg="#0d1117", fg="#58a6ff",
+                 font=("TkDefaultFont", 11, "bold")).pack(padx=20, pady=(16, 4))
+
+        current = (midi_io._midi_out.name if midi_io._midi_out and hasattr(midi_io._midi_out, 'name')
+                  else ("FluidSynth (built-in)" if midi_io._fs_active else options[0]))
+        var = tk.StringVar(value=current if current in options else options[0])
+        for name in options:
+            tk.Radiobutton(dlg, text=name, variable=var, value=name,
+                          bg="#0d1117", fg="white", selectcolor="#21262d",
+                          activebackground="#0d1117", activeforeground="white",
+                          anchor="w").pack(fill=tk.X, padx=24, pady=2)
+
+        def _apply():
+            chosen = var.get()
+            try:
+                if midi_io._midi_out:
+                    try: midi_io._midi_out.close()
+                    except Exception: pass
+                    midi_io._midi_out = None
+
+                if chosen == "FluidSynth (built-in)":
+                    midi_io.MIDI_OUT_OK = False
+                    if not midi_io._fs_active:
+                        _init_fluidsynth()
+                    _save_settings({"preferred_midi_port": None})
+                else:
+                    midi_io._midi_out   = mido.open_output(chosen)
+                    midi_io.MIDI_OUT_OK = True
+                    _save_settings({"preferred_midi_port": chosen})
+
+                self._update_status()
+                dlg.destroy()
+            except Exception as exc:
+                messagebox.showerror("MIDI Output Device",
+                    f"Could not switch to '{chosen}':\n{exc}", parent=dlg)
+
+        tk.Button(dlg, text="Use This", command=_apply,
+                 bg="#238636", fg="white", relief=tk.FLAT,
+                 padx=12, pady=4).pack(pady=(10, 16))
+
+    def _midi_info(self):
+        try: outs="\n  ".join(mido.get_output_names() or ["(none)"])
+        except: outs="(error)"
+        try: ins="\n  ".join(mido.get_input_names() or ["(none)"])
+        except: ins="(error)"
+        out_port = midi_io._midi_out.name if midi_io._midi_out and hasattr(midi_io._midi_out,'name') else "(none)"
+        in_port  = midi_io._midi_in.name  if midi_io._midi_in  and hasattr(midi_io._midi_in, 'name') else "(none)"
+        messagebox.showinfo("MIDI I/O",
+            f"Output: {'OK  →  ' + out_port if midi_io.MIDI_OUT_OK else 'NOT CONNECTED'}\n\n"
+            f"Input:  {'OK  →  ' + in_port  if midi_io.MIDI_IN_OK  else 'NOT CONNECTED'}\n\n"
+            f"All output ports:\n  {outs}\n\n"
+            f"All input ports:\n  {ins}\n\n"
+            "Tip: run  pkill timidity && timidity -B8,8 -Os -iA &\n"
+            "to ensure only one TiMidity instance is active.",parent=self.root)
+
+    def _about(self):
+        import webbrowser
+        dlg = tk.Toplevel(self.root)
+        dlg.title(f"About  v{APP_VERSION}")
+        dlg.resizable(False, False)
+        dlg.configure(bg="#0d1117")
+        dlg.grab_set()
+
+        BG = "#0d1117"; FG = "white"; MUTED = "#8b949e"
+
+        tk.Label(dlg, text="🎹  Midi-Studio",
+                 bg=BG, fg="#58a6ff",
+                 font=("TkDefaultFont", 18, "bold")).pack(pady=(24, 4))
+        tk.Label(dlg, text="Work-Alike — No code from the original",
+                 bg=BG, fg=MUTED, font=("TkDefaultFont", 9)).pack()
+        tk.Label(dlg, text=f"Version {APP_VERSION}   ·   {APP_TIMESTAMP}",
+                 bg=BG, fg="#3fb950", font=("TkDefaultFont", 9)).pack(pady=(4, 14))
+
+        tk.Frame(dlg, bg="#21262d", height=1).pack(fill=tk.X, padx=28)
+
+        # ── Sterling Lions Club section ───────────────────────────────────────
+        tk.Label(dlg, text="Supporting the Sterling Lions Club",
+                 bg=BG, fg="#d29922",
+                 font=("TkDefaultFont", 10, "italic")).pack(pady=(14, 4))
+
+        lf = tk.Frame(dlg, bg=BG); lf.pack()
+        for txt, url in [("🦁  Make a Donation", LIONS_DONATE_URL),
+                         ("🌐  Visit Website",   LIONS_WEBSITE_URL)]:
+            lk = tk.Label(lf, text=txt, bg=BG, fg="#58a6ff",
+                          font=("TkDefaultFont", 10, "underline"),
+                          cursor="hand2")
+            lk.pack(pady=2)
+            lk.bind("<Button-1>", lambda e, u=url: webbrowser.open(u))
+            lk.bind("<Enter>", lambda e, w=lk: w.configure(fg="#79c0ff"))
+            lk.bind("<Leave>", lambda e, w=lk: w.configure(fg="#58a6ff"))
+
+        tk.Frame(dlg, bg="#21262d", height=1).pack(fill=tk.X, padx=28, pady=14)
+
+        # ── Technical info ────────────────────────────────────────────────────
+        info = (
+            "Built in Python 3 + tkinter + mido + python-rtmidi\n"
+            "Original inspiration: MidiSoft Studio4 © 1991–1995 MidiSoft\n"
+            "Corporation, created by Raymond Bily\n"
+            "Developed by Michael F. Winthrop in collaboration with Claude Sonnet 4.6\n\n"
+            "Keys:  Space = Play / Stop     Home = Rewind\n"
+            "       ← / → = Prev / Next measure\n"
+            "       Ctrl+1/2/3 = Score / Piano Roll / List"
+        )
+        tk.Label(dlg, text=info, bg=BG, fg=MUTED,
+                 font=("TkDefaultFont", 9), justify=tk.LEFT).pack(padx=28, pady=(0, 6))
+
+        _credit_lf = tk.Frame(dlg, bg=BG); _credit_lf.pack(pady=(0, 10))
+        for txt, url in [("MidiSoft.com", "https://midisoft.com/"),
+                          ("MIDISOFT Studio 4.0 archive (vetusware.com)",
+                           "https://vetusware.com/download/MIDISOFT%20Studio%204.0%204.0/?id=5666")]:
+            _clk = tk.Label(_credit_lf, text=txt, bg=BG, fg=MUTED,
+                            font=("TkDefaultFont", 8, "underline"),
+                            cursor="hand2")
+            _clk.pack()
+            _clk.bind("<Button-1>", lambda e, u=url: webbrowser.open(u))
+            _clk.bind("<Enter>", lambda e, w=_clk: w.configure(fg="#58a6ff"))
+            _clk.bind("<Leave>", lambda e, w=_clk: w.configure(fg=MUTED))
+
+        tk.Button(dlg, text="Close", command=dlg.destroy,
+                  bg="#21262d", fg=FG,
+                  activebackground="#30363d", activeforeground=FG,
+                  relief=tk.FLAT, padx=20, pady=5,
+                  font=("TkDefaultFont", 10)).pack(pady=14)
+
+    def _on_quit(self):
+        if getattr(self, "_shutting_down", False):
+            return
+        if not self._confirm_discard():
+            return
+        self._do_quit()
+
+    def _do_quit(self):
+        if getattr(self, "_shutting_down", False):
+            return
+        self._shutting_down = True
+
+        import threading
+        import time
+
+        print("QUIT: begin shutdown")
+        try:
+            print("QUIT: active threads at start:")
+            for t in threading.enumerate():
+                try:
+                    print(f"  thread name={t.name!r} daemon={t.daemon} alive={t.is_alive()}")
+                except Exception as e:
+                    print("  thread print exception:", e)
+        except Exception as e:
+            print("QUIT: enumerate threads failed:", e)
+
+        try:
+            print("QUIT: setting _midi_shutdown_evt")
+            _midi_shutdown_evt.set()
+        except Exception as e:
+            print("QUIT: failed to set _midi_shutdown_evt:", e)
+
+        try:
+            if getattr(self, "_tick_job", None):
+                print(f"QUIT: canceling _tick_job={self._tick_job}")
+                self.root.after_cancel(self._tick_job)
+                self._tick_job = None
+        except Exception as e:
+            print("QUIT: after_cancel failed:", e)
+
+        for w in list(getattr(self, "_open_windows", [])):
+            try:
+                if w and w.winfo_exists():
+                    print("QUIT: destroying auxiliary window", w)
+                    w.destroy()
+            except Exception as e:
+                print("QUIT: auxiliary window destroy failed:", e)
+
+        try:
+            if getattr(self, "_score_view", None) and self._score_view.winfo_exists():
+                print("QUIT: destroying score view")
+                self._score_view.destroy()
+        except Exception as e:
+            print("QUIT: score view destroy failed:", e)
+
+        # Try transport.stop() only; do not call transport.close() here.
+        try:
+            if getattr(self, "transport", None):
+                print("QUIT: calling transport.stop()")
+                t0 = time.time()
+                self.transport.stop()
+                print(f"QUIT: transport.stop() returned after {time.time() - t0:.3f}s")
+        except Exception as e:
+            print("QUIT: transport.stop() exception:", e)
+
+        # Destroy root on Tk thread
+        try:
+            if self.root and self.root.winfo_exists():
+                print("QUIT: destroying root")
+                self.root.destroy()
+        except Exception as e:
+            print("QUIT: root.destroy() exception:", e)
+
