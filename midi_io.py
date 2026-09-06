@@ -14,7 +14,6 @@ import platform
 import sys
 import threading
 import time
-import tkinter as tk
 
 import mido
 import mido.backends.rtmidi
@@ -290,6 +289,8 @@ def _maybe_show_no_synth_dialog(root):
     if MIDI_OUT_OK or _fs_active:
         return
 
+    import tkinter as tk
+
     import webbrowser
 
     distro = _detect_linux_distro()  # 'arch' / 'debian' / 'fedora' / 'suse' / None
@@ -533,6 +534,8 @@ def _prompt_midi_output_choice(trusted_ports):
     to try something else.  Now the user must explicitly opt in to
     persistence; otherwise every session asks fresh.
     """
+    import tkinter as tk
+
     _root = tk.Tk()
     _root.withdraw()
     _dlg = tk.Toplevel(_root)
