@@ -246,32 +246,40 @@ class TkPopupMenu(tk.Toplevel):
         self.deiconify()
         self.lift()
         self._posted = True
-        self.bind("<Escape>", lambda e: self._close_chain())
-        # Click-outside dismissal: with a grab active, ALL clicks are
-        # routed to the grabbing window regardless of physical screen
-        # position, so check whether the click actually landed on one
-        # of THIS menu's own rows (or an active submenu's) — if not,
-        # it's a click-away and the whole chain should close, same as
-        # tk.Menu's native behavior.
-        self.bind("<Button-1>", self._on_click)
-        # v22ze-68 fix: grab_set()/focus_force() used to be called
-        # SYNCHRONOUSLY, in the same event-handling cycle as the click
-        # that opened this menu (deiconify() on a previously-withdrawn
-        # Toplevel, immediately followed by a grab). On the first menu
-        # interaction after a window is mapped -- and, per user report,
-        # apparently on EVERY first click on each top-level label,
-        # consistently -- the window manager (confirmed on KDE/KWin)
-        # hadn't finished actually routing focus to the newly-mapped
-        # window before the grab was established, so the grab didn't
-        # reliably "take": the click that should have landed on a row
-        # inside the menu was lost, with no visible effect. Every
-        # SUBSEQUENT click worked because by then the window was fully
-        # settled. Deferring the grab by one idle cycle lets the window
-        # manager finish mapping/focusing the window first, so the grab
-        # is established against a window that's actually ready for it.
-        self.focus_force()
-        if not _is_submenu:
-            self.after_idle(self.grab_set)
+        # v22ze-75 fix: the previous fix (v22ze-74) deferred all input-
+        # sensitive setup to after_idle(), which fixed the "flashes open
+        # and immediately closes" bug MOST of the time — but after_idle()
+        # only waits for Tk's own internal idle queue to drain, which is
+        # NOT the same thing as the window manager having actually mapped
+        # this window yet. That's a race against real wall-clock WM
+        # behavior, not against anything Tk itself controls, so its
+        # outcome depends on system load / WM speed at the moment — this
+        # is exactly why it worked reliably for whichever menu happened
+        # to be opened first (the WM had the most idle time beforehand)
+        # but was flaky for the others. The actual event that means "the
+        # window manager has now really mapped this window" is X11's own
+        # <Map> event — waiting for that instead of guessing at idle
+        # timing removes the race entirely rather than just usually
+        # winning it.
+        self._map_seen = False
+
+        def _on_map(event):
+            if self._map_seen:
+                return
+            self._map_seen = True
+            self.bind("<Escape>", lambda e: self._close_chain())
+            self.bind("<Button-1>", self._on_click)
+            self.focus_force()
+            if not _is_submenu:
+                self.grab_set()
+
+        self.bind("<Map>", _on_map)
+        # Fallback safety net: on the small chance a WM never delivers a
+        # <Map> event for an already-realized Toplevel (some WMs skip it
+        # if the window was merely deiconified rather than newly created),
+        # still finish setup after a short delay so the menu never gets
+        # permanently stuck half-initialized.
+        self.after(150, lambda: _on_map(None))
 
     def _on_click(self, event):
         under = self.winfo_containing(event.x_root, event.y_root)
@@ -6809,8 +6817,9 @@ class SplashScreen(tk.Toplevel):
     """Startup splash — stays open until the user explicitly closes it.
 
     Centers on whichever monitor contains the main program window (correct on
-    dual-screen setups).  Dismissed by clicking 'Continue', clicking anywhere
-    on the splash, or pressing any key.  No auto-close timer.
+    dual-screen setups).  Dismissed only by clicking the "Continue" button —
+    clicking a credit/donation link opens that link in the browser without
+    closing the splash.  No auto-close timer.
     """
 
     def __init__(self, root, app):
@@ -6854,8 +6863,10 @@ class SplashScreen(tk.Toplevel):
         self.after(80, lambda: self._position_on_parent_screen(root))
 
         # ── Dismiss bindings ───────────────────────────────────────────────────
-        self.bind("<Button-1>", lambda e: self._dismiss())
-        self.bind("<Key>", lambda e: self._dismiss())
+        # Only the "Continue" button (below, in _build) dismisses this window.
+        # Previously any click anywhere, or any key press, also dismissed it —
+        # which meant clicking a credit/donation link both opened the browser
+        # AND closed the splash before the user could read anything else on it.
 
     def _position_on_parent_screen(self, root):
         """Centre on the monitor that currently contains the main window."""
@@ -6950,7 +6961,11 @@ class SplashScreen(tk.Toplevel):
                 cursor="hand2",
             )
             _clk.pack()
-            _clk.bind("<Button-1>", lambda e, u=url: webbrowser.open(u))
+            def _open_link(e, u=url):
+                webbrowser.open(u)
+                return "break"  # don't let this click also reach the
+                                # Toplevel's own <Button-1> dismiss binding
+            _clk.bind("<Button-1>", _open_link)
             _clk.bind("<Enter>", lambda e, w=_clk: w.configure(fg=BLUE))
             _clk.bind("<Leave>", lambda e, w=_clk: w.configure(fg=MUTED))
 
@@ -6996,7 +7011,12 @@ class SplashScreen(tk.Toplevel):
                 cursor="hand2",
             )
             lk.pack(pady=1)
-            lk.bind("<Button-1>", lambda e, u=url: (webbrowser.open(u), self._dismiss()))
+
+            def _open_lions_link(e, u=url):
+                webbrowser.open(u)
+                return "break"
+
+            lk.bind("<Button-1>", _open_lions_link)
             lk.bind("<Enter>", lambda e, w=lk: w.configure(fg="#79c0ff"))
             lk.bind("<Leave>", lambda e, w=lk: w.configure(fg=BLUE))
 
@@ -7009,7 +7029,7 @@ class SplashScreen(tk.Toplevel):
 
         tk.Label(
             inner,
-            text="Click anywhere or press any key to continue",
+            text="Click Continue below to proceed",
             bg=BG,
             fg=MUTED,
             font=("TkDefaultFont", 8),
