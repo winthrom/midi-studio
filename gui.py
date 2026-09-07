@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """GUI components: menus, piano roll, MIDI list, transport."""
 
+from __future__ import annotations
+
 import bisect
 import math
 import os
