@@ -245,6 +245,23 @@ class TkPopupMenu(tk.Toplevel):
         self.geometry(f"+{x}+{y}")
         self.deiconify()
         self.lift()
+        # v22ze-76 fix: even after v22ze-75's fix (wait for the real X11
+        # <Map> event instead of guessing at idle timing), the same
+        # inconsistent behavior was still reported — some menus opening
+        # fine on their actual first use, others not, with no fixed
+        # pattern, all on the same run. That rules out an INPUT-readiness
+        # race (focus/grab), since <Map> already confirms the window
+        # manager has mapped the window before any of that runs. What's
+        # left is PAINT lag: on compositing window managers (KWin, already
+        # implicated by earlier comments in this file), a window can be
+        # logically mapped — which is all <Map> confirms — before the
+        # compositor has actually painted a frame of it on screen yet.
+        # update_idletasks() only flushes pending geometry/layout work; it
+        # does not force an actual repaint. A plain update() does. Forcing
+        # one here means control doesn't return to the caller (and thus
+        # the click that opened this menu doesn't finish being processed)
+        # until this window has actually been drawn, not just mapped.
+        self.update()
         self._posted = True
         # v22ze-75 fix: the previous fix (v22ze-74) deferred all input-
         # sensitive setup to after_idle(), which fixed the "flashes open
@@ -1006,6 +1023,7 @@ class MidiNote:
         "channel",
         "articulation",
         "spelling",
+        "_orig",
     )
 
     def __init__(self, tick, pitch, velocity, duration, channel=0, articulation="", spelling=""):
@@ -7547,12 +7565,25 @@ class ScoreView(tk.Frame):
         # Articulation, Measures), per the housekeeping-list follow-up
         # request. Which tab is active determines what a canvas click
         # does -- see _on_click, which dispatches on self._active_tool.
-        self._active_tool = "note_rest"  # note_rest | accidental | dynamics | articulation
+        self._active_tool = "note_rest"  # note_rest | accidental | dynamics | articulation | select
         self._entry_mode_var = tk.StringVar(value="note")  # note | rest
         self._dur_var = tk.StringVar(value="quarter")
         self._accidental_var = tk.StringVar(value="sharp")
         self._dynamic_var = tk.StringVar(value="mf")
         self._articulation_var = tk.StringVar(value="staccato")
+        # ── Selection state (Select tool) ──────────────────────────────────
+        # Notes are plain __slots__ objects with default identity-based
+        # equality/hashing (no __eq__ override), so it's safe to key a set
+        # directly on (track_index, note) tuples rather than needing a
+        # separate note-id field.
+        self._selection = set()          # {(track_index, note), ...}
+        self._box_select_start = None    # (cx, cy) canvas coords, or None
+        self._box_select_rect_id = None  # canvas item id of the live rubber-band
+        # Rebuilt on every _draw_inner() pass: maps a canvas item id (as
+        # returned by canvas.find_overlapping) to the (track_index, note)
+        # it represents, so box-select and single-note select can both
+        # resolve raw canvas hits back to actual note objects.
+        self._note_hit_items = {}
 
         nb = ttk.Notebook(self, height=42)
         nb.pack(fill=tk.X, side=tk.TOP)
@@ -7565,7 +7596,18 @@ class ScoreView(tk.Frame):
                 "dynamics",
                 "articulation",
                 "measures",
+                "select",
             ][idx]
+            # Selection now persists across tab switches on purpose (see
+            # chat): the intended workflow is select in one tab, then act
+            # on that selection from a different tab (e.g. select a rest
+            # + chord in Select, then apply a duration from Note/Rest).
+            # Only the box-select-drag-in-progress state gets reset, since
+            # a half-finished drag doesn't mean anything on another tab.
+            self._box_select_start = None
+            if self._box_select_rect_id is not None:
+                self.canvas.delete(self._box_select_rect_id)
+                self._box_select_rect_id = None
 
         nb.bind("<<NotebookTabChanged>>", _on_tab_changed)
 
@@ -7687,6 +7729,37 @@ class ScoreView(tk.Frame):
             fg="#333",
         ).pack(side=tk.LEFT, padx=8, pady=6)
 
+        # -- Tab 6: Select ---------------------------------------------------
+        t6 = tk.Frame(nb, bg=tabbg)
+        nb.add(t6, text="Select")
+        tk.Button(
+            t6,
+            text="Clear Selection",
+            command=self._clear_selection,
+            relief=tk.FLAT,
+            padx=6,
+        ).pack(side=tk.LEFT, padx=(8, 4), pady=6)
+        tk.Button(
+            t6,
+            text="Delete Selected",
+            command=self._delete_selected,
+            relief=tk.FLAT,
+            padx=6,
+        ).pack(side=tk.LEFT, padx=4)
+        self._selection_count_lbl = tk.Label(
+            t6, text="0 selected", bg=tabbg, fg="#333", font=("TkDefaultFont", 8)
+        )
+        self._selection_count_lbl.pack(side=tk.LEFT, padx=(12, 4))
+        tk.Label(
+            t6,
+            text="  Drag a box around notes to select them, or click a single "
+            "note. Shift+drag/click adds to the selection. Delete key or the "
+            "button above removes the selection.",
+            bg=tabbg,
+            fg="#666",
+            font=("TkDefaultFont", 8),
+        ).pack(side=tk.LEFT, padx=10)
+
         # ── Mini transport (synced to main app) ──────────────────────────────
         tk.Frame(tb, width=1, bg="#aaa").pack(side=tk.LEFT, fill=tk.Y, padx=8, pady=2)
         mbs = dict(relief=tk.FLAT, bg="#c8c8c0", padx=5, pady=1, font=("TkDefaultFont", 12))
@@ -7760,7 +7833,12 @@ class ScoreView(tk.Frame):
         self.canvas.pack(fill=tk.BOTH, expand=True)
         self.canvas.bind("<Configure>", self._on_canvas_configure)
         self.canvas.bind("<Button-1>", self._on_click)
+        self.canvas.bind("<B1-Motion>", self._on_drag)
+        self.canvas.bind("<ButtonRelease-1>", self._on_release)
         self.canvas.bind("<Button-3>", self._on_right)
+        self.canvas.bind("<Delete>", lambda e: self._delete_selected())
+        self.canvas.bind("<BackSpace>", lambda e: self._delete_selected())
+        self.canvas.bind("<Escape>", lambda e: self._clear_selection())
 
     def _current_cursor_tick(self):
         """Current transport position, safely, for redraws triggered by
@@ -8018,6 +8096,11 @@ class ScoreView(tk.Frame):
         self._flash_index = []
         self._flash_ticks_only = None
         self._currently_lit = {}
+        # Phase 1 (Select tool): rebuilt every redraw for the same
+        # reason as _flash_index above -- delete("all") just invalidated
+        # every previous canvas item id, so old note_hit_items entries
+        # would point at nothing (or an unrelated item reusing that id).
+        self._note_hit_items = {}
 
         if not song.tracks:
             # Note 0: draw placeholder empty staves so the score area looks
@@ -8123,6 +8206,16 @@ class ScoreView(tk.Frame):
                 # completely, the same as to_ly does.
                 rh_copies = [_sv_copy.copy(n) for n in raw[_i].notes]
                 lh_copies = [_sv_copy.copy(n) for n in raw[_i + 1].notes]
+                # Phase 1 (Select tool): preserve a link back to the real
+                # note object in tr.notes, however many copy-generations
+                # deep this goes -- getattr(n, "_orig", n) always bottoms
+                # out at the true source, which is what selection/deletion
+                # actually need to act on (see _draw_chord's hit-item
+                # registration and the selection-highlight check).
+                for _c, _orig_n in zip(rh_copies, raw[_i].notes):
+                    _c._orig = getattr(_orig_n, "_orig", _orig_n)
+                for _c, _orig_n in zip(lh_copies, raw[_i + 1].notes):
+                    _c._orig = getattr(_orig_n, "_orig", _orig_n)
                 for n in rh_copies:
                     n.channel = 0
                 for n in lh_copies:
@@ -8601,6 +8694,13 @@ class ScoreView(tk.Frame):
             # actually stored on the real note.
             cpy.articulation = getattr(n, "articulation", "")
             cpy.spelling = getattr(n, "spelling", "")  # v22ze-51
+            # Phase 1 (Select tool): every note ScoreView ever draws passes
+            # through this quantization copy, so this is the one place that
+            # guarantees selection/deletion can always resolve back to the
+            # real tr.notes object, regardless of which further path (plain
+            # single-staff, or the RH/LH merge copy above _draw_system) a
+            # given note takes after this.
+            cpy._orig = getattr(n, "_orig", n)
             qtr.notes.append(cpy)
 
         div_map = {4: 1, 8: 2, 16: 4, 32: 8}
@@ -9386,6 +9486,12 @@ class ScoreView(tk.Frame):
             outline_col = "black"
             if is_grace:
                 fill_col = outline_col = "#444444"
+            # Selection highlight (Select tool): identity-based membership,
+            # since MidiNote has no custom __eq__ -- see _selection's
+            # declaration in __init__ for why that's safe to rely on.
+            if getattr(n, "_orig", n) in self._selection:
+                fill_col = "#1a73e8"
+                outline_col = "#1a73e8"
             if db >= 4:
                 # Whole note: outline only. v22ze: fill="" (not "white")
                 # so a staff line already drawn underneath shows through
@@ -9406,6 +9512,10 @@ class ScoreView(tk.Frame):
             # it, reverting to _nh_orig_fill once the flash window passes.
             if not is_grace:
                 self._flash_index.append((int(n.tick), _nh_id, _nh_orig_fill))
+            # Phase 1 (Select tool): register this canvas item so a click
+            # or box-drag hit on it (via canvas.find_overlapping) can be
+            # resolved back to the actual MidiNote object it represents.
+            self._note_hit_items[_nh_id] = getattr(n, "_orig", n)
 
             # v22ze-50 fix: _click_articulation() correctly set/toggled
             # n.articulation on the underlying note (and pushed a proper
@@ -10849,6 +10959,97 @@ class ScoreView(tk.Frame):
             self._click_dynamics(cx, cy)
         elif self._active_tool == "articulation":
             self._click_articulation(cx, cy)
+        elif self._active_tool == "select":
+            # Actual selection happens on release (see _on_release) once
+            # we know whether this was a plain click or a drag -- just
+            # record where the gesture started, and give the canvas
+            # keyboard focus so the Delete key (bound below) can reach it.
+            self._box_select_start = (cx, cy)
+            self.canvas.focus_set()
+
+    def _on_drag(self, event):
+        if self._active_tool != "select" or self._box_select_start is None:
+            return
+        cx, cy = self._cxy(event)
+        x0, y0 = self._box_select_start
+        if self._box_select_rect_id is None:
+            self._box_select_rect_id = self.canvas.create_rectangle(
+                x0, y0, cx, cy, outline="#1a73e8", dash=(3, 2), width=1
+            )
+        else:
+            self.canvas.coords(self._box_select_rect_id, x0, y0, cx, cy)
+
+    def _on_release(self, event):
+        if self._active_tool != "select" or self._box_select_start is None:
+            return
+        cx, cy = self._cxy(event)
+        x0, y0 = self._box_select_start
+        additive = bool(event.state & 0x0001)  # Shift held
+        dragged = abs(cx - x0) > 3 or abs(cy - y0) > 3
+
+        if self._box_select_rect_id is not None:
+            self.canvas.delete(self._box_select_rect_id)
+            self._box_select_rect_id = None
+        self._box_select_start = None
+
+        if not additive:
+            self._selection.clear()
+
+        if dragged:
+            x1, x2 = sorted((x0, cx))
+            y1, y2 = sorted((y0, cy))
+            hits = self.canvas.find_overlapping(x1, y1, x2, y2)
+        else:
+            # Plain click (no drag): small point hit-test, same tolerance
+            # as the existing single-note lookup used elsewhere in this
+            # class, so click-to-select feels consistent with click-to-
+            # edit in the other tools.
+            hits = self.canvas.find_overlapping(cx - 3, cy - 3, cx + 3, cy + 3)
+
+        for item_id in hits:
+            note = self._note_hit_items.get(item_id)
+            if note is not None:
+                self._selection.add(note)
+
+        self._refresh_selection_label()
+        self._draw()
+
+    def _clear_selection(self):
+        if not self._selection:
+            return
+        self._selection.clear()
+        self._refresh_selection_label()
+        self._draw()
+
+    def _refresh_selection_label(self):
+        lbl = getattr(self, "_selection_count_lbl", None)
+        if lbl is not None:
+            n = len(self._selection)
+            lbl.configure(text=f"{n} selected")
+
+    def _delete_selected(self):
+        if not self._selection:
+            return
+        song = self.app.song
+        removed = 0
+        for tr in song.tracks:
+            still_there = [n for n in tr.notes if n not in self._selection]
+            removed += len(tr.notes) - len(still_there)
+            if len(still_there) != len(tr.notes):
+                for n in tr.notes:
+                    if n in self._selection:
+                        self.app._push_undo(
+                            NoteEditAction(
+                                description=f"Delete selected note (pitch {n.pitch})",
+                                track_index=song.tracks.index(tr),
+                                before_note=n,
+                                after_note=None,
+                            )
+                        )
+                tr.notes[:] = still_there
+        self._selection.clear()
+        self._refresh_selection_label()
+        self._draw()
 
     def _click_note_rest(self, cx, cy):
         ti, pitch = self._xy_to_pitch(cx, cy)
