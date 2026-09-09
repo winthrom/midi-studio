@@ -1413,10 +1413,38 @@ class Song:
                         # above -- only the FIRST time_signature event
                         # should set the "primary" field; sig_changes
                         # still records every change.
-                        if not song.sig_changes:
-                            song.time_sig_num = msg.numerator
-                            song.time_sig_den = msg.denominator
-                        song.sig_changes.append((abs_t, msg.numerator, msg.denominator))
+                        #
+                        # v22ze-77 fix: this used to run for EVERY track
+                        # in the file, not just track 0. By MIDI
+                        # convention, tempo/time-signature meta events
+                        # belong on track 0 (the "conductor track") only
+                        # -- but plenty of notation software (Finale,
+                        # Sibelius, etc.) redundantly writes a copy of
+                        # the opening time signature onto every
+                        # individual part/track when exporting. Reading
+                        # every track meant every one of those redundant
+                        # copies got appended to sig_changes as if it
+                        # were a real, independent meter change, with NO
+                        # confidence check at all (unlike the separate
+                        # accent-pattern auto-detector, which does have
+                        # one) -- because this reads explicit metadata
+                        # from the file and trusts it completely. If any
+                        # one track's copy landed at a slightly different
+                        # tick (a leading marker/instrument-name event
+                        # shifting its delta-time), or was simply wrong
+                        # in that one part's export, it was imported
+                        # verbatim as a spurious per-measure time
+                        # signature change elsewhere in the piece.
+                        # Reported symptom: individual measures in an
+                        # otherwise-consistent 4/4 piece showing up
+                        # marked 2/4 after import, which rationalize()
+                        # can't fix since it only gates the single global
+                        # time_sig_num/den, never sig_changes itself.
+                        if i == 0:
+                            if not song.sig_changes:
+                                song.time_sig_num = msg.numerator
+                                song.time_sig_den = msg.denominator
+                            song.sig_changes.append((abs_t, msg.numerator, msg.denominator))
                     elif msg.type == "key_signature":
                         song.key_sig = msg.key  # store on song; last one wins
                     elif msg.type == "program_change":
@@ -1447,6 +1475,23 @@ class Song:
                     tr.notes.append(MidiNote(s, pitch, v, dur, ch))
                 if tr.notes or (tr.events and i > 0):
                     song.tracks.append(tr)
+
+        # v22ze-77 fix (defensive backstop): dedupe sig_changes by tick,
+        # even after restricting time_signature parsing to track 0 above
+        # -- some exporters legitimately write a redundant "reset" event
+        # at a tick that's already covered, and multiple entries at the
+        # same tick are ambiguous for measure-map building regardless of
+        # whether their values agree. Keep the FIRST entry seen at each
+        # tick (import order), drop the rest.
+        if song.sig_changes:
+            _seen_ticks = set()
+            _deduped = []
+            for _t, _n, _d in song.sig_changes:
+                if _t not in _seen_ticks:
+                    _seen_ticks.add(_t)
+                    _deduped.append((_t, _n, _d))
+            song.sig_changes = _deduped
+
         return song
 
     # ── MIDI export ──────────────────────────────────────────────────────────
@@ -7630,6 +7675,13 @@ class ScoreView(tk.Frame):
             width=8,
             state="readonly",
         ).pack(side=tk.LEFT)
+        tk.Button(
+            t1,
+            text="Apply to Selection",
+            command=self._apply_duration_to_selection,
+            relief=tk.FLAT,
+            padx=6,
+        ).pack(side=tk.LEFT, padx=(8, 4))
         tk.Label(
             t1,
             text="  Click the staff to insert. Right-click a note to delete.",
@@ -8428,10 +8480,25 @@ class ScoreView(tk.Frame):
             # piece that's genuinely low in both hands (the original
             # v22ze-25 fix this heuristic exists for) still clears both
             # bars easily.
-            if len(treble_notes0) >= 2 and all(n.pitch < 60 for n in treble_notes0):
+            # v22ze-78 fix: this heuristic used a DIFFERENT, stricter test
+            # (>=2 corroborating notes, pitch<60/>64) than the authoritative
+            # per-measure formula used everywhere else in this file (see
+            # bass_treble_measures/treble_bass_measures in _draw_chords,
+            # which is what actually drives the dashed excursion-line
+            # indicator). The two could disagree on measure 0 specifically
+            # -- reported symptom: the dashed line over the top staff
+            # correctly indicated a bass-clef excursion, but the large
+            # opening clef glyph still showed treble, because this block
+            # used its own separate, narrower rule instead of the one that
+            # decided the dashed line. Aligned to the exact same formula
+            # (single non-empty check, thresholds <64/>59) so the opening
+            # glyph and the dashed-line indicator can never drift apart for
+            # measure 0 -- same fix pattern as _clef_branch_for_chord's own
+            # "one source of truth" comment describes for its two callers.
+            if treble_notes0 and all(n.pitch < 64 for n in treble_notes0):
                 top_clef = "𝄢"  # RH opens low -- bass clef in treble staff
             bass_notes0 = [n for n in m0_notes if note_staff_pos(n, _use_flats0)[0] < 2]
-            if len(bass_notes0) >= 2 and all(n.pitch > 64 for n in bass_notes0):
+            if bass_notes0 and all(n.pitch > 59 for n in bass_notes0):
                 bot_clef = "𝄞"  # LH opens high -- treble clef in bass staff
 
         clef_x = self.LM + 4
@@ -8882,7 +8949,12 @@ class ScoreView(tk.Frame):
         # size. Derived from the same SLG*2.8 constant used for the main
         # clef rather than a new hardcoded literal, so the two stay in
         # proportion if the grand-staff clef size is ever changed.
-        clef_sz = int(self.SLG * 2.8 * 0.7)
+        # v22ze-79 fix (per user request): inline clef-change symbols
+        # were intentionally 70% of the grand-staff clef size (v22ze-24,
+        # above) as a deliberate "smaller but still readable" choice.
+        # Changed to match the opening clef exactly, same size, per
+        # explicit request rather than the earlier deliberate scale-down.
+        clef_sz = int(self.SLG * 2.8)
         # v22ze-30 fix: same missing "bt is None" guard as the two
         # _draw_system fixes above -- this whole block only means
         # anything for a grand-staff (piano) track with a real bass
@@ -8925,7 +8997,7 @@ class ScoreView(tk.Frame):
             c.create_line(dash_x0, dash_y, x1, dash_y, fill="#444", width=1, dash=(6, 4))
             # Closing bracket at end of run
             c.create_line(x1, dash_y, x1, dash_y + self.SLG, fill="#444", width=1)
-            # Return bass clef (slightly smaller than main)
+            # Return bass clef (now matches main opening clef size)
             if re + 1 < nm:
                 rx = (
                     (self._tick_to_x(mmap[re + 1][1]) - clef_sz * 0.9)
@@ -10612,6 +10684,16 @@ class ScoreView(tk.Frame):
         cx: horizontal center, y: vertical centre reference, slg: staff-line-gap px"""
         rw = max(int(slg * 0.9), 6)  # rest rectangle width
         rh = max(int(slg * 0.55), 4)  # rest rectangle height
+        # Phase 1b (Select tool): a click/box-select hit needs a reliable
+        # target regardless of which glyph variant below gets drawn -- a
+        # quarter-rest zigzag or 16th/32nd dot-and-slash shape is easy to
+        # narrowly miss. One invisible rectangle over the glyph's full
+        # vertical extent (whole/half sit off-center from y; the rest sit
+        # roughly +/- 1.5*slg around y) covers every variant uniformly.
+        # Returned so callers can tag it with an identity for hit-testing.
+        _hit_id = c.create_rectangle(
+            cx - rw, y - slg * 1.6, cx + rw, y + slg * 1.6, outline="", fill=""
+        )
 
         if rest_type == "whole":
             # Filled rectangle hanging BELOW a staff line
@@ -10705,6 +10787,8 @@ class ScoreView(tk.Frame):
                     fill="black",
                     width=max(1, int(slg * 0.12)),
                 )
+
+        return _hit_id
 
     def _draw_rests(self, c, tr, tt, bt, nm, song, mmap, ti=0):
         """Draw rests: whole-measure rests where there are no notes, and
@@ -10801,7 +10885,8 @@ class ScoreView(tk.Frame):
                 if not meas_notes:
                     mx = (self._tick_to_x(ms) + self._tick_to_x(me)) // 2
                     ry = y_top + slg
-                    self._draw_rest_shape(c, "whole", mx, ry, slg)
+                    _rid = self._draw_rest_shape(c, "whole", mx, ry, slg)
+                    self._note_hit_items[_rid] = ("rest", ti, ms, me - ms)
                     continue
 
                 # ── Beat-level gaps within the measure ──────────────────
@@ -10819,6 +10904,7 @@ class ScoreView(tk.Frame):
                         if gap >= tpb // 8:
                             parts = _rest_seq(gap)
                             gx = self._tick_to_x(cursor)
+                            frag_tick = cursor
                             for val, rtype in parts:
                                 pw = val * self._px_per_tick
                                 mid = gx + pw / 2
@@ -10828,8 +10914,10 @@ class ScoreView(tk.Frame):
                                     ry = y_top + slg * 2
                                 else:
                                     ry = mid_y
-                                self._draw_rest_shape(c, rtype, mid, ry, slg)
+                                _rid = self._draw_rest_shape(c, rtype, mid, ry, slg)
+                                self._note_hit_items[_rid] = ("rest", ti, frag_tick, val)
                                 gx += pw
+                                frag_tick += val
                     active += delta
                     if active == 0:
                         cursor = tick
@@ -10840,6 +10928,7 @@ class ScoreView(tk.Frame):
                     if gap >= tpb // 8:
                         parts = _rest_seq(gap)
                         gx = self._tick_to_x(cursor)
+                        frag_tick = cursor
                         for val, rtype in parts:
                             pw = val * self._px_per_tick
                             mid = gx + pw / 2
@@ -10849,8 +10938,10 @@ class ScoreView(tk.Frame):
                                 ry = y_top + slg * 2
                             else:
                                 ry = mid_y
-                            self._draw_rest_shape(c, rtype, mid, ry, slg)
+                            _rid = self._draw_rest_shape(c, rtype, mid, ry, slg)
+                            self._note_hit_items[_rid] = ("rest", ti, frag_tick, val)
                             gx += pw
+                            frag_tick += val
 
         if bt_local is None:
             # Single-staff track -- no hand split needed, same as before.
@@ -10933,6 +11024,99 @@ class ScoreView(tk.Frame):
         step = total_d % 7
         semi = [0, 2, 4, 5, 7, 9, 11][max(0, min(6, step))]
         return max(0, min(127, oct_ * 12 + semi))
+
+    def _apply_duration_to_selection(self):
+        """Phase 1b: rewrite the selected span using the currently-picked
+        duration (self._dur_var). Per the confirmed rule: selected rests
+        are deleted; selected notes/chords are set to the picked duration;
+        the span's total length can grow or shrink; everything after the
+        span, within the same measure, shifts by the resulting delta.
+        """
+        if not self._selection:
+            return
+        song = self.app.song
+        tpb = song.ticks_per_beat
+        picked_ticks = self._dur_to_ticks(self._dur_var.get(), tpb)
+
+        # Group selected items by track index.
+        by_track = {}  # track_index -> list of ("note", tick, end) or ("rest", tick, end)
+        note_lookup = {}  # (track_index, tick) -> list of MidiNote (chord)
+        for item in self._selection:
+            if isinstance(item, tuple) and item[0] == "rest":
+                _, ti_sel, rtick, rdur = item
+                by_track.setdefault(ti_sel, []).append(("rest", rtick, rtick + rdur))
+            else:
+                note = item
+                ti_sel = None
+                for idx, tr in enumerate(song.tracks):
+                    if note in tr.notes:
+                        ti_sel = idx
+                        break
+                if ti_sel is None:
+                    continue  # stale selection entry (note no longer in the song)
+                by_track.setdefault(ti_sel, []).append(("note", note.tick, note.tick + note.duration))
+                note_lookup.setdefault((ti_sel, note.tick), []).append(note)
+
+        for ti_sel, items in by_track.items():
+            tr = song.tracks[ti_sel]
+            items.sort(key=lambda it: it[1])  # order by tick
+            span_start = items[0][1]
+            span_end = max(it[2] for it in items)
+            old_span = span_end - span_start
+
+            # Collapse consecutive "note" entries at the same tick into one
+            # chord entry (simultaneous notes move/resize together).
+            ordered = []
+            seen_ticks = set()
+            for kind, tick, end in items:
+                if kind == "note":
+                    if tick in seen_ticks:
+                        continue
+                    seen_ticks.add(tick)
+                    ordered.append(("note", tick))
+                else:
+                    ordered.append(("rest", tick))
+
+            new_span = sum(picked_ticks for kind, _ in ordered if kind == "note")
+            delta = new_span - old_span
+
+            # Find the measure span_end falls in, so the shift is bounded
+            # to that measure only -- never cascades into the rest of the
+            # track (matches the auto-fix plan's "never cascade" rule).
+            measure_end = None
+            mmap = getattr(song, "rationalized_measure_map", None)
+            if mmap:
+                for m_idx, ms, me, num, den, tpm in mmap:
+                    if ms <= span_end < me or (span_end == me and ms < me):
+                        measure_end = me
+                        break
+            if measure_end is None:
+                measure_end = max(
+                    (n.tick + n.duration for n in tr.notes if n.tick >= span_end),
+                    default=span_end,
+                )
+
+            # Shift everything after the span (within the measure) BEFORE
+            # touching the selected notes' own tick/duration -- otherwise
+            # their rewritten .tick values corrupt the >= span_end test.
+            if delta != 0:
+                for n in tr.notes:
+                    if span_end <= n.tick < measure_end:
+                        n.tick += delta
+
+            # Lay out the selected chords consecutively from span_start.
+            cursor = span_start
+            for kind, tick in ordered:
+                if kind == "rest":
+                    continue
+                for n in note_lookup.get((ti_sel, tick), []):
+                    n.tick = cursor
+                    n.duration = picked_ticks
+                cursor += picked_ticks
+
+        self._selection.clear()
+        self._refresh_selection_label()
+        self._draw()
 
     def _dur_to_ticks(self, name, tpb):
         return {
@@ -12656,7 +12840,6 @@ class MidisoftStudio:
                 self._score_setup_dlg._populate_measure_detail(
                     self._selected_measure_idx)
             return
-
         BG    = "#0d1117"
         FG    = "#f0f6fc"
         MUTED = "#8b949e"
@@ -12671,6 +12854,18 @@ class MidisoftStudio:
         dlg = tk.Toplevel(self.root)
         dlg.title("Score Setup")
         dlg.configure(bg=BG)
+        # v22ze-79 fix: clicking a different measure in the strip while
+        # this dialog was already open correctly called
+        # _populate_measure_detail() (see the early-return branch above),
+        # but on some window managers (KWin, confirmed -- the same class
+        # of stacking-order issue found elsewhere in this codebase) the
+        # dialog stayed visually behind the main window, so the update
+        # was real but invisible: it looked exactly like "the click only
+        # works once". dlg.lift() alone wasn't reliably winning the
+        # stacking fight against the main window reclaiming focus from
+        # that same click. Making the dialog explicitly topmost sidesteps
+        # the WM race entirely instead of hoping lift() wins it.
+        dlg.attributes("-topmost", True)
         # v22ze-57 fix: this used to just make the window resizable, with
         # no way to reach content once the window was shrunk below its
         # natural height — a prior session flagged the full fix (wrap the
