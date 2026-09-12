@@ -489,6 +489,11 @@ def _backfill_musicxml_staff_tags(xml_doc):
     invalid ordering per the MusicXML DTD (<staff> must precede
     <beam>/<notations>/<lyric>). Every note's <staff> position is
     verified and corrected here, not just ones this function adds.
+
+    Also backfills the `number` attribute on <clef> elements that are
+    missing it -- python-ly attaches this correctly on the INITIAL
+    clef of each staff but drops it on mid-piece clef changes. See the
+    v22ze-92 comment further down in this function for the full story.
     """
     import xml.etree.ElementTree as ET
 
@@ -557,6 +562,125 @@ def _backfill_musicxml_staff_tags(xml_doc):
                 if insert_at is not None and insert_at < cur_idx:
                     note.remove(staff_el)
                     note.insert(insert_at, staff_el)
+
+            # v22ze-92 fix: python-ly correctly attaches a `number`
+            # attribute (which staff a clef belongs to) on the INITIAL
+            # clef of each staff, but drops it on a mid-piece clef change
+            # (e.g. the \clef command written where an excursion run --
+            # see detect_clef_runs, above -- reverts back to a staff's
+            # home clef). A <clef> with no `number` is genuinely
+            # ambiguous in a multi-staff part, and different readers can
+            # resolve that ambiguity differently -- confirmed directly:
+            # exported as bass-in-treble-then-back-to-treble at measure 1
+            # into measure 3, correctly represented in the LilyPond
+            # source (verified separately), but the measure-3 <clef>
+            # reverting the RH staff back to treble came out with no
+            # `number` at all, and MuseScore flagged that exact measure's
+            # clef as wrong on import. Fix: for any clef missing `number`,
+            # find the measure's next note in document order and use its
+            # (already-resolved, above) staff -- the clef takes effect
+            # for whichever staff immediately follows it, so this is the
+            # same reasoning already applied to notes, just one element
+            # type over.
+            for attributes_el in measure.findall("attributes"):
+                for clef_el in attributes_el.findall("clef"):
+                    if clef_el.get("number"):
+                        continue
+                    all_children = list(measure)
+                    attr_idx = all_children.index(attributes_el)
+                    following_staff = None
+                    for later in all_children[attr_idx + 1:]:
+                        if later.tag == "note":
+                            following_staff = resolved.get(id(later))
+                            break
+                        if later.tag == "attributes" and later.find("clef") is not None:
+                            break  # another clef change first -- give up, ambiguous
+                    if following_staff:
+                        clef_el.set("number", following_staff)
+
+    # v22ze-93 fix: found while investigating a beat-count mismatch
+    # MuseScore reported for a measure immediately following a mid-piece
+    # clef change (the same boundary v22ze-92 above already knew was
+    # fragile). python-ly's parser leaks the LAST chord-tone of the
+    # measure BEFORE a clef change into the START of the measure AFTER
+    # it -- a duplicate, orphaned <chord/> note with no anchor note
+    # preceding it in its own measure at all. Confirmed directly: the
+    # spurious note's pitch, duration, staff, and voice exactly match
+    # the true final chord-tone of the previous measure. This extra,
+    # duplicated note is exactly the kind of structural anomaly that
+    # would throw off a real reader's per-measure beat tracking even
+    # though a naive "sum the durations" check doesn't clearly flag it
+    # as impossible. Detect and remove: a measure's first note, if it's
+    # a <chord/> note, must always be checked against whether a real
+    # anchor precedes it in the SAME measure; if not, and it exactly
+    # matches (pitch, duration, staff, voice) the previous measure's
+    # final note in that staff/voice, it's this duplication bug, not
+    # real content.
+    for part in root.findall(".//part"):
+        measures = part.findall("measure")
+        for m_i in range(1, len(measures)):
+            prev_measure = measures[m_i - 1]
+            measure = measures[m_i]
+            children = list(measure)
+            if not children or children[0].tag != "note":
+                continue
+            first_note = children[0]
+            if first_note.find("chord") is None:
+                continue  # not a chord-continuation note, nothing to check
+            # Confirm there really is no anchor before it in this measure
+            # (there can't be, since it's children[0], but keep the check
+            # explicit and self-documenting rather than relying on index 0).
+            prev_notes = [c for c in prev_measure if c.tag == "note"]
+            if not prev_notes:
+                continue
+
+            def _note_key(n):
+                p = n.find("pitch")
+                if p is None:
+                    return None
+                return (
+                    p.findtext("step"), p.findtext("alter", "0"), p.findtext("octave"),
+                    n.findtext("duration"), n.findtext("staff"), n.findtext("voice"),
+                )
+
+            # v22ze-93 correction: must compare against the previous
+            # measure's last note in the SAME STAFF/VOICE as the
+            # suspected duplicate, not simply the last <note> element in
+            # raw document order -- a multi-staff measure lists staff 1's
+            # notes, then a <backup>, then staff 2's, so "the last note"
+            # overall is whichever staff happens to be listed second, not
+            # necessarily the one that matters for this comparison. This
+            # bug meant the very first version of this fix never actually
+            # matched anything and silently did nothing.
+            first_staff = first_note.findtext("staff")
+            first_voice = first_note.findtext("voice")
+            same_context_prev = [
+                n for n in prev_notes
+                if n.findtext("staff") == first_staff and n.findtext("voice") == first_voice
+            ]
+            if not same_context_prev:
+                continue
+
+            # v22ze-93 correction #2: the duplicated note is not always
+            # literally the LAST note of the previous measure's matching
+            # voice -- confirmed directly: measure 2's voice=1 sequence
+            # has two more (non-chord) notes after the note that actually
+            # gets duplicated into measure 3. Whatever internal state
+            # python-ly is carrying across the clef-change boundary isn't
+            # simply "the most recent note" -- so match against ANY note
+            # in the previous measure's same staff/voice, not just the
+            # last one. A chord=True note with no anchor in its own
+            # measure is never valid on its own regardless of what it
+            # matches, but requiring a match against real prior content
+            # (rather than unconditionally deleting the first note of
+            # every measure that happens to start with an orphaned
+            # chord flag) keeps this from being a blunt, potentially
+            # content-destroying rule.
+            first_key = _note_key(first_note)
+            if first_key is not None and any(
+                _note_key(p) == first_key for p in same_context_prev
+            ):
+                measure.remove(first_note)
 
 
 def _strip_ly_block(text, keyword):
@@ -1229,6 +1353,160 @@ class Song:
         if self.rationalized_measure_map:
             return self.rationalized_measure_map
         return self.build_measure_map()
+
+    def fix_measure_timing(self, measure_idx):
+        """Auto-fix mismatched note timing for ONE measure, across every
+        track (voice/staff) independently, per the locked-down rules:
+
+          - Note ONSETS are immutable -- a note's tick never moves.
+          - Note DURATIONS may be extended by small amounts to absorb
+            sub-grid leftovers in a genuine gap (a moment where NOTHING
+            in this voice is sounding).
+          - Rests are implicit (gaps between notes), so "fixing" one just
+            means the note durations around it end up placing that gap
+            on a clean grid boundary -- there's no separate rest object
+            to edit.
+          - A note whose true duration crosses the barline is tie-split
+            (trimmed to the barline + a tied continuation note added at
+            the start of the next measure) rather than destructively
+            trimmed, UNLESS that would collide with a note already
+            sitting at the next measure's start tick -- in which case it
+            is trimmed locally and flagged instead. This never cascades
+            past one measure.
+          - A leading gap (before anything sounds, so nothing precedes
+            it to extend) that isn't a whole multiple of the smallest
+            notatable unit (a 32nd note) can't be fixed at all -- there
+            is nothing finer to notate it with -- and is flagged rather
+            than guessed at.
+
+        v22ze-82 fix: the first version of this method treated every
+        track as strictly monophonic -- it walked notes sorted by onset
+        and flagged any note whose end tick fell after the NEXT note's
+        onset as an unwanted "overlap" to be trimmed. Real tracks are
+        routinely polyphonic (a held note under a moving line, chord
+        tones of differing lengths), and that pairwise check destroyed
+        a legitimately long note whenever a shorter note happened to
+        start before it ended. It also only checked the LAST note by
+        onset order for barline overflow, missing overflow from any
+        earlier-starting note whose duration ran long -- confirmed via
+        a real-data report of two measures with an exact clean 0.5-beat
+        overflow that silently failed to auto-correct at all.
+
+        Rebuilt using the same start/end event + "how many notes are
+        currently sounding" technique _draw_rests() already uses to
+        correctly detect gaps in polyphonic content (a gap only exists
+        when NOTHING is sounding, not just because two onsets differ),
+        and checks every note independently for barline overflow rather
+        than only the last one.
+
+        Returns {track_index: "ok" | "ok (empty measure)" | "flagged: <reason>"}.
+        """
+        mmap = self.get_measure_map()
+        entry = next((e for e in mmap if e[0] == measure_idx), None)
+        if entry is None:
+            return {}
+        _, ms, me, num, den, tpm = entry
+        next_entry = next((e for e in mmap if e[0] == measure_idx + 1), None)
+
+        # Every standard rest value (see REST_VALS in ScoreView) is an
+        # exact multiple of a 32nd note, so a gap decomposes into some
+        # sequence of standard symbols if and only if it's itself a
+        # multiple of this -- that's the whole test for "clean".
+        smallest_unit = max(1, self.ticks_per_beat // 8)
+
+        results = {}
+        for ti, tr in enumerate(self.tracks):
+            notes = [n for n in tr.notes if ms <= n.tick < me]
+            if not notes:
+                results[ti] = "ok (empty measure)"
+                continue
+
+            reasons = []
+
+            # --- 1. Barline overflow: every note checked independently,
+            # not just the last one by onset -- a longer-held earlier
+            # note can overflow even while later, shorter notes don't. ---
+            for n in list(notes):
+                n_end = n.tick + n.duration
+                if n_end > me:
+                    overflow = n_end - me
+                    collision = (
+                        any(o.tick == next_entry[1] for o in tr.notes) if next_entry else True
+                    )
+                    n.duration = me - n.tick
+                    if not collision:
+                        cont = MidiNote(
+                            me, n.pitch, n.velocity, overflow, n.channel,
+                            articulation="tie_continuation",
+                        )
+                        tr.notes.append(cont)
+                    else:
+                        reasons.append(
+                            f"note (pitch {n.pitch}) overflowed the barline by "
+                            f"{overflow} ticks; tying into the next measure would "
+                            f"collide with a note already there, so it was trimmed "
+                            f"locally instead"
+                        )
+            # Durations above may have changed (tick values never do), so
+            # re-derive the working note list rather than reuse the stale one.
+            notes = [n for n in tr.notes if ms <= n.tick < me]
+
+            # --- 2. Polyphony-aware gap detection: group note on/off
+            # events by tick, track how many notes are sounding, and only
+            # treat a stretch as a real gap when NOTHING is sounding. ---
+            by_tick = {}
+            for n in notes:
+                by_tick.setdefault(n.tick, []).append(("on", n))
+                end = min(n.tick + n.duration, me)
+                by_tick.setdefault(end, []).append(("off", n))
+
+            cursor = ms
+            active = 0
+            last_ending_notes = []  # notes that caused active to hit 0 most recently
+
+            for tick in sorted(by_tick):
+                if active == 0 and tick > cursor:
+                    gap = tick - cursor
+                    leftover = gap % smallest_unit
+                    if leftover:
+                        if last_ending_notes:
+                            for en in last_ending_notes:
+                                en.duration += leftover
+                        else:
+                            reasons.append(
+                                f"{leftover}-tick sub-grid gap with nothing sounding "
+                                f"beforehand to absorb the leftover"
+                            )
+
+                ending_here = [n for kind, n in by_tick[tick] if kind == "off"]
+                starting_here = [n for kind, n in by_tick[tick] if kind == "on"]
+                active += len(starting_here) - len(ending_here)
+
+                if active == 0:
+                    cursor = tick
+                    last_ending_notes = ending_here
+                elif starting_here:
+                    last_ending_notes = []
+
+            # --- 3. Trailing gap after the last sounding note ---
+            if active == 0 and cursor < me:
+                gap = me - cursor
+                leftover = gap % smallest_unit
+                if leftover:
+                    if last_ending_notes:
+                        for en in last_ending_notes:
+                            en.duration += leftover
+                    else:
+                        reasons.append(
+                            f"{leftover}-tick sub-grid trailing gap with nothing "
+                            f"sounding beforehand to absorb the leftover"
+                        )
+
+            results[ti] = "ok" if not reasons else "flagged: " + "; ".join(reasons)
+
+            results[ti] = "ok" if not reasons else "flagged: " + "; ".join(reasons)
+
+        return results
 
     def tpm_at_tick(self, tick):
         """Return ticks-per-measure for the time signature active at `tick`."""
@@ -2406,7 +2684,28 @@ class Song:
             new_song.tempo = self.tempo
         new_song.time_sig_num = detected_num
         new_song.time_sig_den = detected_den
-        new_song.sig_changes = [(0, detected_num, detected_den)]
+        # v22ze-80 fix: this used to unconditionally collapse sig_changes
+        # to a single global entry, discarding ANY genuine mid-piece meter
+        # changes the original song had -- confirmed against a real,
+        # hand-notated piece where verified-correct 2/4 measures elsewhere
+        # in a 4/4 piece got silently erased by rationalize(). Whole-song
+        # accent-pattern detection (detect_time_signature(), above) is
+        # only a meaningful operation for a piece that has ONE meter
+        # throughout; it has no way to represent "this piece genuinely
+        # changes time signature partway through" at all, since it
+        # returns a single (num, den) for the entire song. Applying that
+        # single result as a blanket override was fine for the common
+        # single-meter case, but actively wrong -- and previously silent
+        # -- for a piece with real meter changes. Now: only replace
+        # sig_changes with the single detected signature if the ORIGINAL
+        # song also only had one (or zero) signature entries; if the
+        # original already had multiple distinct entries, that's a
+        # meter-changing piece by definition, and the original entries
+        # are trusted as-is rather than being flattened.
+        if len(self.sig_changes) <= 1:
+            new_song.sig_changes = [(0, detected_num, detected_den)]
+        else:
+            new_song.sig_changes = list(self.sig_changes)
         new_song.key_sig = getattr(self, "key_sig", "C")
 
         # ── 3. Measure range filter ──────────────────────────────────────────
@@ -4387,19 +4686,21 @@ class Song:
             both paths derive the same answer from the same rule instead
             of two hand-tuned approximations of it.
 
-            v22ze-71 fix: this "v22ze update" (above) unified the pitch
-            thresholds with the screen's check, but that happened BEFORE
-            v22ze-67 further tightened the screen's version -- requiring
-            at least 2 corroborating notes (not just one) and a stricter
-            treble-side threshold (<60, not <64) -- specifically because
-            a single borderline note in a not-yet-hand-split measure was
-            enough to flip an entire staff's clef incorrectly. This copy
-            never got that second fix, so it could still trigger falsely
-            on exactly the same single-note case v22ze-67 fixed on
-            screen -- confirmed directly: the same real file rendered
-            correctly (treble at the opening) in this app's own score
-            view, but exported with bass clef misapplied. Now uses the
-            identical, fully-updated thresholds.
+            v22ze-91 fix: the "v22ze-71 fix" above synced this with the
+            screen's thresholds as they stood at the time -- but this
+            SAME session later found and fixed a further, separate
+            drift between the screen's opening-clef-glyph check and its
+            own dashed-line indicator (v22ze-78), which changed the
+            authoritative thresholds to a single non-empty check with
+            pitch>59/pitch<64 -- dropping the ">=2 corroborating notes"
+            requirement and changing the treble-side threshold from <60
+            to <64. This copy never got that update either, so a third
+            (not just two) independently-drifted copy of the same
+            check remained -- confirmed directly: a real file's measure
+            3 showed correctly in this app's own score view but exported
+            with the wrong clef to both LilyPond and MusicXML (which
+            both route through this same function -- see
+            _export_musicxml's docstring). Now matches exactly.
 
             Returns (enter_at, revert_at): sets of measure indices.
             enter_at measures get a \\clef <opposite> just before their
@@ -4414,11 +4715,11 @@ class Song:
                     continue
                 if home_clef == "bass":
                     cluster = [n for n in mn if note_staff_pos(n, _use_flats)[0] < 2]
-                    if len(cluster) >= 2 and all(n.pitch > 64 for n in cluster):
+                    if cluster and all(n.pitch > 59 for n in cluster):
                         opposite_measures.add(m_idx)
                 elif home_clef == "treble":
                     cluster = [n for n in mn if note_staff_pos(n, _use_flats)[0] >= -2]
-                    if len(cluster) >= 2 and all(n.pitch < 60 for n in cluster):
+                    if cluster and all(n.pitch < 64 for n in cluster):
                         opposite_measures.add(m_idx)
 
             enter_at, revert_at = set(), set()
@@ -10229,55 +10530,133 @@ class ScoreView(tk.Frame):
             if cw < 6:
                 continue
 
-            # ── Compute actual beat content ───────────────────────────────
-            # Use the latest note-end that starts within the measure as a
-            # proxy for how much content the measure contains.  This is the
-            # most direct answer to "does this measure overflow the barline?"
-            latest_end = ms  # fallback: empty measure
-            for tr in tracks:
-                for n in tr.notes:
+            # v22ze-88: per-staff strip display. This used to combine
+            # every track into one "latest_end" figure and one solid
+            # background color per measure -- the same combining bug
+            # found and fixed in the measure-detail panel earlier this
+            # session, but never carried over to the strip itself, which
+            # is what actually needed it (per user report: "we still
+            # have not separated the beat count for each staff" -- the
+            # detail panel fix wasn't what they meant). Now computes a
+            # delta per TRACK and draws one horizontal color band per
+            # track, stacked top-to-bottom in track order (so, for a
+            # 2-track grand-staff piece, the cell's top half reflects the
+            # right-hand/treble track and the bottom half reflects the
+            # left-hand/bass track independently) -- matching MuseScore's
+            # per-staff red-boxing convention rather than one ambiguous
+            # combined flag that can hide one hand's problem behind the
+            # other's.
+            per_track_deltas = []  # (label, delta, is_real_problem) in staff order
+            smallest_unit = max(1, tpb // 8)
+
+            def _measure_delta(notes_iter):
+                latest_end = ms
+                has_notes = False
+                for n in notes_iter:
                     if ms <= n.tick < me:
+                        has_notes = True
                         latest_end = max(latest_end, n.tick + n.duration)
+                if not has_notes:
+                    return 0.0, False
+                actual_ticks = max(1, latest_end - ms)
+                expected_ticks = tpm
+                d = (actual_ticks - expected_ticks) / tpb
+                mismatch_ticks = actual_ticks - expected_ticks
+                is_real = d > 0 or (mismatch_ticks % smallest_unit != 0)
+                return d, is_real
 
-            actual_ticks = max(0, latest_end - ms)
-            expected_ticks = tpm
-            if actual_ticks == 0:
-                actual_ticks = expected_ticks  # empty = neutral
+            # v22ze-90 fix: for a grand-staff piece, _draw_system (above,
+            # around _prehand_split) MERGES both hands' notes into ONE
+            # combined pseudo-track before this function ever sees `tracks`
+            # -- each note tagged via .channel (0=RH, 1=LH) so the actual
+            # STAFF rendering can split them back apart -- but this
+            # function was iterating `tracks` directly, one entry per list
+            # item, so a merged grand-staff piece produced exactly ONE
+            # entry here regardless of having two real hands, hence one
+            # solid-color band instead of two. Now detects a merged track
+            # via _prehand_split and splits it back into its two channels
+            # for the per-staff calculation, matching what actually gets
+            # drawn on screen.
+            for tr in tracks:
+                if getattr(tr, "_prehand_split", False):
+                    rh_notes = [n for n in tr.notes if n.channel == 0]
+                    lh_notes = [n for n in tr.notes if n.channel == 1]
+                    d_rh, real_rh = _measure_delta(rh_notes)
+                    d_lh, real_lh = _measure_delta(lh_notes)
+                    per_track_deltas.append((tr, d_rh, real_rh))
+                    per_track_deltas.append((tr, d_lh, real_lh))
+                else:
+                    d, is_real = _measure_delta(tr.notes)
+                    per_track_deltas.append((tr, d, is_real))
+            worst_delta = max(per_track_deltas, key=lambda p: abs(p[1]))[1] if per_track_deltas else 0.0
 
-            actual_q = actual_ticks / tpb
-            expected_q = expected_ticks / tpb
-            delta = actual_q - expected_q  # positive = overflow
+            def _band_color(d, is_real):
+                if not is_real or abs(d) < 0.15:
+                    return None
+                return "#5a4200" if abs(d) <= 1.0 else "#5a1010"
 
-            # ── Choose cell colour ────────────────────────────────────────
-            if m_idx == selected:
-                fill = "#1a3a5a"
-            elif m_idx in accepted:
-                fill = "#1a4a1a"
-            elif abs(delta) < 0.15:
-                fill = None  # clean
-            elif abs(delta) <= 1.0:
-                fill = "#5a4200"  # amber
-            else:
-                fill = "#5a1010"  # red
-
-            # ── Draw cell background ──────────────────────────────────────
+            # ── Draw cell background: per-track bands always drawn first
+            # (v22ze-89 fix: "selected" used to be a full opaque blue fill
+            # that completely REPLACED the per-staff diagnostic bands --
+            # so the moment you clicked a measure to see what was wrong
+            # with it, the very information you clicked for disappeared,
+            # replaced by a plain "you clicked this" blue rectangle.
+            # Selection is now an outline drawn on top of the bands
+            # instead, so both pieces of information are visible together.
+            # "Accepted" (green) keeps the full-fill treatment since it's
+            # meant to read as "this measure is done, nothing to look at
+            # here" -- the opposite intent from selection.) ─────────────
             pad = 1
-            if fill:
+            if m_idx in accepted:
                 c.create_rectangle(
-                    x0 + pad,
-                    strip_top + pad,
-                    x1 - pad,
-                    strip_bot - pad,
-                    fill=fill,
-                    outline="",
-                    tags="strip",
+                    x0 + pad, strip_top + pad, x1 - pad, strip_bot - pad,
+                    fill="#1a4a1a", outline="", tags="strip",
+                )
+            elif len(per_track_deltas) <= 1:
+                fill = _band_color(worst_delta, per_track_deltas[0][2] if per_track_deltas else False)
+                if fill:
+                    c.create_rectangle(
+                        x0 + pad, strip_top + pad, x1 - pad, strip_bot - pad,
+                        fill=fill, outline="", tags="strip",
+                    )
+            else:
+                band_h = (self.STRIP_H - 2 * pad) / len(per_track_deltas)
+                for band_i, (tr, d, is_real) in enumerate(per_track_deltas):
+                    fill = _band_color(d, is_real)
+                    if not fill:
+                        continue
+                    band_top = strip_top + pad + band_i * band_h
+                    band_bot = band_top + band_h
+                    c.create_rectangle(
+                        x0 + pad, band_top, x1 - pad, band_bot,
+                        fill=fill, outline="", tags="strip",
+                    )
+                # Thin divider between bands so two adjacent flagged
+                # tracks read as distinct, not one blended block.
+                if len(per_track_deltas) == 2:
+                    mid_y = strip_top + pad + band_h
+                    c.create_line(
+                        x0 + pad, mid_y, x1 - pad, mid_y,
+                        fill="#000000", width=1, tags="strip",
+                    )
+
+            if m_idx == selected:
+                c.create_rectangle(
+                    x0 + pad, strip_top + pad, x1 - pad, strip_bot - pad,
+                    fill="", outline="#4aa3ff", width=2, tags="strip",
                 )
 
-            # ── Beat-count label (omit when clean and not selected) ───────
+            # ── Beat-count label (worst-track figure; omit when clean
+            # and not selected) ────────────────────────────────────────
             cx = (x0 + x1) / 2
-            if abs(delta) >= 0.15 or m_idx == selected:
+            actual_q = worst_delta + tpm / tpb
+            expected_q = tpm / tpb
+            if abs(worst_delta) >= 0.15 or m_idx == selected:
                 label = f"{round(actual_q)}/{round(expected_q)}"
-                txt_col = "#ffffff" if fill else "#888888"
+                any_band_filled = m_idx in accepted or any(
+                    _band_color(d, is_real) for _, d, is_real in per_track_deltas
+                )
+                txt_col = "#ffffff" if any_band_filled else "#888888"
                 c.create_text(
                     cx,
                     strip_top + self.STRIP_H * 0.42,
@@ -10288,8 +10667,10 @@ class ScoreView(tk.Frame):
                 )
 
                 # Local BPM below the fraction when it differs by > 3 BPM
-                if actual_ticks > 0 and actual_ticks != expected_ticks:
-                    local_bpm = global_bpm * (expected_ticks / actual_ticks)
+                # (based on actual_q/expected_q computed above, the
+                # worst-track figure -- same basis as the label itself).
+                if actual_q > 0 and abs(actual_q - expected_q) > 0.01:
+                    local_bpm = global_bpm * (expected_q / actual_q)
                     if abs(local_bpm - global_bpm) > 3:
                         c.create_text(
                             cx,
@@ -12671,34 +13052,29 @@ class MidisoftStudio:
             return {'bpm': None, 'confidence': 0.0, 'note': str(exc)}
 
     def _cleanup_measure(self, measure_idx):
-        """Apply Option-D barline clamping + re-quantize to a single measure."""
+        """Auto-fix mismatched timing for one measure using Song.fix_measure_timing()
+        -- see that method's docstring for the full rule set (note onsets are
+        immutable, durations may be extended/trimmed by small amounts, barline
+        overflow is tie-split rather than clipped).
+
+        v22ze-81: this used to do destructive "Option-D barline clamping" --
+        snapping every note's ONSET to a fixed 1/8 grid (moving notes the
+        user explicitly wants treated as unambiguous ground truth) and hard-
+        clipping any note that overflowed the barline (silently discarding
+        the clipped portion instead of tying it into the next measure).
+        Replaced with the agreed, less-destructive algorithm from
+        Song.fix_measure_timing(); the button/undo/accepted-measure wiring
+        around this method is unchanged.
+        """
         import copy as _cup
         mmap = self.song.get_measure_map()
         if measure_idx >= len(mmap):
             return
-        _mi, ms, me, num, den, tpm = mmap[measure_idx]
-        tpb  = self.song.ticks_per_beat
-        grid = tpb // 8   # eighth-note grid as default cleanup resolution
 
         before_tracks = _cup.deepcopy(self.song.tracks)
         before_map    = _cup.deepcopy(self.song.rationalized_measure_map)
 
-        for tr in self.song.tracks:
-            for n in tr.notes:
-                if ms <= n.tick < me:
-                    # Clamp onset to measure
-                    if n.tick < ms:
-                        n.tick = ms
-                    # Snap onset to grid within measure
-                    rel    = n.tick - ms
-                    snapped = round(rel / grid) * grid
-                    snapped = max(0, min(int(tpm) - grid, snapped))
-                    n.tick  = ms + snapped
-                    # Clamp duration so note ends at or before barline
-                    if n.tick + n.duration > me:
-                        n.duration = me - n.tick
-                    if n.duration <= 0:
-                        n.duration = grid
+        results = self.song.fix_measure_timing(measure_idx)
 
         self._push_undo(RationalizationAction(
             description=f"Cleanup measure {measure_idx + 1}",
@@ -12710,6 +13086,7 @@ class MidisoftStudio:
         self._accepted_measures.add(measure_idx)
         self.song.modified = True
         self._refresh_views()
+        return results
 
     def _cleanup_all_measures(self):
         """Apply Option-D cleanup to every measure in the song."""
@@ -12717,25 +13094,16 @@ class MidisoftStudio:
         mmap = self.song.get_measure_map()
         if not mmap:
             return
+
         before_tracks = _cup.deepcopy(self.song.tracks)
         before_map    = _cup.deepcopy(self.song.rationalized_measure_map)
-        tpb  = self.song.ticks_per_beat
-        grid = tpb // 8
 
+        all_flags = {}
         for _mi, ms, me, num, den, tpm in mmap:
-            for tr in self.song.tracks:
-                for n in tr.notes:
-                    if ms <= n.tick < me:
-                        if n.tick < ms:
-                            n.tick = ms
-                        rel     = n.tick - ms
-                        snapped = round(rel / grid) * grid
-                        snapped = max(0, min(int(tpm) - grid, snapped))
-                        n.tick  = ms + snapped
-                        if n.tick + n.duration > me:
-                            n.duration = me - n.tick
-                        if n.duration <= 0:
-                            n.duration = grid
+            results = self.song.fix_measure_timing(_mi)
+            flags = [msg for msg in results.values() if msg.startswith("flagged")]
+            if flags:
+                all_flags[_mi] = flags
             self._accepted_measures.add(_mi)
 
         self._push_undo(RationalizationAction(
@@ -12747,6 +13115,7 @@ class MidisoftStudio:
         ))
         self.song.modified = True
         self._refresh_views()
+        return all_flags
 
     def _set_key_signature(self):
         """Open a dialog to view/override the song's key signature.
@@ -13073,34 +13442,102 @@ class MidisoftStudio:
             _mi, ms, me, num, den, tpm = mmap[idx]
             tpb = self.song.ticks_per_beat
 
-            # Compute beat content
-            latest_end = ms
+            # v22ze-83 fix: this used to combine EVERY track into one
+            # number by taking the max note-end across all of them --
+            # for a two-staff piano piece (or any multi-track piece),
+            # that means whichever hand/part happens to end latest wins,
+            # and the OTHER hand's actual timing (better or worse) is
+            # silently hidden or misattributed. Confirmed against a real
+            # file: measure 36 has a genuine ~2-beat overflow in the RH
+            # part while the LH part is essentially fine, but a combined
+            # single number can't distinguish "one part is badly wrong"
+            # from "both parts are moderately wrong" -- exactly the
+            # ambiguity that made these reports hard to act on. Now
+            # computed and displayed per track/staff, matching the
+            # already-requested "identify which staff" feature -- this
+            # turned out to be a correctness fix, not just a nice-to-have.
+            per_track_lines = []
+            worst_delta = 0.0
+            any_real_leftover = False  # true only if some track has a genuine
+                                        # sub-grid data error, vs. just a
+                                        # clean, valid, notatable rest/overflow
+            smallest_unit = max(1, tpb // 8)
             for tr in self.song.tracks:
+                latest_end = ms
+                has_notes = False
                 for n in tr.notes:
                     if ms <= n.tick < me:
+                        has_notes = True
                         latest_end = max(latest_end, n.tick + n.duration)
-            actual_ticks   = max(1, latest_end - ms)
-            expected_ticks = tpm
-            actual_q   = actual_ticks   / tpb
-            expected_q = expected_ticks / tpb
-            delta      = actual_q - expected_q
+                if not has_notes:
+                    per_track_lines.append(f"{(tr.name or '(untitled)').rstrip(':')}: empty")
+                    continue
+                actual_ticks   = max(1, latest_end - ms)
+                expected_ticks = tpm
+                actual_q = actual_ticks / tpb
+                expected_q = expected_ticks / tpb
+                delta    = actual_q - expected_q
+                if abs(delta) > abs(worst_delta):
+                    worst_delta = delta
+                mismatch_ticks = actual_ticks - expected_ticks
+                is_clean_grid = mismatch_ticks % smallest_unit == 0
+                # v22ze-87 correction: grid-alignment only means "not an
+                # error" for UNDERFILL (a clean trailing gap really is just
+                # a legitimate rest). For OVERFLOW, a note is still crossing
+                # the barline regardless of whether the excess happens to be
+                # grid-aligned -- that's still a real problem needing a tie-
+                # split, just one fix_measure_timing() can do cleanly rather
+                # than needing to guess through a sub-grid remainder.
+                if delta > 0:
+                    any_real_leftover = True  # overflow is always worth fixing
+                elif not is_clean_grid:
+                    any_real_leftover = True
+                tag = "✓ clean" if abs(delta) < 0.1 else (
+                    f"overflow by {abs(delta):.2f}"
+                    + (" (fixable via tie-split)" if is_clean_grid else "")
+                    if delta > 0 else
+                    f"underfill by {abs(delta):.2f}"
+                    + (" (clean rest, not an error)" if is_clean_grid else "")
+                )
+                per_track_lines.append(
+                    f"{(tr.name or '(untitled)').rstrip(':')}: {actual_q:.2f}/{expected_q:.0f}  {tag}"
+                )
 
             meas_title_var.set(f"  Measure {idx + 1}")
-            beat_info_var.set(
-                f"Beat count:  {actual_q:.2f} / {expected_q:.0f}  "
-                f"({'overflow' if delta > 0 else 'underfill'} "
-                f"by {abs(delta):.2f} beats)" if abs(delta) >= 0.1
-                else f"Beat count:  {actual_q:.2f} / {expected_q:.0f}  ✓ clean")
+            beat_info_var.set("Beat count —  " + "   |   ".join(per_track_lines))
+
+            # Derived local BPM still shown as a single rough estimate,
+            # based on whichever track had the largest timing delta above
+            # (the per-track breakdown is what actually identifies which
+            # staff has the problem; this is just a quick read-out).
+            expected_ticks = tpm
+            actual_ticks = max(1, round((worst_delta + expected_ticks / tpb) * tpb))
 
             local_bpm = self.song.bpm * (expected_ticks / actual_ticks)
-            local_bpm_var.set(f"Derived local BPM:  {local_bpm:.1f}")
+            local_bpm_var.set(
+                f"If this measure's timing were taken at face value, it "
+                f"would imply ~{local_bpm:.1f} BPM (piece tempo: "
+                f"{self.song.bpm:.0f}) — this is a diagnostic estimate "
+                f"only, not a change to the piece's actual tempo.")
 
-            if abs(delta) < 0.15:
+            if abs(worst_delta) < 0.15:
                 status_var.set("This measure looks clean.")
-            elif abs(delta) <= 1.0:
+            elif not any_real_leftover:
+                # v22ze-86: every track's mismatch is already a whole
+                # multiple of the smallest notatable unit -- i.e. a
+                # legitimate rest (or cleanly tie-splittable overflow),
+                # not broken data. 'Clean up this measure' correctly does
+                # nothing here, so don't suggest it as if something's wrong.
                 status_var.set(
-                    "Moderate overflow — likely rubato at barline. "
-                    "Try 'Clean up this measure'.")
+                    "The amount shown above is a clean, grid-aligned rest "
+                    "(or overflow) — not a timing error. 'Clean up this "
+                    "measure' won't change anything here, correctly.")
+            elif abs(worst_delta) <= 1.0:
+                kind = "overflow" if worst_delta > 0 else "underfill"
+                status_var.set(
+                    f"Moderate {kind} with a genuine sub-grid leftover — "
+                    f"likely rubato at barline or a small data error. "
+                    f"Try 'Clean up this measure'.")
             else:
                 status_var.set(
                     "Large discrepancy — check time signature or "
@@ -13111,6 +13548,7 @@ class MidisoftStudio:
 
         # Attach so _on_strip_click can call it via the panel reference
         dlg._populate_measure_detail = _populate_measure_detail
+        dlg._beat_info_var = beat_info_var  # exposed for testing/introspection
 
         # Populate immediately if a measure is already selected
         if self._selected_measure_idx is not None:
@@ -13138,14 +13576,26 @@ class MidisoftStudio:
             if idx is None:
                 cleanup_status_var.set("Select a measure first.")
                 return
-            self._cleanup_measure(idx)
-            cleanup_status_var.set(f"✓  Cleaned measure {idx + 1}.")
+            results = self._cleanup_measure(idx)
+            flags = [msg for msg in (results or {}).values() if msg.startswith("flagged")]
+            if flags:
+                cleanup_status_var.set(
+                    f"⚠ Measure {idx + 1}: partially fixed, still flagged — " + "; ".join(flags)
+                )
+            else:
+                cleanup_status_var.set(f"✓  Cleaned measure {idx + 1}.")
             _populate_measure_detail(idx)
 
         def _cleanup_all():
-            self._cleanup_all_measures()
-            cleanup_status_var.set(
-                f"✓  Cleaned all {len(self.song.get_measure_map())} measures.")
+            all_flags = self._cleanup_all_measures()
+            n_measures = len(self.song.get_measure_map())
+            if all_flags:
+                cleanup_status_var.set(
+                    f"✓  Cleaned {n_measures} measures — "
+                    f"{len(all_flags)} still flagged (see each measure for detail)."
+                )
+            else:
+                cleanup_status_var.set(f"✓  Cleaned all {n_measures} measures.")
 
         def _step_through():
             cleanup_status_var.set(
@@ -13264,9 +13714,10 @@ class MidisoftStudio:
         btn_row1.pack(fill=tk.X, pady=2)
         _btn_this = _tt(tk.Button(btn_row1, text="Clean up this measure",
                               command=_cleanup_this, **bb),
-            "Snap this measure's notes onto the beat grid and clip any "
-            "note that overflows into the next measure. Only available "
-            "after rationalizing.")
+            "Auto-fix this measure's timing (see Song.fix_measure_timing): "
+            "absorbs sub-grid leftovers into note durations, tie-splits "
+            "barline overflow into the next measure when possible. Works "
+            "on the raw file -- rationalizing first is not required.")
         _btn_this.pack(side=tk.LEFT, padx=(0, 4))
         _btn_all = _tt(tk.Button(btn_row1, text="Clean up all measures",
                              command=_cleanup_all, **bb),
@@ -13288,24 +13739,31 @@ class MidisoftStudio:
                              activebackground="#2a5f9e",
                              relief=tk.FLAT, padx=8, pady=3,
                              command=self._rationalize_score),
-            "Cleanup requires rationalizing first. Opens the Rationalize "
-            "Score dialog — once you Accept there, cleanup and Bake below "
-            "become available.")
+            "Optional: run whole-song rationalization (quantization, "
+            "meter detection). Cleanup and Bake above work directly on "
+            "the raw file and do not require this first.")
         _btn_rat.pack(side=tk.LEFT)
 
         def _refresh_cleanup_state():
-            """Enable or disable cleanup controls based on rationalization state."""
-            rationalized = self._is_rationalized
-            state = tk.NORMAL if rationalized else tk.DISABLED
+            """v22ze-84 fix: this used to disable Clean up this measure /
+            Clean up all measures / Step through entirely until whole-song
+            Rationalize had been run -- a real requirement for the OLD
+            destructive cleanup implementation (Option-D grid-snapping),
+            which needed a pre-built rationalized measure map to work from
+            at all. It was never updated when that implementation was
+            replaced with Song.fix_measure_timing(), which calls
+            get_measure_map() -- already designed to fall back to a
+            computed grid when rationalized_measure_map is None -- so the
+            gate now blocks a feature that works fine without it. Confirmed
+            directly against a real multi-measure file: fix_measure_timing()
+            runs correctly on the raw, never-rationalized song. Buttons are
+            now always enabled; rationalizing first remains available as an
+            option, just no longer a requirement.
+            """
             for btn in (_btn_this, _btn_all, _btn_step):
-                btn.configure(state=state)
-            if rationalized:
-                cleanup_gate_var.set("")
-                _btn_rat.pack_forget()
-            else:
-                cleanup_gate_var.set(
-                    "⚠  Cleanup is available after Rationalize Score has been run.")
-                _btn_rat.pack(side=tk.LEFT)
+                btn.configure(state=tk.NORMAL)
+            cleanup_gate_var.set("")
+            _btn_rat.pack(side=tk.LEFT)
 
         # Run immediately to set initial state
         _refresh_cleanup_state()
@@ -15243,11 +15701,77 @@ class MidisoftStudio:
             _clk.bind("<Enter>", lambda e, w=_clk: w.configure(fg="#58a6ff"))
             _clk.bind("<Leave>", lambda e, w=_clk: w.configure(fg=MUTED))
 
+        tk.Button(dlg, text="About Our Notation Engraving", command=self._about_engraving,
+                  bg="#21262d", fg="#58a6ff",
+                  activebackground="#30363d", activeforeground="#79c0ff",
+                  relief=tk.FLAT, padx=12, pady=4,
+                  font=("TkDefaultFont", 9, "underline")).pack(pady=(0, 4))
+
         tk.Button(dlg, text="Close", command=dlg.destroy,
                   bg="#21262d", fg=FG,
                   activebackground="#30363d", activeforeground=FG,
                   relief=tk.FLAT, padx=20, pady=5,
                   font=("TkDefaultFont", 10)).pack(pady=14)
+
+    def _about_engraving(self):
+        """Explains, in plain terms, what Midi-Studio's notation rendering
+        does and does not attempt -- added after a real, worked example
+        (Rachmaninoff Op. 23 No. 5, measure 3) showed the difference
+        between our onset-spacing-based simplified engraving and the
+        composer's actual published notation (a tied, dotted quarter with
+        its own rest and dynamic marking). Both produce the identical
+        audio result; only the notated page differs."""
+        dlg = tk.Toplevel(self.root)
+        dlg.title("About Our Notation Engraving")
+        dlg.resizable(False, False)
+        dlg.configure(bg="#0d1117")
+        dlg.grab_set()
+
+        BG = "#0d1117"; FG = "white"; MUTED = "#8b949e"; ACCENT = "#58a6ff"
+
+        tk.Label(dlg, text="About Our Notation Engraving",
+                 bg=BG, fg=ACCENT,
+                 font=("TkDefaultFont", 13, "bold")).pack(pady=(20, 10), padx=28)
+
+        body = (
+            "Midi-Studio's score rendering is a simplification, not a full\n"
+            "transcription, of any composer's original engraving. It does not\n"
+            "attempt to reconstruct ties, dots, rest placement, or dynamic\n"
+            "markings the way a composer's published score does. Instead, it\n"
+            "aims for something narrower and more reliable: notation that is\n"
+            "correct against the prevailing time signature and reproduces the\n"
+            "same audio result as the source MIDI file.\n\n"
+            "This means:\n\n"
+            "  •  The rhythm shown is derived from when notes start relative\n"
+            "     to each other (onset spacing), not from raw sustain length —\n"
+            "     so pedal, legato, or overhang in the MIDI data doesn't\n"
+            "     distort the notated rhythm.\n\n"
+            "  •  The simplified notation never changes the actual\n"
+            "     performance. Playback, timing, and duration data are\n"
+            "     untouched; only the visual representation is simplified.\n\n"
+            "  •  Where a composer's engraving might use a tied, dotted note\n"
+            "     with a specific rest and dynamic marking to notate an\n"
+            "     expressive idea, our engraving may show the same musical\n"
+            "     content more plainly — same sound, simpler page.\n\n"
+            "  •  This is a deliberate tradeoff for general-purpose\n"
+            "     reliability, not an attempt to replace or improve on a\n"
+            "     composer's or editor's published score. Reconstructing\n"
+            "     that fully is a different, much harder problem — it would\n"
+            "     require information (ties, engraving choices, dynamics)\n"
+            "     that a MIDI file structurally cannot contain.\n\n"
+            "If you need the composer's actual notated intent, the original\n"
+            "score remains the authoritative source. Midi-Studio's rendering\n"
+            "is a correct, readable, and faithful-to-the-audio alternative —\n"
+            "not a replacement for it."
+        )
+        tk.Label(dlg, text=body, bg=BG, fg=MUTED,
+                 font=("TkDefaultFont", 9), justify=tk.LEFT).pack(padx=28, pady=(0, 6))
+
+        tk.Button(dlg, text="Close", command=dlg.destroy,
+                  bg="#21262d", fg=FG,
+                  activebackground="#30363d", activeforeground=FG,
+                  relief=tk.FLAT, padx=20, pady=5,
+                  font=("TkDefaultFont", 10)).pack(pady=(6, 20))
 
     def _on_quit(self):
         if getattr(self, "_shutting_down", False):
