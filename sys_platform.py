@@ -8,10 +8,13 @@ import shutil
 import subprocess
 import sys
 import time
+from datetime import datetime
 
 # Application identity (update APP_VERSION each release)
 APP_VERSION = "22ze-73"
 APP_FULL_NAME = "Midi-Studio — a Synthesizer in the Spirit of MidiSoft Studio4"
+APP_TIMESTAMP = datetime.now().strftime("%Y-%m-%d  %H:%M")
+APP_TITLE = f"{APP_FULL_NAME}  —  v{APP_VERSION}  {APP_TIMESTAMP}"
 
 # Sterling Lions Club links
 LIONS_DONATE_URL = "https://e-clubhouse.org/sites/sterlingva/page-10.php"

@@ -5,13 +5,7 @@ import sys
 import tkinter as tk
 from tkinter import messagebox
 
-from gui import MidisoftStudio, _maybe_show_no_synth_dialog
-from midi_io import (
-    MIDI_OUT_OK,
-    _fs_active,
-    midi_input_subscribe,
-    midi_input_unsubscribe,
-)
+from gui import MidisoftStudio, SplashScreen
 
 # Import modules
 from sys_platform import APP_FULL_NAME, APP_VERSION
@@ -20,17 +14,21 @@ from sys_platform import APP_FULL_NAME, APP_VERSION
 def main():
     """Launch the MIDI Studio application."""
     root = tk.Tk()
-    root.withdraw()
+    try:
+        root.tk.call("tk", "scaling", 1.25)
+    except Exception:
+        pass
 
     try:
-        # Initialize the main application window
+        # Initialize the main application window.
+        # (MidisoftStudio.__init__ shows the "no synthesizer detected"
+        # dialog itself, once the window exists.)
         app = MidisoftStudio(root)
 
-        # Show setup dialog if no synthesizer detected
-        _maybe_show_no_synth_dialog(root)
+        # Centres on the main window's monitor; stays until dismissed.
+        SplashScreen(root, app)
 
         # Run the event loop
-        root.deiconify()
         root.mainloop()
 
     except Exception as e:

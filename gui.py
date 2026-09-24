@@ -1148,7 +1148,10 @@ class MidiNote:
         "articulation",
         "spelling",
         "_orig",
+<<<<<<< HEAD
         "_tie_pred_id",
+=======
+>>>>>>> b6bd1106c3f00a158eb2f178ed731b054f18b3c8
     )
 
     def __init__(self, tick, pitch, velocity, duration, channel=0, articulation="", spelling=""):
@@ -14295,6 +14298,7 @@ class MidisoftStudio:
         tk.Label(ph_row, text=ph_label_text, bg=BG, fg=ph_fg,
                  font=("TkDefaultFont", 9)).pack(side=tk.LEFT, padx=4)
 
+<<<<<<< HEAD
         # Pedal/harmonic-boundary duration correction
         # NEW — this step previously ran unconditionally on every
         # Rationalize (no way to turn it off from this dialog), while
@@ -14318,11 +14322,17 @@ class MidisoftStudio:
                  bg=BG, fg=FG, font=("TkDefaultFont", 9)).pack(
             side=tk.LEFT, padx=4)
 
+=======
+>>>>>>> b6bd1106c3f00a158eb2f178ed731b054f18b3c8
         # Quantize strength
         q_str_var = tk.IntVar(value=85)
         _tt(_row(pfrm, "Quantize strength (%):", lambda p: tk.Spinbox(
             p, from_=0, to=100, textvariable=q_str_var, width=5,
+<<<<<<< HEAD
             bg="#21262d", fg=FG, buttonbackground="#30363d"), 7),
+=======
+            bg="#21262d", fg=FG, buttonbackground="#30363d"), 6),
+>>>>>>> b6bd1106c3f00a158eb2f178ed731b054f18b3c8
             "How firmly note onsets snap to the grid. 100% = hard snap "
             "(mechanical); 0% = no snapping (keeps all rubato/timing "
             "exactly as played). 85% is a good default for a human "
@@ -14332,7 +14342,11 @@ class MidisoftStudio:
         q_div_var = tk.StringVar(value="8th")
         grid_opts = {"8th": 8, "16th": 16, "Quarter": 4, "32nd": 32}
         _tt(_row(pfrm, "Quantize grid:", lambda p: tk.OptionMenu(
+<<<<<<< HEAD
             p, q_div_var, *grid_opts.keys()), 8),
+=======
+            p, q_div_var, *grid_opts.keys()), 7),
+>>>>>>> b6bd1106c3f00a158eb2f178ed731b054f18b3c8
             "The finest note value onsets can snap to. Choose 16th for "
             "pieces with fast ornamental notes; Quarter for simple slow "
             "pieces; 8th is the common default.")
@@ -14354,7 +14368,11 @@ class MidisoftStudio:
         rest_opts = {"Off": 0, "32nd": _tpb_r // 8,
                      "16th": _tpb_r // 4, "8th": _tpb_r // 2}
         _tt(_row(pfrm, "Remove rests shorter than:", lambda p: tk.OptionMenu(
+<<<<<<< HEAD
             p, rest_var, *rest_opts.keys()), 9),
+=======
+            p, rest_var, *rest_opts.keys()), 8),
+>>>>>>> b6bd1106c3f00a158eb2f178ed731b054f18b3c8
             "Gaps between notes shorter than this are merged away as "
             "performance noise rather than notated as real rests. "
             "'Off' preserves every gap exactly as played.")
@@ -14363,7 +14381,11 @@ class MidisoftStudio:
         span_var = tk.IntVar(value=14)
         _tt(_row(pfrm, "Max hand span (semitones):", lambda p: tk.Spinbox(
             p, from_=10, to=18, textvariable=span_var, width=4,
+<<<<<<< HEAD
             bg="#21262d", fg=FG, buttonbackground="#30363d"), 10),
+=======
+            bg="#21262d", fg=FG, buttonbackground="#30363d"), 9),
+>>>>>>> b6bd1106c3f00a158eb2f178ed731b054f18b3c8
             "The widest interval one hand is assumed able to comfortably "
             "play. Notes wider than this within one hand are penalised "
             "during hand assignment. 14 semitones (a tenth) is a typical "
@@ -14373,7 +14395,11 @@ class MidisoftStudio:
         arp_var = tk.IntVar(value=0)
         _tt(_row(pfrm, "Arpeggio window (0=auto):", lambda p: tk.Spinbox(
             p, from_=0, to=200, textvariable=arp_var, width=5,
+<<<<<<< HEAD
             bg="#21262d", fg=FG, buttonbackground="#30363d"), 11),
+=======
+            bg="#21262d", fg=FG, buttonbackground="#30363d"), 10),
+>>>>>>> b6bd1106c3f00a158eb2f178ed731b054f18b3c8
             "Notes within this many ticks of each other are treated as a "
             "rolled chord/arpeggio rather than sequential notes. 0 lets "
             "the app compute a sensible value from the detected tempo.")
@@ -14435,7 +14461,10 @@ class MidisoftStudio:
                 'timesig_override':  (None if detect_ts_var.get()
                                       else (_ts_num_var.get(), _ts_den_var.get())),
                 'preserve_hands':    preserve_hands_var.get(),
+<<<<<<< HEAD
                 'correct_pedal_durations': correct_pedal_var.get(),
+=======
+>>>>>>> b6bd1106c3f00a158eb2f178ed731b054f18b3c8
             }
             m_range = None
             if not range_all.get():
@@ -14882,6 +14911,7 @@ class MidisoftStudio:
         self._undo_stack = []
         self._redo_stack = []
         self._original_song = None
+<<<<<<< HEAD
         self._is_rationalized = False  # v22ze-102 fix: this was left
         # stale-True across a file close/reload (only _original_song was
         # reset here), so _set_rationalized_song()'s "already rationalized"
@@ -14890,6 +14920,8 @@ class MidisoftStudio:
         # the operation's result effectively orphaned from the undo/
         # discard bookkeeping. Reset together -- they're a paired
         # invariant (_original_song is not None) IFF (_is_rationalized).
+=======
+>>>>>>> b6bd1106c3f00a158eb2f178ed731b054f18b3c8
         self._accepted_measures = set()
         self.play_btn.configure(text="▶  Play")
         self.rec_btn.configure(bg="#0f3320",fg="#3fb950")
@@ -15521,11 +15553,14 @@ class MidisoftStudio:
                 'detect_tempo':      False,
                 'detect_timesig':    False,
                 'preserve_hands':    False,  # actually run the DP split
+<<<<<<< HEAD
                 'correct_pedal_durations': False,  # NEW — this step was the
                                               # one exception that still
                                               # altered timing despite the
                                               # "nothing else changes" promise
                                               # above; see gui.py step 0.5.
+=======
+>>>>>>> b6bd1106c3f00a158eb2f178ed731b054f18b3c8
             }
             result = self.song.rationalize(params=params)
             result = result.bake_to_score()
@@ -16103,3 +16138,7 @@ class MidisoftStudio:
                 self.root.destroy()
         except Exception as e:
             print("QUIT: root.destroy() exception:", e)
+<<<<<<< HEAD
+=======
+
+>>>>>>> b6bd1106c3f00a158eb2f178ed731b054f18b3c8
