@@ -14307,13 +14307,14 @@ class MidisoftStudio:
         correct_pedal_var = tk.BooleanVar(value=True)
         cp_row = tk.Frame(pfrm, bg=BG)
         cp_row.grid(row=6, column=0, columnspan=2, sticky="w", pady=(4, 0))
-        _tt(tk.Checkbutton(
+        cp_check = _tt(tk.Checkbutton(
             cp_row, variable=correct_pedal_var, bg=BG, fg=FG,
             selectcolor="#21262d", activebackground=BG),
             "Extend each note's written duration to the next onset of "
             "the same pitch, or to the sustain pedal's release if that "
             "comes first (whichever bound is closer). Off = leave "
             "note durations exactly as read from the file.")
+        cp_check.pack(side=tk.LEFT)
         tk.Label(cp_row, text="Correct pedal/harmonic-boundary durations",
                  bg=BG, fg=FG, font=("TkDefaultFont", 9)).pack(
             side=tk.LEFT, padx=4)
