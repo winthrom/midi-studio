@@ -9230,6 +9230,21 @@ class ScoreView(tk.Frame):
         # then picks the pieces up automatically with zero changes of its
         # own, since it already looks for exactly this shape.
         _mmap_starts_r = [ms for (_mi, ms, me, *_r) in mmap]
+        # v22ze-101 fix: _draw_ties() below refuses to draw a tie arc for
+        # any note longer than 2 measures (MAX_TIE_TICKS -- treats it as a
+        # duration-correction artifact, not a real tie). This loop used to
+        # have no matching limit, so a note stretched past 2 measures (e.g.
+        # by rationalize()'s pedal/harmonic-boundary duration correction)
+        # still got fragmented into a notehead at the start of every
+        # measure it crossed -- with no tie arc drawn to explain any of
+        # them, since _draw_ties had already bailed on that same note.
+        # Result: orphan chord fragments scattered across later measures,
+        # looking exactly like leftover chords "dumped" from earlier ones.
+        # Fix: clip what we're willing to fragment to the SAME limit
+        # _draw_ties uses, so the two never disagree. This only affects
+        # this render-only qtr copy -- real note/duration data on the
+        # actual Track is untouched (see note above).
+        _MAX_TIE_TICKS_r = (mmap[0][5] * 2) if mmap else tpb * 4 * 2
 
         def _measure_bounds_r(tick):
             i = bisect.bisect_right(_mmap_starts_r, tick) - 1
@@ -9241,6 +9256,16 @@ class ScoreView(tk.Frame):
         _split_notes = []
         for n in qtr.notes:
             cur = n
+            if cur.duration > _MAX_TIE_TICKS_r:
+                clipped = type("QNote", (), {})()
+                clipped.tick = cur.tick
+                clipped.pitch = cur.pitch
+                clipped.velocity = cur.velocity
+                clipped.channel = cur.channel
+                clipped.articulation = getattr(cur, "articulation", "")
+                clipped.spelling = getattr(cur, "spelling", "")
+                clipped.duration = _MAX_TIE_TICKS_r
+                cur = clipped
             _guard = 0  # safety cap -- a note can only cross so many
             # real barlines; this just prevents a runaway
             # loop if mmap/tick data is ever malformed.
@@ -14270,11 +14295,34 @@ class MidisoftStudio:
         tk.Label(ph_row, text=ph_label_text, bg=BG, fg=ph_fg,
                  font=("TkDefaultFont", 9)).pack(side=tk.LEFT, padx=4)
 
+        # Pedal/harmonic-boundary duration correction
+        # NEW — this step previously ran unconditionally on every
+        # Rationalize (no way to turn it off from this dialog), while
+        # Separate Hands has always disabled it internally so it could
+        # promise not to touch note timing. Exposing it here lets it
+        # actually be tested/compared against Separate Hands, and gives
+        # a way to turn it off if it's over-extending durations on a
+        # given piece (e.g. a note not recurring for many measures
+        # getting stretched to bridge that whole gap).
+        correct_pedal_var = tk.BooleanVar(value=True)
+        cp_row = tk.Frame(pfrm, bg=BG)
+        cp_row.grid(row=6, column=0, columnspan=2, sticky="w", pady=(4, 0))
+        _tt(tk.Checkbutton(
+            cp_row, variable=correct_pedal_var, bg=BG, fg=FG,
+            selectcolor="#21262d", activebackground=BG),
+            "Extend each note's written duration to the next onset of "
+            "the same pitch, or to the sustain pedal's release if that "
+            "comes first (whichever bound is closer). Off = leave "
+            "note durations exactly as read from the file.")
+        tk.Label(cp_row, text="Correct pedal/harmonic-boundary durations",
+                 bg=BG, fg=FG, font=("TkDefaultFont", 9)).pack(
+            side=tk.LEFT, padx=4)
+
         # Quantize strength
         q_str_var = tk.IntVar(value=85)
         _tt(_row(pfrm, "Quantize strength (%):", lambda p: tk.Spinbox(
             p, from_=0, to=100, textvariable=q_str_var, width=5,
-            bg="#21262d", fg=FG, buttonbackground="#30363d"), 6),
+            bg="#21262d", fg=FG, buttonbackground="#30363d"), 7),
             "How firmly note onsets snap to the grid. 100% = hard snap "
             "(mechanical); 0% = no snapping (keeps all rubato/timing "
             "exactly as played). 85% is a good default for a human "
@@ -14284,7 +14332,7 @@ class MidisoftStudio:
         q_div_var = tk.StringVar(value="8th")
         grid_opts = {"8th": 8, "16th": 16, "Quarter": 4, "32nd": 32}
         _tt(_row(pfrm, "Quantize grid:", lambda p: tk.OptionMenu(
-            p, q_div_var, *grid_opts.keys()), 7),
+            p, q_div_var, *grid_opts.keys()), 8),
             "The finest note value onsets can snap to. Choose 16th for "
             "pieces with fast ornamental notes; Quarter for simple slow "
             "pieces; 8th is the common default.")
@@ -14306,7 +14354,7 @@ class MidisoftStudio:
         rest_opts = {"Off": 0, "32nd": _tpb_r // 8,
                      "16th": _tpb_r // 4, "8th": _tpb_r // 2}
         _tt(_row(pfrm, "Remove rests shorter than:", lambda p: tk.OptionMenu(
-            p, rest_var, *rest_opts.keys()), 8),
+            p, rest_var, *rest_opts.keys()), 9),
             "Gaps between notes shorter than this are merged away as "
             "performance noise rather than notated as real rests. "
             "'Off' preserves every gap exactly as played.")
@@ -14315,7 +14363,7 @@ class MidisoftStudio:
         span_var = tk.IntVar(value=14)
         _tt(_row(pfrm, "Max hand span (semitones):", lambda p: tk.Spinbox(
             p, from_=10, to=18, textvariable=span_var, width=4,
-            bg="#21262d", fg=FG, buttonbackground="#30363d"), 9),
+            bg="#21262d", fg=FG, buttonbackground="#30363d"), 10),
             "The widest interval one hand is assumed able to comfortably "
             "play. Notes wider than this within one hand are penalised "
             "during hand assignment. 14 semitones (a tenth) is a typical "
@@ -14325,7 +14373,7 @@ class MidisoftStudio:
         arp_var = tk.IntVar(value=0)
         _tt(_row(pfrm, "Arpeggio window (0=auto):", lambda p: tk.Spinbox(
             p, from_=0, to=200, textvariable=arp_var, width=5,
-            bg="#21262d", fg=FG, buttonbackground="#30363d"), 10),
+            bg="#21262d", fg=FG, buttonbackground="#30363d"), 11),
             "Notes within this many ticks of each other are treated as a "
             "rolled chord/arpeggio rather than sequential notes. 0 lets "
             "the app compute a sensible value from the detected tempo.")
@@ -14387,6 +14435,7 @@ class MidisoftStudio:
                 'timesig_override':  (None if detect_ts_var.get()
                                       else (_ts_num_var.get(), _ts_den_var.get())),
                 'preserve_hands':    preserve_hands_var.get(),
+                'correct_pedal_durations': correct_pedal_var.get(),
             }
             m_range = None
             if not range_all.get():
@@ -14833,6 +14882,14 @@ class MidisoftStudio:
         self._undo_stack = []
         self._redo_stack = []
         self._original_song = None
+        self._is_rationalized = False  # v22ze-102 fix: this was left
+        # stale-True across a file close/reload (only _original_song was
+        # reset here), so _set_rationalized_song()'s "already rationalized"
+        # branch fired on the NEXT rationalize/Separate Hands call for a
+        # brand-new file, skipping the re-baseline it needs and leaving
+        # the operation's result effectively orphaned from the undo/
+        # discard bookkeeping. Reset together -- they're a paired
+        # invariant (_original_song is not None) IFF (_is_rationalized).
         self._accepted_measures = set()
         self.play_btn.configure(text="▶  Play")
         self.rec_btn.configure(bg="#0f3320",fg="#3fb950")
