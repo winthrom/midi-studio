@@ -2467,7 +2467,16 @@ class Song:
         # This distinguishes:
         #   staccato = note IS on the beat, played short by performer choice
         #   grace    = note is BEFORE the beat, played short by definition
-        _grace_thresh = p["arpeggio_window"] * 2  # notes shorter than this
+        # v22ze-103 fix: this threshold must be >= the min_dur removal floor
+        # bake_to_score() applies later (grace_ticks(tpb), Step 2 "remove
+        # sub-threshold notes"). It previously used a smaller, independent
+        # value (arpeggio_window * 2), which left a dead zone: any note
+        # with duration in [this threshold, grace_ticks(tpb)) was too long
+        # to be considered a grace-note candidate HERE, yet too short to
+        # survive the unconditional removal floor LATER -- guaranteed
+        # silent deletion with no path to preservation, regardless of
+        # whether it had a legitimate longer note following it.
+        _grace_thresh = max(p["arpeggio_window"] * 2, grace_ticks(tpb))
         _beat_window = tpb // 2  # must be within half-beat of next
         all_notes_sorted = sorted(all_notes, key=lambda n: n.tick)
         for i, n in enumerate(all_notes_sorted):
