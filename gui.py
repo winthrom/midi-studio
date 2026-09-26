@@ -1259,6 +1259,11 @@ def _build_measure_map_core(tpb, sigs, total):
     return measures
 
 
+_TC_CREATED = [0]  # TEMP DEBUG (module level)
+_TC_MERGED = [0]  # TEMP DEBUG (module level)
+_TC_ORPHANED = [0]  # TEMP DEBUG (module level)
+
+
 class Song:
     def __init__(self):
         self.ticks_per_beat = 480
@@ -2118,6 +2123,10 @@ class Song:
 
     # ── Score Rationalization ────────────────────────────────────────────────
     def rationalize(self, params=None, measure_range=None):
+        global _TC_CREATED, _TC_MERGED, _TC_ORPHANED  # TEMP DEBUG
+        _TC_CREATED = [0]   # TEMP DEBUG
+        _TC_MERGED = [0]    # TEMP DEBUG
+        _TC_ORPHANED = [0]  # TEMP DEBUG
         """Return a NEW Song with rationalized notation.
 
         The original Song is never modified.  The returned Song has:
@@ -2476,15 +2485,25 @@ class Song:
         # survive the unconditional removal floor LATER -- guaranteed
         # silent deletion with no path to preservation, regardless of
         # whether it had a legitimate longer note following it.
-        _grace_thresh = max(p["arpeggio_window"] * 2, grace_ticks(tpb))
+        _grace_thresh = max(p["arpeggio_window"] * 2, grace_ticks(tpb))  # v22ze-103 fix
         _beat_window = tpb // 2  # must be within half-beat of next
         all_notes_sorted = sorted(all_notes, key=lambda n: n.tick)
+        _DEBUG_TARGET = (44, 45, 37)  # TEMP DEBUG
         for i, n in enumerate(all_notes_sorted):
+            if n.pitch in _DEBUG_TARGET and 200000 <= n.tick <= 210000:
+                print(f"[GRACE-DEBUG] pitch={n.pitch} tick={n.tick} dur={n.duration} "
+                      f"_grace_thresh={_grace_thresh} art_before={getattr(n,'articulation','')!r}",
+                      flush=True)
             if n.duration >= _grace_thresh:
+                if n.pitch in _DEBUG_TARGET and 200000 <= n.tick <= 210000:
+                    print(f"[GRACE-DEBUG]   -> SKIPPED (too long)", flush=True)
                 continue  # too long to be a grace note
             if getattr(n, "articulation", ""):
+                if n.pitch in _DEBUG_TARGET and 200000 <= n.tick <= 210000:
+                    print(f"[GRACE-DEBUG]   -> SKIPPED (already marked)", flush=True)
                 continue  # already marked
             # Look for a longer note within one beat following this note
+            _found_grace = False
             for j in range(i + 1, len(all_notes_sorted)):
                 m = all_notes_sorted[j]
                 gap = m.tick - (n.tick + n.duration)
@@ -2493,7 +2512,13 @@ class Song:
                 if m.duration >= _grace_thresh and m.pitch != n.pitch:
                     # This short note precedes a longer different-pitch note
                     n.articulation = "grace"
+                    _found_grace = True
+                    if n.pitch in _DEBUG_TARGET and 200000 <= n.tick <= 210000:
+                        print(f"[GRACE-DEBUG]   -> TAGGED GRACE (matched pitch={m.pitch} "
+                              f"tick={m.tick} dur={m.duration})", flush=True)
                     break
+            if not _found_grace and n.pitch in _DEBUG_TARGET and 200000 <= n.tick <= 210000:
+                print(f"[GRACE-DEBUG]   -> NOT TAGGED (no qualifying next note found)", flush=True)
 
         # ── 0.6. Staccato detection (AFTER pedal correction) ─────────────────
         # Staccato ratio only makes sense once pedal correction has extended
@@ -2993,11 +3018,15 @@ class Song:
                         n.articulation = ""
                     remainder = n.duration - max_dur
                     n.duration = max_dur  # clip to barline
+                    # v22ze-104 fix: tag the PREDECESSOR too, not just the
+                    # continuation -- see bake_to_score() Step 4 for why.
+                    n.articulation = "tie_predecessor"
                     # Build tie-continuation note
                     tie_note = copy.copy(n)
                     tie_note.tick = me  # starts at next barline
                     tie_note.duration = remainder
                     tie_note.articulation = "tie_continuation"
+                    _TC_CREATED[0] += 1  # TEMP DEBUG
                     extra_groups.append([tie_note])
 
         # Merge tie-continuations in so that they get Pass A+B treatment too
@@ -3022,6 +3051,7 @@ class Song:
                         cont.tick = me
                         cont.duration = remainder
                         cont.articulation = "tie_continuation"
+                        _TC_CREATED[0] += 1  # TEMP DEBUG
                         newly_added.append([cont])
             q_groups.extend(extra_groups)
             extra_groups = newly_added
@@ -3377,8 +3407,48 @@ class Song:
         rh_track.events.sort(key=lambda e: e.tick)
         lh_track.events.sort(key=lambda e: e.tick)
 
-        for group, (lh_set, rh_set) in zip(q_groups, assignments):
+        # v22ze-106 fix: q_groups is NOT guaranteed to be in tick order at
+        # this point -- Pass A/B appends tie-continuation groups to the
+        # END of the list regardless of their actual tick position, and
+        # nothing re-sorts it afterward. The final rh_track.notes.sort()/
+        # lh_track.notes.sort() calls below make the OUTPUT correctly
+        # ordered either way, but _tie_chain_hand's "most recently
+        # processed note of this pitch" tracking silently assumed
+        # iteration order == chronological order. Sort the (group,
+        # assignment) pairs together here so that assumption holds --
+        # confirmed via instrumentation that most remaining orphans after
+        # v22ze-105 had a valid predecessor index that was simply the
+        # WRONG note (out-of-order processing), not a missing one.
+        _tie_chain_hand: dict = {}  # v22ze-105: pitch -> 'RH'/'LH', so a tie
+        # continuation follows the SAME hand as its predecessor rather than
+        # being independently DP-assigned. Without this, a continuation
+        # piece -- created as its own singleton group with no other notes
+        # for context -- could easily be assigned to the OTHER hand than
+        # its predecessor, and since bake_to_score() processes each hand's
+        # notes separately, the continuation's true predecessor would then
+        # be invisible to it entirely (different track's note list) --
+        # producing exactly the "orphaned tie, no predecessor found"
+        # pattern confirmed via instrumentation on a real file.
+        _pairs = sorted(
+            zip(q_groups, assignments),
+            key=lambda gp: gp[0][0].tick if gp[0] else 0,
+        )
+        for group, (lh_set, rh_set) in _pairs:
             for n in group:
+                _tie_tag = getattr(n, "articulation", "")
+
+                # Tie-chain continuity override (v22ze-105): takes priority
+                # over everything except preserve-hands mode (which already
+                # keeps chains together naturally via the file's own
+                # channel tag, so it doesn't need this).
+                if not _preserve_hands and _tie_tag == "tie_continuation" \
+                        and n.pitch in _tie_chain_hand:
+                    forced = _tie_chain_hand[n.pitch]
+                    nc = copy.copy(n)
+                    nc.channel = 0 if forced == "RH" else 1
+                    (rh_track if forced == "RH" else lh_track).notes.append(nc)
+                    continue
+
                 # Preserve-hands mode (v22t): trust the note's own channel
                 # tag (set at step 0.1 from the file's original track)
                 # directly, bypassing both the DP result AND the arpeggio
@@ -3408,21 +3478,29 @@ class Song:
                         nc = copy.copy(n)
                         nc.channel = 0
                         rh_track.notes.append(nc)
+                        if _tie_tag in ("tie_predecessor", "tie_continuation"):
+                            _tie_chain_hand[n.pitch] = "RH"
                         continue
                     elif forced_hand == "LH":
                         nc = copy.copy(n)
                         nc.channel = 1
                         lh_track.notes.append(nc)
+                        if _tie_tag in ("tie_predecessor", "tie_continuation"):
+                            _tie_chain_hand[n.pitch] = "LH"
                         continue
                 # Normal DP assignment
                 if n.pitch in rh_set:
                     nc = copy.copy(n)
                     nc.channel = 0
                     rh_track.notes.append(nc)
+                    if _tie_tag in ("tie_predecessor", "tie_continuation"):
+                        _tie_chain_hand[n.pitch] = "RH"
                 else:
                     nc = copy.copy(n)
                     nc.channel = 1
                     lh_track.notes.append(nc)
+                    if _tie_tag in ("tie_predecessor", "tie_continuation"):
+                        _tie_chain_hand[n.pitch] = "LH"
 
         rh_track.notes.sort(key=lambda n: n.tick)
         lh_track.notes.sort(key=lambda n: n.tick)
@@ -3758,6 +3836,7 @@ class Song:
             return 4  # cap at sixteenth — 32nds make scores unreadably dense
 
     def bake_to_score(self):
+        global _TC_CREATED, _TC_MERGED, _TC_ORPHANED  # TEMP DEBUG
         """Return a NEW Song whose note data matches exactly what the score displays.
 
         The score renderer (build_measure_str inside to_ly) applies a cleaning
@@ -3918,10 +3997,18 @@ class Song:
                 # regardless of duration — they will be rendered as small
                 # prefatory noteheads before the beat.
                 min_dur = _gt
+                _TIE_TAGS = ("tie_predecessor", "tie_continuation")  # v22ze-104
+                for _q, _n in snapped:  # TEMP DEBUG
+                    if _n.pitch in (44, 45, 37) and 200000 <= _n.tick <= 210000:
+                        _kept = _n.duration >= min_dur or getattr(_n, "articulation", "") in ("grace",) + _TIE_TAGS
+                        print(f"[MINDUR-DEBUG] pitch={_n.pitch} tick={_n.tick} dur={_n.duration} "
+                              f"min_dur={min_dur} art={getattr(_n,'articulation','')!r} "
+                              f"KEPT={_kept}", flush=True)
                 snapped = [
                     (q, n)
                     for q, n in snapped
-                    if n.duration >= min_dur or getattr(n, "articulation", "") == "grace"
+                    if n.duration >= min_dur
+                    or getattr(n, "articulation", "") in ("grace",) + _TIE_TAGS
                 ]
                 if not snapped:
                     continue
@@ -3939,6 +4026,14 @@ class Song:
                     next_tick = groups[i + 1][0] if i + 1 < len(groups) else budget
                     available = next_tick - tick
                     if available <= 0:
+                        for _n in chord:  # TEMP DEBUG
+                            if getattr(_n, "articulation", "") in (
+                                "tie_predecessor", "tie_continuation"
+                            ):
+                                print(f"[SKIP-DEBUG] DISCARDED WHOLE CHORD pitch={_n.pitch} "
+                                      f"art={_n.articulation!r} tick={tick} ms={ms} "
+                                      f"next_tick={next_tick} available={available} "
+                                      f"n_notes_in_chord={len(chord)}", flush=True)
                         continue
 
                     raw_dur = max(n.duration for n in chord)
@@ -3950,7 +4045,16 @@ class Song:
                     for n in chord:
                         nc = _bk.copy(n)
                         nc.tick = abs_tick
-                        nc.duration = chosen
+                        # v22ze-104 fix: preserve exact duration for a
+                        # tie-chain piece instead of overwriting it with
+                        # the chord's uniformly-chosen notation duration
+                        # -- see fix note above Pass A's tagging site.
+                        if getattr(n, "articulation", "") in (
+                            "tie_predecessor", "tie_continuation"
+                        ):
+                            nc.duration = n.duration
+                        else:
+                            nc.duration = chosen
                         # v22ze-48 fix: this used to clear the
                         # tie_continuation marker RIGHT HERE, before
                         # Step 5 below ever got a chance to see it --
@@ -4007,7 +4111,12 @@ class Song:
                     if idx is not None:
                         pred = merged[idx]
                         pred.duration = (n.tick + n.duration) - pred.tick
+                        _TC_MERGED[0] += 1  # TEMP DEBUG
                         continue
+                    _TC_ORPHANED[0] += 1  # TEMP DEBUG
+                    if _TC_ORPHANED[0] <= 20:
+                        print(f"[ORPHAN-DEBUG] pitch={n.pitch} tick={n.tick} dur={n.duration} "
+                              f"had_predecessor_idx={last_of_pitch.get(n.pitch)}", flush=True)
                     # Orphan: no predecessor found to merge into (e.g. the
                     # predecessor note was itself dropped/clipped to zero
                     # length somewhere upstream). Falls through to being
@@ -4023,6 +4132,8 @@ class Song:
             out_tr.notes = merged
             out.tracks.append(out_tr)
 
+        print(f"[TIE-SUMMARY] created={_TC_CREATED[0]} merged={_TC_MERGED[0]} "
+              f"orphaned={_TC_ORPHANED[0]}", flush=True)  # TEMP DEBUG
         return out
 
     def to_ly(self, path, show_bar_numbers=True, staff_size=16):
