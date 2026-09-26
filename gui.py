@@ -2372,9 +2372,32 @@ class Song:
                 # same-pitch onset) or the plain decay default below,
                 # exactly like a note played with no pedal engaged should.
                 _decay_ticks = int(tpb * (2.0 + (n.velocity / 127.0) * 4.0))
-                bounds = [b for b in (nsp, npd) if b is not None]
-                if bounds:
+                # v22ze-109 fix: confirmed directly against a real file
+                # that this could produce a wildly oversized duration --
+                # one note extended 147082 ticks (~38 measures) -- with
+                # NO pedal anywhere near it. Root cause: when npd is None
+                # (no pedal active at this note's own onset -- the v22ze-100
+                # fix above correctly stops treating a FUTURE pedal segment
+                # as a bound in that case), nsp (next same-pitch onset)
+                # was used as the sole bound with nothing capping how far
+                # away that onset could be. A bass/pedal-point note that
+                # simply isn't struck again for dozens of measures got
+                # 'extended' all the way to that distant, musically
+                # unrelated future onset -- then mislabeled pedal_extended
+                # even though no pedal was involved. That single runaway
+                # note then fed rationalize()'s barline splitter, creating
+                # dozens of tied fragments stacked across every measure it
+                # crossed -- worse the further into the piece a passage
+                # sits, since more such gaps accumulate.
+                # Fix: nsp only counts as a bound when it's close enough
+                # to look like natural continuation (within the note's own
+                # decay window); anything farther falls back to the decay
+                # default, exactly as if that pitch never recurred at all.
+                if npd is not None:
+                    bounds = [b for b in (nsp, npd) if b is not None]
                     new_dur = max(n.duration, min(bounds) - tick)
+                elif nsp is not None and (nsp - tick) <= _decay_ticks:
+                    new_dur = max(n.duration, nsp - tick)
                 else:
                     new_dur = max(n.duration, _decay_ticks)
                 if new_dur > n.duration and n.articulation == "":
@@ -2476,7 +2499,7 @@ class Song:
         # survive the unconditional removal floor LATER -- guaranteed
         # silent deletion with no path to preservation, regardless of
         # whether it had a legitimate longer note following it.
-        _grace_thresh = max(p["arpeggio_window"] * 2, grace_ticks(tpb))
+        _grace_thresh = max(p["arpeggio_window"] * 2, grace_ticks(tpb))  # v22ze-103 fix
         _beat_window = tpb // 2  # must be within half-beat of next
         all_notes_sorted = sorted(all_notes, key=lambda n: n.tick)
         for i, n in enumerate(all_notes_sorted):
@@ -2993,6 +3016,9 @@ class Song:
                         n.articulation = ""
                     remainder = n.duration - max_dur
                     n.duration = max_dur  # clip to barline
+                    # v22ze-104 fix: tag the PREDECESSOR too, not just the
+                    # continuation -- see bake_to_score() Step 4 for why.
+                    n.articulation = "tie_predecessor"
                     # Build tie-continuation note
                     tie_note = copy.copy(n)
                     tie_note.tick = me  # starts at next barline
@@ -3377,8 +3403,48 @@ class Song:
         rh_track.events.sort(key=lambda e: e.tick)
         lh_track.events.sort(key=lambda e: e.tick)
 
-        for group, (lh_set, rh_set) in zip(q_groups, assignments):
+        # v22ze-106 fix: q_groups is NOT guaranteed to be in tick order at
+        # this point -- Pass A/B appends tie-continuation groups to the
+        # END of the list regardless of their actual tick position, and
+        # nothing re-sorts it afterward. The final rh_track.notes.sort()/
+        # lh_track.notes.sort() calls below make the OUTPUT correctly
+        # ordered either way, but _tie_chain_hand's "most recently
+        # processed note of this pitch" tracking silently assumed
+        # iteration order == chronological order. Sort the (group,
+        # assignment) pairs together here so that assumption holds --
+        # confirmed via instrumentation that most remaining orphans after
+        # v22ze-105 had a valid predecessor index that was simply the
+        # WRONG note (out-of-order processing), not a missing one.
+        _tie_chain_hand: dict = {}  # v22ze-105: pitch -> 'RH'/'LH', so a tie
+        # continuation follows the SAME hand as its predecessor rather than
+        # being independently DP-assigned. Without this, a continuation
+        # piece -- created as its own singleton group with no other notes
+        # for context -- could easily be assigned to the OTHER hand than
+        # its predecessor, and since bake_to_score() processes each hand's
+        # notes separately, the continuation's true predecessor would then
+        # be invisible to it entirely (different track's note list) --
+        # producing exactly the "orphaned tie, no predecessor found"
+        # pattern confirmed via instrumentation on a real file.
+        _pairs = sorted(
+            zip(q_groups, assignments),
+            key=lambda gp: gp[0][0].tick if gp[0] else 0,
+        )
+        for group, (lh_set, rh_set) in _pairs:
             for n in group:
+                _tie_tag = getattr(n, "articulation", "")
+
+                # Tie-chain continuity override (v22ze-105): takes priority
+                # over everything except preserve-hands mode (which already
+                # keeps chains together naturally via the file's own
+                # channel tag, so it doesn't need this).
+                if not _preserve_hands and _tie_tag == "tie_continuation" \
+                        and n.pitch in _tie_chain_hand:
+                    forced = _tie_chain_hand[n.pitch]
+                    nc = copy.copy(n)
+                    nc.channel = 0 if forced == "RH" else 1
+                    (rh_track if forced == "RH" else lh_track).notes.append(nc)
+                    continue
+
                 # Preserve-hands mode (v22t): trust the note's own channel
                 # tag (set at step 0.1 from the file's original track)
                 # directly, bypassing both the DP result AND the arpeggio
@@ -3408,21 +3474,29 @@ class Song:
                         nc = copy.copy(n)
                         nc.channel = 0
                         rh_track.notes.append(nc)
+                        if _tie_tag in ("tie_predecessor", "tie_continuation"):
+                            _tie_chain_hand[n.pitch] = "RH"
                         continue
                     elif forced_hand == "LH":
                         nc = copy.copy(n)
                         nc.channel = 1
                         lh_track.notes.append(nc)
+                        if _tie_tag in ("tie_predecessor", "tie_continuation"):
+                            _tie_chain_hand[n.pitch] = "LH"
                         continue
                 # Normal DP assignment
                 if n.pitch in rh_set:
                     nc = copy.copy(n)
                     nc.channel = 0
                     rh_track.notes.append(nc)
+                    if _tie_tag in ("tie_predecessor", "tie_continuation"):
+                        _tie_chain_hand[n.pitch] = "RH"
                 else:
                     nc = copy.copy(n)
                     nc.channel = 1
                     lh_track.notes.append(nc)
+                    if _tie_tag in ("tie_predecessor", "tie_continuation"):
+                        _tie_chain_hand[n.pitch] = "LH"
 
         rh_track.notes.sort(key=lambda n: n.tick)
         lh_track.notes.sort(key=lambda n: n.tick)
@@ -3918,10 +3992,12 @@ class Song:
                 # regardless of duration — they will be rendered as small
                 # prefatory noteheads before the beat.
                 min_dur = _gt
+                _TIE_TAGS = ("tie_predecessor", "tie_continuation")  # v22ze-104
                 snapped = [
                     (q, n)
                     for q, n in snapped
-                    if n.duration >= min_dur or getattr(n, "articulation", "") == "grace"
+                    if n.duration >= min_dur
+                    or getattr(n, "articulation", "") in ("grace",) + _TIE_TAGS
                 ]
                 if not snapped:
                     continue
@@ -3950,7 +4026,16 @@ class Song:
                     for n in chord:
                         nc = _bk.copy(n)
                         nc.tick = abs_tick
-                        nc.duration = chosen
+                        # v22ze-104 fix: preserve exact duration for a
+                        # tie-chain piece instead of overwriting it with
+                        # the chord's uniformly-chosen notation duration
+                        # -- see fix note above Pass A's tagging site.
+                        if getattr(n, "articulation", "") in (
+                            "tie_predecessor", "tie_continuation"
+                        ):
+                            nc.duration = n.duration
+                        else:
+                            nc.duration = chosen
                         # v22ze-48 fix: this used to clear the
                         # tie_continuation marker RIGHT HERE, before
                         # Step 5 below ever got a chance to see it --
@@ -4004,6 +4089,66 @@ class Song:
                         gap = n.tick - (pred.tick + pred.duration)
                         if gap > tpb * 2:  # more than 2 beats since predecessor ended
                             idx = None
+                    # v22ze-107 fix: a gap of exactly 0 means this
+                    # continuation is a CLEAN barline join built by
+                    # rationalize()'s Pass A/B, tick-exact since
+                    # v22ze-104 -- predecessor's end IS this note's
+                    # onset. Merging those unconditionally (as this used
+                    # to) silently undid that barline-aligned split,
+                    # reconstituting an entire multi-measure pedal
+                    # sustain back into one oversized note. That
+                    # oversized note then broke two separate downstream
+                    # consumers that each assume a note lives inside one
+                    # measure: _draw_measure_strip's per-measure
+                    # beat-count diagnostic (which read the inflated
+                    # duration as e.g. "37 beats" in a 4-beat measure),
+                    # and _draw_chords's render-time barline splitter
+                    # (which re-cut it at an arbitrary fixed window with
+                    # no relation to the real barlines, scattering extra
+                    # unexplained chord fragments -- the reported
+                    # "bunching"). Only a genuine leftover snapping-drift
+                    # artifact (0 < gap <= 2 beats) still needs stitching
+                    # here; a gap of exactly 0 means the split is already
+                    # correct and must be preserved as separate per-measure
+                    # notes so _draw_ties (purely geometric on tick
+                    # adjacency) can draw the connecting arc itself.
+                    # v22ze-108 fix: v22ze-107 only excluded gap==0 from
+                    # merging, treating anything 0 < gap <= tpb*2 (up to
+                    # TWO FULL BEATS) as 'genuine snapping drift' worth
+                    # stitching back together. That threshold was written
+                    # for a different job entirely -- v22ze-99's guard
+                    # against merging into a stale, far-away note -- not
+                    # as a tolerance for 'is this really the same
+                    # conceptual note, just off by a snapping rounding
+                    # error'. A real snapping-drift artifact (the thing
+                    # Step 5's docstring actually describes) is at most
+                    # a fraction of the notation grid, not two beats. Left
+                    # this wide, a chain of continuation pieces with even
+                    # a few ticks of nonzero gap between each link (e.g.
+                    # fallout from grace-note/min-dur processing in Steps
+                    # 2-3, which run before this) still got fully
+                    # re-stitched into one oversized multi-measure note --
+                    # reproducing a smaller-scale version of the exact
+                    # v22ze-107 bug via this branch instead of the
+                    # gap==0 branch. Confirmed on the real file: merged
+                    # dropped 2352->562 after v22ze-107, but the measure
+                    # strip still showed 6/4-8/4 mismatches and the score
+                    # was still visibly dense with ties -- both explained
+                    # by these still-being-merged multi-measure notes.
+                    # Fix: only stitch when the gap is within one
+                    # notation-grid unit ('grid', already computed above
+                    # as tpb // NOTATION_DIVISION -- a sixteenth note at
+                    # this file's tpb); anything larger gets the same
+                    # 'leave it as its own tagged note' treatment as a
+                    # clean gap==0 join, so _draw_ties can tie it instead.
+                    if idx is not None:
+                        pred = merged[idx]
+                        gap = n.tick - (pred.tick + pred.duration)
+                        if gap <= grid:
+                            nc = _bk.copy(n)
+                            last_of_pitch[nc.pitch] = len(merged)
+                            merged.append(nc)
+                            continue
                     if idx is not None:
                         pred = merged[idx]
                         pred.duration = (n.tick + n.duration) - pred.tick
