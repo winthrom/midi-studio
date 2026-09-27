@@ -1259,11 +1259,6 @@ def _build_measure_map_core(tpb, sigs, total):
     return measures
 
 
-_TC_CREATED = [0]  # TEMP DEBUG (module level)
-_TC_MERGED = [0]  # TEMP DEBUG (module level)
-_TC_ORPHANED = [0]  # TEMP DEBUG (module level)
-
-
 class Song:
     def __init__(self):
         self.ticks_per_beat = 480
@@ -2123,10 +2118,6 @@ class Song:
 
     # ── Score Rationalization ────────────────────────────────────────────────
     def rationalize(self, params=None, measure_range=None):
-        global _TC_CREATED, _TC_MERGED, _TC_ORPHANED  # TEMP DEBUG
-        _TC_CREATED = [0]   # TEMP DEBUG
-        _TC_MERGED = [0]    # TEMP DEBUG
-        _TC_ORPHANED = [0]  # TEMP DEBUG
         """Return a NEW Song with rationalized notation.
 
         The original Song is never modified.  The returned Song has:
@@ -2511,22 +2502,12 @@ class Song:
         _grace_thresh = max(p["arpeggio_window"] * 2, grace_ticks(tpb))  # v22ze-103 fix
         _beat_window = tpb // 2  # must be within half-beat of next
         all_notes_sorted = sorted(all_notes, key=lambda n: n.tick)
-        _DEBUG_TARGET = (44, 45, 37)  # TEMP DEBUG
         for i, n in enumerate(all_notes_sorted):
-            if n.pitch in _DEBUG_TARGET and 200000 <= n.tick <= 210000:
-                print(f"[GRACE-DEBUG] pitch={n.pitch} tick={n.tick} dur={n.duration} "
-                      f"_grace_thresh={_grace_thresh} art_before={getattr(n,'articulation','')!r}",
-                      flush=True)
             if n.duration >= _grace_thresh:
-                if n.pitch in _DEBUG_TARGET and 200000 <= n.tick <= 210000:
-                    print(f"[GRACE-DEBUG]   -> SKIPPED (too long)", flush=True)
                 continue  # too long to be a grace note
             if getattr(n, "articulation", ""):
-                if n.pitch in _DEBUG_TARGET and 200000 <= n.tick <= 210000:
-                    print(f"[GRACE-DEBUG]   -> SKIPPED (already marked)", flush=True)
                 continue  # already marked
             # Look for a longer note within one beat following this note
-            _found_grace = False
             for j in range(i + 1, len(all_notes_sorted)):
                 m = all_notes_sorted[j]
                 gap = m.tick - (n.tick + n.duration)
@@ -2535,13 +2516,7 @@ class Song:
                 if m.duration >= _grace_thresh and m.pitch != n.pitch:
                     # This short note precedes a longer different-pitch note
                     n.articulation = "grace"
-                    _found_grace = True
-                    if n.pitch in _DEBUG_TARGET and 200000 <= n.tick <= 210000:
-                        print(f"[GRACE-DEBUG]   -> TAGGED GRACE (matched pitch={m.pitch} "
-                              f"tick={m.tick} dur={m.duration})", flush=True)
                     break
-            if not _found_grace and n.pitch in _DEBUG_TARGET and 200000 <= n.tick <= 210000:
-                print(f"[GRACE-DEBUG]   -> NOT TAGGED (no qualifying next note found)", flush=True)
 
         # ── 0.6. Staccato detection (AFTER pedal correction) ─────────────────
         # Staccato ratio only makes sense once pedal correction has extended
@@ -3049,7 +3024,6 @@ class Song:
                     tie_note.tick = me  # starts at next barline
                     tie_note.duration = remainder
                     tie_note.articulation = "tie_continuation"
-                    _TC_CREATED[0] += 1  # TEMP DEBUG
                     extra_groups.append([tie_note])
 
         # Merge tie-continuations in so that they get Pass A+B treatment too
@@ -3074,7 +3048,6 @@ class Song:
                         cont.tick = me
                         cont.duration = remainder
                         cont.articulation = "tie_continuation"
-                        _TC_CREATED[0] += 1  # TEMP DEBUG
                         newly_added.append([cont])
             q_groups.extend(extra_groups)
             extra_groups = newly_added
@@ -3859,7 +3832,6 @@ class Song:
             return 4  # cap at sixteenth — 32nds make scores unreadably dense
 
     def bake_to_score(self):
-        global _TC_CREATED, _TC_MERGED, _TC_ORPHANED  # TEMP DEBUG
         """Return a NEW Song whose note data matches exactly what the score displays.
 
         The score renderer (build_measure_str inside to_ly) applies a cleaning
@@ -4021,15 +3993,6 @@ class Song:
                 # prefatory noteheads before the beat.
                 min_dur = _gt
                 _TIE_TAGS = ("tie_predecessor", "tie_continuation")  # v22ze-104
-<<<<<<< HEAD
-=======
-                for _q, _n in snapped:  # TEMP DEBUG
-                    if _n.pitch in (44, 45, 37) and 200000 <= _n.tick <= 210000:
-                        _kept = _n.duration >= min_dur or getattr(_n, "articulation", "") in ("grace",) + _TIE_TAGS
-                        print(f"[MINDUR-DEBUG] pitch={_n.pitch} tick={_n.tick} dur={_n.duration} "
-                              f"min_dur={min_dur} art={getattr(_n,'articulation','')!r} "
-                              f"KEPT={_kept}", flush=True)
->>>>>>> 18c20cbe24daa18665d854f5fcd2ab7e9ce155cd
                 snapped = [
                     (q, n)
                     for q, n in snapped
@@ -4052,14 +4015,6 @@ class Song:
                     next_tick = groups[i + 1][0] if i + 1 < len(groups) else budget
                     available = next_tick - tick
                     if available <= 0:
-                        for _n in chord:  # TEMP DEBUG
-                            if getattr(_n, "articulation", "") in (
-                                "tie_predecessor", "tie_continuation"
-                            ):
-                                print(f"[SKIP-DEBUG] DISCARDED WHOLE CHORD pitch={_n.pitch} "
-                                      f"art={_n.articulation!r} tick={tick} ms={ms} "
-                                      f"next_tick={next_tick} available={available} "
-                                      f"n_notes_in_chord={len(chord)}", flush=True)
                         continue
 
                     raw_dur = max(n.duration for n in chord)
@@ -4197,12 +4152,7 @@ class Song:
                     if idx is not None:
                         pred = merged[idx]
                         pred.duration = (n.tick + n.duration) - pred.tick
-                        _TC_MERGED[0] += 1  # TEMP DEBUG
                         continue
-                    _TC_ORPHANED[0] += 1  # TEMP DEBUG
-                    if _TC_ORPHANED[0] <= 20:
-                        print(f"[ORPHAN-DEBUG] pitch={n.pitch} tick={n.tick} dur={n.duration} "
-                              f"had_predecessor_idx={last_of_pitch.get(n.pitch)}", flush=True)
                     # Orphan: no predecessor found to merge into (e.g. the
                     # predecessor note was itself dropped/clipped to zero
                     # length somewhere upstream). Falls through to being
@@ -4218,8 +4168,6 @@ class Song:
             out_tr.notes = merged
             out.tracks.append(out_tr)
 
-        print(f"[TIE-SUMMARY] created={_TC_CREATED[0]} merged={_TC_MERGED[0]} "
-              f"orphaned={_TC_ORPHANED[0]}", flush=True)  # TEMP DEBUG
         return out
 
     def to_ly(self, path, show_bar_numbers=True, staff_size=16):
