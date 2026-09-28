@@ -7666,7 +7666,8 @@ class SplashScreen(tk.Toplevel):
 
         tk.Frame(inner, bg=BDCOL, height=1).pack(fill=tk.X, pady=(16, 8))
 
-        midi_ok = midi_io.MIDI_OUT_OK
+        # v22ze-111 fix: welcome-screen MIDI status also recognizes built-in FluidSynth (see _play()).
+        midi_ok = midi_io.MIDI_OUT_OK or midi_io._fs_active
         midi_txt = "MIDI ready" if midi_ok else "⚠  No MIDI output — start TiMidity"
         midi_col = GREEN if midi_ok else "#f78166"
         tk.Label(inner, text=midi_txt, bg=BG, fg=midi_col, font=("TkDefaultFont", 9)).pack()
@@ -14971,7 +14972,8 @@ class MidisoftStudio:
 
     def _update_status(self):
         s=self.song; bars=s.total_ticks()/s.ticks_per_measure()
-        out="MIDI OUT OK" if midi_io.MIDI_OUT_OK else "No MIDI out — run: timidity -B8,8 -Os -iA &"
+        # v22ze-111 fix: status bar also recognizes built-in FluidSynth (see _play()).
+        out=("MIDI OUT OK" if midi_io.MIDI_OUT_OK else "MIDI OUT OK (FluidSynth)" if midi_io._fs_active else "No MIDI out — run: timidity -B8,8 -Os -iA &")
         inp=" | MIDI IN OK" if midi_io.MIDI_IN_OK else ""
         self.status_var.set(f"BPM:{s.bpm}  {s.time_sig_num}/{s.time_sig_den}  "
                             f"Tracks:{len(s.tracks)}  Bars:{bars:.0f}  TPB:{s.ticks_per_beat}  {out}{inp}")
@@ -15746,7 +15748,13 @@ class MidisoftStudio:
     def _play(self):
         if not self.song.tracks:
             messagebox.showinfo("Play","No tracks.",parent=self.root); return
-        if not midi_io.MIDI_OUT_OK:
+        # v22ze-111 fix: gate on MIDI_OUT_OK *or* _fs_active. The Setup-tab
+        # picker sets MIDI_OUT_OK False when built-in FluidSynth is chosen
+        # (it is not a mido port), so this refused to play and showed
+        # TiMidity-only advice even though FluidSynth was ready. midi_io's
+        # send path already routes notes to the FluidSynth synth when
+        # _fs_active is True.
+        if not (midi_io.MIDI_OUT_OK or midi_io._fs_active):
             messagebox.showwarning("No MIDI","Run: timidity -B8,8 -Os -iA &\nthen restart. (-B8,8 prevents audio buzz)",parent=self.root); return
         if self.transport.is_playing():
             self._stop(); return
@@ -15870,7 +15878,7 @@ class MidisoftStudio:
             self._offer_trim_leading_measures()
         else:
             if not self.song.tracks: messagebox.showinfo("Record","Add a track first.",parent=self.root); return
-            if not midi_io.MIDI_OUT_OK: messagebox.showwarning("No MIDI","Run: timidity -B8,8 -Os -iA &",parent=self.root); return
+            if not (midi_io.MIDI_OUT_OK or midi_io._fs_active): messagebox.showwarning("No MIDI","Run: timidity -B8,8 -Os -iA &",parent=self.root); return  # v22ze-111 fix: see _play()
             if not midi_io.MIDI_IN_OK:
                 messagebox.showwarning("No MIDI Input",
                     "No MIDI input port found.\n\n"
@@ -15999,14 +16007,32 @@ class MidisoftStudio:
                  bg="#0d1117", fg="#58a6ff",
                  font=("TkDefaultFont", 11, "bold")).pack(padx=20, pady=(16, 4))
 
+        # v22ze-110 fix (picker overflow): with enough MIDI ports, the old plain-packed list of
+        # radiobuttons could grow taller than the screen. The dialog was
+        # non-resizable with no scroll mechanism, so the 'Use This' button
+        # (packed last, below every radiobutton) ended up permanently
+        # off-screen and unreachable. Cap the list area's height and make
+        # it scrollable instead, so the button always stays visible.
+        _list_max_height = 320
+        _list_canvas = tk.Canvas(dlg, bg="#0d1117", highlightthickness=0,
+                                  width=360, height=_list_max_height)
+        _list_scroll = tk.Scrollbar(dlg, orient="vertical", command=_list_canvas.yview)
+        _list_frame = tk.Frame(_list_canvas, bg="#0d1117")
+        _list_frame.bind("<Configure>",
+            lambda e: _list_canvas.configure(scrollregion=_list_canvas.bbox("all")))
+        _list_canvas.create_window((0, 0), window=_list_frame, anchor="nw")
+        _list_canvas.configure(yscrollcommand=_list_scroll.set)
+        _list_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(20, 0), pady=(0, 8))
+        _list_scroll.pack(side=tk.LEFT, fill=tk.Y, padx=(0, 20), pady=(0, 8))
+
         current = (midi_io._midi_out.name if midi_io._midi_out and hasattr(midi_io._midi_out, 'name')
                   else ("FluidSynth (built-in)" if midi_io._fs_active else options[0]))
         var = tk.StringVar(value=current if current in options else options[0])
         for name in options:
-            tk.Radiobutton(dlg, text=name, variable=var, value=name,
+            tk.Radiobutton(_list_frame, text=name, variable=var, value=name,
                           bg="#0d1117", fg="white", selectcolor="#21262d",
                           activebackground="#0d1117", activeforeground="white",
-                          anchor="w").pack(fill=tk.X, padx=24, pady=2)
+                          anchor="w").pack(fill=tk.X, padx=4, pady=2)
 
         def _apply():
             chosen = var.get()
@@ -16043,8 +16069,16 @@ class MidisoftStudio:
         except: ins="(error)"
         out_port = midi_io._midi_out.name if midi_io._midi_out and hasattr(midi_io._midi_out,'name') else "(none)"
         in_port  = midi_io._midi_in.name  if midi_io._midi_in  and hasattr(midi_io._midi_in, 'name') else "(none)"
+        # v22ze-110 fix (FluidSynth status): MIDI_OUT_OK is only ever True for a mido-backed port.
+        # Selecting 'FluidSynth (built-in)' deliberately sets MIDI_OUT_OK
+        # to False (it's a different backend, not a mido port), but this
+        # status display never checked _fs_active as an alternate success
+        # condition -- so it reported NOT CONNECTED even when FluidSynth
+        # was working perfectly. Recognize both as valid connected states.
+        _out_ok = midi_io.MIDI_OUT_OK or midi_io._fs_active
+        _out_label = out_port if midi_io.MIDI_OUT_OK else ("FluidSynth (built-in)" if midi_io._fs_active else "(none)")
         messagebox.showinfo("MIDI I/O",
-            f"Output: {'OK  →  ' + out_port if midi_io.MIDI_OUT_OK else 'NOT CONNECTED'}\n\n"
+            f"Output: {'OK  →  ' + _out_label if _out_ok else 'NOT CONNECTED'}\n\n"
             f"Input:  {'OK  →  ' + in_port  if midi_io.MIDI_IN_OK  else 'NOT CONNECTED'}\n\n"
             f"All output ports:\n  {outs}\n\n"
             f"All input ports:\n  {ins}\n\n"

@@ -627,6 +627,9 @@ def _init_midi():
     _TRUSTED_SYNTH_NAMES = (
         "timidity",
         "fluidsynth",
+        "fluid synth",  # v22ze-110 (trusted name): pyfluidsynth's own ALSA port is "FLUID Synth ..." (with a space) --
+                        # without this, a standalone FluidSynth port was never recognized
+                        # as trusted and could never be offered as a choice alongside TiMidity.
         "qsynth",
         "zynaddsubfx",
         "yoshimi",
@@ -839,10 +842,11 @@ def midi_input_unsubscribe(token: int):
         _midi_listeners.pop(token, None)
 
 
-# Initialize on module load
-if mido:
-    _init_midi()
-    if not MIDI_OUT_OK:
-        _init_fluidsynth()
-
+# v22ze-110 fix (duplicate init): MIDI init (_init_midi() / _init_fluidsynth()) already ran once,
+# above, right after both functions were defined -- including the v22w
+# last-resort unverified-port fallback that a second init block here
+# used to duplicate without that fallback. Running it a second time
+# here caused _prompt_midi_output_choice()'s "pick a MIDI port" dialog
+# to pop up TWICE on every startup. Removed; only _start_dispatch_thread()
+# (which is idempotent and safe to call once) belongs here.
 _start_dispatch_thread()   # start immediately so thru works before any record
