@@ -191,6 +191,22 @@ def _find_soundfont():
     return None
 
 
+def _saved_master_volume():
+    """v22ze-115b: built-in FluidSynth volume as a 0..1 slider position.
+    Reads "master_volume"; falls back to the older "fluidsynth_gain" key
+    (v22ze-113, a raw gain) and finally to the default (gain 0.7)."""
+    s = _load_settings()
+    gmax = audio_backend.FLUIDSYNTH_GAIN_MAX
+    try:
+        if "master_volume" in s:
+            return max(0.0, min(1.0, float(s["master_volume"])))
+        if "fluidsynth_gain" in s:
+            return max(0.0, min(1.0, float(s["fluidsynth_gain"]) / gmax))
+    except (TypeError, ValueError):
+        pass
+    return audio_backend.DEFAULT_MASTER_VOLUME
+
+
 def _init_fluidsynth():
     """Try to set up a FluidSynth soft-synth as a MIDI output backend.
 
@@ -219,12 +235,9 @@ def _init_fluidsynth():
     try:
         # v22ze-112: default is channels=256, which made FluidSynth register
         # 16 separate ALSA ports (one per 16-channel group). MIDI only has 16.
-        # v22ze-113: default gain is 0.2 (quiet). Use a saved override if any.
-        try:
-            _gain = float(_load_settings().get("fluidsynth_gain", 0.7))
-        except (TypeError, ValueError):
-            _gain = 0.7
-        _gain = max(0.0, min(10.0, _gain))
+        # v22ze-113/115b: library default gain is 0.2 (quiet). Use the saved
+        # master volume (slider position) or the default (gain 0.7).
+        _gain = _saved_master_volume() * audio_backend.FLUIDSYNTH_GAIN_MAX
         fs = fluidsynth.Synth(channels=16, gain=_gain)
         _plat = platform.system()
         if _plat == "Linux":
@@ -791,6 +804,95 @@ def _send(msg):
     """
     _sync_backend()
     audio_backend.send(msg)
+
+
+# ── v22ze-115b: public output API (gui.py uses only these) ───────────────────
+def output_ready() -> bool:
+    """True if some output (a MIDI port or built-in FluidSynth) can make sound."""
+    _sync_backend()
+    return audio_backend.ready()
+
+
+def output_label() -> str:
+    """'(none)', the MIDI port's name, or 'FluidSynth (built-in)'."""
+    _sync_backend()
+    return audio_backend.active_name()
+
+
+def forget_saved_output():
+    """Clear the remembered startup choice so the startup window returns."""
+    s = _load_settings()
+    s["preferred_midi_port"] = None
+    _save_settings(s)
+
+
+def _silence_active():
+    b = audio_backend.get_active()
+    if b is not None and b.is_ready():
+        try:
+            b.all_notes_off()
+        except Exception:
+            pass
+
+
+def select_output(choice, forget_saved=True):
+    """Switch output at runtime.  `choice` is a mido output-port name or
+    FLUIDSYNTH_BUILTIN.  Raises on failure and leaves the current output
+    untouched.  Like every in-program switch, it clears the remembered
+    startup choice (see v22ze-112) unless forget_saved=False."""
+    global _midi_out, MIDI_OUT_OK
+    if choice == FLUIDSYNTH_BUILTIN:
+        if not _fs_active and not _init_fluidsynth():
+            raise RuntimeError(
+                "Built-in FluidSynth could not start: "
+                + (_fs_fail_detail or str(_fs_fail_reason) or "unknown reason")
+            )
+        new = None
+    else:
+        new = mido.open_output(choice)  # open first: a failure changes nothing
+    _silence_active()
+    old, _midi_out = _midi_out, new
+    MIDI_OUT_OK = new is not None
+    if old is not None and old is not new:
+        try:
+            old.close()
+        except Exception:
+            pass
+    _sync_backend()
+    if forget_saved:
+        forget_saved_output()
+
+
+def close_output():
+    """Close the MIDI output port, if any (called when the app shuts down)."""
+    global _midi_out, MIDI_OUT_OK
+    old, _midi_out = _midi_out, None
+    MIDI_OUT_OK = False
+    if old is not None:
+        try:
+            old.close()
+        except Exception:
+            pass
+    _sync_backend()
+
+
+def get_fluidsynth_volume() -> float:
+    """Built-in FluidSynth volume, 0..1 (slider position)."""
+    return _saved_master_volume()
+
+
+def set_fluidsynth_volume(level, save=True) -> bool:
+    """Set the built-in FluidSynth volume (0..1), live if the synth exists,
+    and remember it.  Returns True if a running synth was updated.  Has no
+    effect on external MIDI synths (TiMidity etc.: use its own -A option)."""
+    level = max(0.0, min(1.0, float(level)))
+    if save:
+        s = _load_settings()
+        s["master_volume"] = level
+        _save_settings(s)
+    if _fs_synth is not None and _fs_sfid is not None:
+        return FluidSynthBackend(_fs_synth, _fs_sfid).set_master_volume(level)
+    return False
 
 
 def _send_raw(status, d1, d2=0):

@@ -76,8 +76,9 @@ def test_fluid_backend():
     b.pedal(1, True)
     assert s.calls == [("noteon", 0, 64, 80), ("noteoff", 0, 64),
                        ("program_select", 4, 5, 0, 19), ("cc", 1, 64, 127)]
-    assert b.set_master_volume(0.5) and s.calls[-1] == ("setting", "synth.gain", 0.5)
-    assert b.set_master_volume(9) and s.calls[-1][2] == 1.0          # clamped
+    assert b.set_master_volume(0.5) and s.calls[-1] == ("setting", "synth.gain", 0.75)
+    assert b.set_master_volume(9) and s.calls[-1][2] == ab.FLUIDSYNTH_GAIN_MAX   # clamped
+    assert abs(ab.DEFAULT_MASTER_VOLUME * ab.FLUIDSYNTH_GAIN_MAX - 0.7) < 1e-9
     b.stop(); assert s.deleted and not b.is_ready() and not b.set_master_volume(.5)
 
 def test_registry():
@@ -90,7 +91,7 @@ def test_registry():
     ab.set_active(b2)                                   # stops b1 (after all-notes-off)
     assert s1.deleted and not b1.is_ready() and not s2.deleted
     assert sum(1 for c in s1.calls if c[:3] == ("cc", 0, 123)) == 1
-    assert ab.set_master_volume(0.3) and s2.calls[-1] == ("setting", "synth.gain", 0.3)
+    assert ab.set_master_volume(0.3) and s2.calls[-1] == ("setting", "synth.gain", 0.3 * ab.FLUIDSYNTH_GAIN_MAX)
     ab.shutdown(); assert not ab.ready() and s2.deleted
 
 def test_send_never_raises():

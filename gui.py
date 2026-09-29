@@ -28,10 +28,8 @@ from theory import (
 )
 import midi_io
 from midi_io import (
-    _init_fluidsynth,
     _maybe_show_no_synth_dialog,
     _midi_shutdown_evt,
-    _save_settings,
     _send,
     _send_raw,
     midi_input_subscribe,
@@ -6279,11 +6277,7 @@ class Transport:
 
     def close(self):
         self.stop()
-        if midi_io._midi_out:
-            try:
-                midi_io._midi_out.close()
-            except:
-                pass
+        midi_io.close_output()  # v22ze-115b
         if midi_io._midi_in:
             try:
                 midi_io._midi_in.close()
@@ -7667,7 +7661,7 @@ class SplashScreen(tk.Toplevel):
         tk.Frame(inner, bg=BDCOL, height=1).pack(fill=tk.X, pady=(16, 8))
 
         # v22ze-111 fix: welcome-screen MIDI status also recognizes built-in FluidSynth (see _play()).
-        midi_ok = midi_io.MIDI_OUT_OK or midi_io._fs_active
+        midi_ok = midi_io.output_ready()  # v22ze-115b
         midi_txt = "MIDI ready" if midi_ok else "⚠  No MIDI output — start TiMidity"
         midi_col = GREEN if midi_ok else "#f78166"
         tk.Label(inner, text=midi_txt, bg=BG, fg=midi_col, font=("TkDefaultFont", 9)).pack()
@@ -14976,7 +14970,8 @@ class MidisoftStudio:
     def _update_status(self):
         s=self.song; bars=s.total_ticks()/s.ticks_per_measure()
         # v22ze-111 fix: status bar also recognizes built-in FluidSynth (see _play()).
-        out=("MIDI OUT OK" if midi_io.MIDI_OUT_OK else "MIDI OUT OK (FluidSynth)" if midi_io._fs_active else "No MIDI out — run: timidity -B8,8 -Os -iA &")
+        # v22ze-115b: via midi_io.output_ready()/output_label()
+        out=(("MIDI OUT OK (FluidSynth)" if midi_io.output_label() == "FluidSynth (built-in)" else "MIDI OUT OK") if midi_io.output_ready() else "No MIDI out — run: timidity -B8,8 -Os -iA &")
         inp=" | MIDI IN OK" if midi_io.MIDI_IN_OK else ""
         self.status_var.set(f"BPM:{s.bpm}  {s.time_sig_num}/{s.time_sig_den}  "
                             f"Tracks:{len(s.tracks)}  Bars:{bars:.0f}  TPB:{s.ticks_per_beat}  {out}{inp}")
@@ -15757,7 +15752,7 @@ class MidisoftStudio:
         # TiMidity-only advice even though FluidSynth was ready. midi_io's
         # send path already routes notes to the FluidSynth synth when
         # _fs_active is True.
-        if not (midi_io.MIDI_OUT_OK or midi_io._fs_active):
+        if not midi_io.output_ready():  # v22ze-115b
             messagebox.showwarning("No MIDI","Run: timidity -B8,8 -Os -iA &\nthen restart. (-B8,8 prevents audio buzz)",parent=self.root); return
         if self.transport.is_playing():
             self._stop(); return
@@ -15881,7 +15876,7 @@ class MidisoftStudio:
             self._offer_trim_leading_measures()
         else:
             if not self.song.tracks: messagebox.showinfo("Record","Add a track first.",parent=self.root); return
-            if not (midi_io.MIDI_OUT_OK or midi_io._fs_active): messagebox.showwarning("No MIDI","Run: timidity -B8,8 -Os -iA &",parent=self.root); return  # v22ze-111 fix: see _play()
+            if not midi_io.output_ready(): messagebox.showwarning("No MIDI","Run: timidity -B8,8 -Os -iA &",parent=self.root); return  # v22ze-115b: see _play()
             if not midi_io.MIDI_IN_OK:
                 messagebox.showwarning("No MIDI Input",
                     "No MIDI input port found.\n\n"
@@ -16028,8 +16023,7 @@ class MidisoftStudio:
         _list_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(20, 0), pady=(0, 8))
         _list_scroll.pack(side=tk.LEFT, fill=tk.Y, padx=(0, 20), pady=(0, 8))
 
-        current = (midi_io._midi_out.name if midi_io._midi_out and hasattr(midi_io._midi_out, 'name')
-                  else ("FluidSynth (built-in)" if midi_io._fs_active else options[0]))
+        current = midi_io.output_label()  # v22ze-115b (port name, "FluidSynth (built-in)" or "(none)")
         var = tk.StringVar(value=current if current in options else options[0])
         for name in options:
             tk.Radiobutton(_list_frame, text=name, variable=var, value=name,
@@ -16040,31 +16034,31 @@ class MidisoftStudio:
         def _apply():
             chosen = var.get()
             try:
-                if midi_io._midi_out:
-                    try: midi_io._midi_out.close()
-                    except Exception: pass
-                    midi_io._midi_out = None
-
-                if chosen == "FluidSynth (built-in)":
-                    midi_io.MIDI_OUT_OK = False
-                    if not midi_io._fs_active:
-                        _init_fluidsynth()
-                    # v22ze-112: a switch made inside the program must NOT
-                    # become the silent startup default. Clear any remembered
-                    # choice so the startup window returns next launch.
-                    _save_settings({**midi_io._load_settings(), "preferred_midi_port": None})
-                else:
-                    midi_io._midi_out   = mido.open_output(chosen)
-                    midi_io.MIDI_OUT_OK = True
-                    # v22ze-112: was saving `chosen` as the permanent default
-                    # (see comment above); now clears it instead.
-                    _save_settings({**midi_io._load_settings(), "preferred_midi_port": None})
+                # v22ze-115b: all switching logic lives in midi_io now. It opens
+                # the new output before closing the old one, silences the old
+                # one, keeps the current output if the switch fails, and (per
+                # v22ze-112) clears the remembered startup choice.
+                midi_io.select_output(chosen)
 
                 self._update_status()
                 dlg.destroy()
             except Exception as exc:
                 messagebox.showerror("MIDI Output Device",
                     f"Could not switch to '{chosen}':\n{exc}", parent=dlg)
+
+        # v22ze-115b: live volume for the built-in FluidSynth (remembered).
+        _vol_frame = tk.Frame(dlg, bg="#0d1117")
+        _vol_frame.pack(fill=tk.X, padx=20, pady=(4, 0))
+        tk.Label(_vol_frame, text="Built-in FluidSynth volume (external synths: use their own volume)",
+                 bg="#0d1117", fg="#8b949e", font=("TkDefaultFont", 9)).pack(anchor="w")
+        _vol = tk.Scale(_vol_frame, from_=0, to=100, orient=tk.HORIZONTAL,
+                        bg="#0d1117", fg="white", troughcolor="#21262d",
+                        highlightthickness=0, length=360)
+        _vol.set(int(round(midi_io.get_fluidsynth_volume() * 100)))
+        _vol.configure(command=lambda v: midi_io.set_fluidsynth_volume(float(v) / 100.0, save=False))
+        _vol.bind("<ButtonRelease-1>", lambda e: midi_io.set_fluidsynth_volume(_vol.get() / 100.0))
+        _vol.bind("<KeyRelease>", lambda e: midi_io.set_fluidsynth_volume(_vol.get() / 100.0))
+        _vol.pack(fill=tk.X)
 
         tk.Button(dlg, text="Use This", command=_apply,
                  bg="#238636", fg="white", relief=tk.FLAT,
@@ -16075,7 +16069,6 @@ class MidisoftStudio:
         except: outs="(error)"
         try: ins="\n  ".join(mido.get_input_names() or ["(none)"])
         except: ins="(error)"
-        out_port = midi_io._midi_out.name if midi_io._midi_out and hasattr(midi_io._midi_out,'name') else "(none)"
         in_port  = midi_io._midi_in.name  if midi_io._midi_in  and hasattr(midi_io._midi_in, 'name') else "(none)"
         # v22ze-110 fix (FluidSynth status): MIDI_OUT_OK is only ever True for a mido-backed port.
         # Selecting 'FluidSynth (built-in)' deliberately sets MIDI_OUT_OK
@@ -16083,8 +16076,8 @@ class MidisoftStudio:
         # status display never checked _fs_active as an alternate success
         # condition -- so it reported NOT CONNECTED even when FluidSynth
         # was working perfectly. Recognize both as valid connected states.
-        _out_ok = midi_io.MIDI_OUT_OK or midi_io._fs_active
-        _out_label = out_port if midi_io.MIDI_OUT_OK else ("FluidSynth (built-in)" if midi_io._fs_active else "(none)")
+        _out_ok = midi_io.output_ready()  # v22ze-115b
+        _out_label = midi_io.output_label()
         messagebox.showinfo("MIDI I/O",
             f"Output: {'OK  →  ' + _out_label if _out_ok else 'NOT CONNECTED'}\n\n"
             f"Input:  {'OK  →  ' + in_port  if midi_io.MIDI_IN_OK  else 'NOT CONNECTED'}\n\n"

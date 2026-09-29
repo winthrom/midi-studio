@@ -22,6 +22,11 @@ from __future__ import annotations
 import sys
 
 NUM_CHANNELS = 16
+# v22ze-115b: master volume is a 0.0-1.0 slider position.  For the built-in
+# FluidSynth, 1.0 means gain 1.5 (FluidSynth's own default gain is only 0.2).
+# The out-of-the-box position gives gain 0.7.
+FLUIDSYNTH_GAIN_MAX = 1.5
+DEFAULT_MASTER_VOLUME = 0.7 / FLUIDSYNTH_GAIN_MAX
 CC_SUSTAIN = 64
 CC_ALL_NOTES_OFF = 123
 
@@ -206,12 +211,12 @@ class FluidSynthBackend(AudioBackend):
         self._synth.program_select(ch, self._sfid, bank, prog)
 
     def set_master_volume(self, level: float) -> bool:
-        """0.0-1.0 maps directly to FluidSynth gain 0.0-1.0 (its own default
-        is 0.2; MIDI Studio's is 0.7)."""
+        """0.0-1.0 maps to FluidSynth gain 0.0-FLUIDSYNTH_GAIN_MAX."""
         if not self.is_ready():
             return False
         try:
-            self._synth.setting("synth.gain", max(0.0, min(1.0, float(level))))
+            level = max(0.0, min(1.0, float(level)))
+            self._synth.setting("synth.gain", level * FLUIDSYNTH_GAIN_MAX)
             return True
         except Exception:
             return False
