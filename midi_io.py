@@ -105,6 +105,21 @@ _fs_active = False  # True once FluidSynth is ready to receive notes
 #   "load_failed"  -- soundfont file found but fs.sfload() rejected it
 #   None           -- FluidSynth was never even attempted (shouldn't
 #                      happen in practice, but keeps the dialog logic simple)
+# v22ze-112: the "built-in FluidSynth" choice, as offered in the startup
+# window and stored in settings when the user ticks "Remember".
+FLUIDSYNTH_BUILTIN = "FluidSynth (built-in)"
+
+
+def _fluidsynth_importable():
+    """v22ze-112: True if pyfluidsynth (and libfluidsynth) can be imported,
+    i.e. built-in FluidSynth is worth offering as a startup choice."""
+    try:
+        import fluidsynth  # noqa: F401
+        return True
+    except Exception:
+        return False
+
+
 _fs_fail_reason = None
 _fs_fail_detail = ""  # the actual exception text, for the "Show details" expander
 
@@ -198,7 +213,9 @@ def _init_fluidsynth():
 
     # 3 — Initialise the synth
     try:
-        fs = fluidsynth.Synth()
+        # v22ze-112: default is channels=256, which made FluidSynth register
+        # 16 separate ALSA ports (one per 16-channel group). MIDI only has 16.
+        fs = fluidsynth.Synth(channels=16)
         _plat = platform.system()
         if _plat == "Linux":
             # v22w: try multiple drivers in order rather than hardcoding
@@ -663,15 +680,22 @@ def _init_midi():
                 # with no prompt.
                 _settings = _load_settings()
                 _saved_port = _settings.get("preferred_midi_port")
-                if _saved_port and _saved_port in trusted:
+                # v22ze-112: built-in FluidSynth counts as one more option.
+                _options = trusted + (
+                    [FLUIDSYNTH_BUILTIN] if _fluidsynth_importable() else []
+                )
+                if _saved_port == FLUIDSYNTH_BUILTIN and len(_options) > len(trusted):
+                    pref = FLUIDSYNTH_BUILTIN
+                    print("[MIDI OUT] Using remembered choice: built-in FluidSynth")
+                elif _saved_port and _saved_port in trusted:
                     pref = _saved_port
                     print(f"[MIDI OUT] Using remembered port: {pref}")
-                elif len(trusted) > 1:
+                elif len(_options) > 1:
                     # v22z-2: genuine choice among multiple trusted synths
                     # (e.g. TiMidity AND Pianoteq both running) — ask rather
                     # than silently picking whichever sorts first.  Previously
                     # this always silently took the first TiMidity port found.
-                    pref, _remember = _prompt_midi_output_choice(trusted)
+                    pref, _remember = _prompt_midi_output_choice(_options)
                     if _remember:
                         _save_settings({"preferred_midi_port": pref})
                 else:
@@ -679,9 +703,14 @@ def _init_midi():
                     pref = (
                         sorted(tim_ports, key=_port_key)[0] if tim_ports else trusted[0]
                     )
-                _midi_out = mido.open_output(pref)
-                MIDI_OUT_OK = True
-                print(f"[MIDI OUT] Opened trusted port: {pref}")
+                if pref == FLUIDSYNTH_BUILTIN:
+                    # v22ze-112: leave MIDI_OUT_OK False; the module-level
+                    # `if not MIDI_OUT_OK: _init_fluidsynth()` below takes over.
+                    print("[MIDI OUT] Built-in FluidSynth selected — no port opened")
+                else:
+                    _midi_out = mido.open_output(pref)
+                    MIDI_OUT_OK = True
+                    print(f"[MIDI OUT] Opened trusted port: {pref}")
             else:
                 # No recognized synth port — don't claim success yet.
                 # Remember the best candidate but let FluidSynth be tried

@@ -12791,7 +12791,10 @@ class MidisoftStudio:
     def _start_midi_monitor(self):
         """Echo MIDI input to output so keyboard is always audible.
         Uses the single dispatcher thread — no port contention with recorder."""
-        if not midi_io.MIDI_IN_OK or not midi_io.MIDI_OUT_OK:
+        # v22ze-112: gate on input only. _send() routes to whichever output
+        # is active (port or built-in FluidSynth) and is a safe no-op if
+        # none is, so thru also works when FluidSynth is chosen later.
+        if not midi_io.MIDI_IN_OK:
             return
         def _thru_cb(msg):
             # Skip thru while recording — the recorder's _rec_cb handles echo
@@ -16046,11 +16049,16 @@ class MidisoftStudio:
                     midi_io.MIDI_OUT_OK = False
                     if not midi_io._fs_active:
                         _init_fluidsynth()
-                    _save_settings({"preferred_midi_port": None})
+                    # v22ze-112: a switch made inside the program must NOT
+                    # become the silent startup default. Clear any remembered
+                    # choice so the startup window returns next launch.
+                    _save_settings({**midi_io._load_settings(), "preferred_midi_port": None})
                 else:
                     midi_io._midi_out   = mido.open_output(chosen)
                     midi_io.MIDI_OUT_OK = True
-                    _save_settings({"preferred_midi_port": chosen})
+                    # v22ze-112: was saving `chosen` as the permanent default
+                    # (see comment above); now clears it instead.
+                    _save_settings({**midi_io._load_settings(), "preferred_midi_port": None})
 
                 self._update_status()
                 dlg.destroy()
