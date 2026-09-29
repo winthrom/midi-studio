@@ -26,17 +26,23 @@ class FakeSynth:
 def setup_function(_=None): ab.shutdown()
 
 
-def test_port_backend_dispatch():
+def test_port_backend_passthrough():
+    # v22ze-115: ports get every message exactly as given (incl. pitchwheel)
     p = FakePort(); b = ab.MidiPortBackend(port=p, msg_factory=fake_msg)
     assert b.is_ready() and b.name == "Fake:port 1"
-    b.send(NS(type="note_on", channel=1, note=60, velocity=90))
-    b.send(NS(type="note_on", channel=1, note=60, velocity=0))      # -> note_off
-    b.send(NS(type="control_change", channel=2, control=7, value=99))
-    b.send(NS(type="program_change", channel=3, program=40))
-    b.send(NS(type="pitchwheel", channel=0, pitch=0))               # ignored
-    kinds = [(m.type, m.__dict__.get("note"), m.__dict__.get("velocity")) for m in p.sent]
-    assert kinds == [("note_on", 60, 90), ("note_off", 60, 0),
-                     ("control_change", None, None), ("program_change", None, None)]
+    msgs = [NS(type="note_on", channel=1, note=60, velocity=90),
+            NS(type="note_on", channel=1, note=60, velocity=0),
+            NS(type="pitchwheel", channel=0, pitch=100),
+            NS(type="sysex", data=[1, 2])]
+    for m in msgs: b.send(m)
+    assert p.sent == msgs and all(a is c for a, c in zip(p.sent, msgs))
+
+def test_port_primitives():
+    p = FakePort(); b = ab.MidiPortBackend(port=p, msg_factory=fake_msg)
+    b.note_on(1, 60, 90); b.note_off(1, 60); b.cc(2, 7, 99); b.program(3, 40)
+    assert [m.type for m in p.sent] == ["note_on", "note_off", "control_change", "program_change"]
+    assert (p.sent[0].note, p.sent[0].velocity) == (60, 90)
+
 
 def test_pedal_and_all_notes_off():
     p = FakePort(); b = ab.MidiPortBackend(port=p, msg_factory=fake_msg)

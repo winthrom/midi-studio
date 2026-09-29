@@ -140,6 +140,12 @@ class MidiPortBackend(AudioBackend):
     def _out(self, mtype, **kw):
         self._port.send(self._make(mtype, **kw))
 
+    def send(self, msg) -> None:
+        """v22ze-115: hand EVERY message to the port untouched (pitchwheel,
+        aftertouch, sysex ...), exactly as midi_io._send() always did for
+        ports.  Only the FluidSynth backend needs per-type translation."""
+        self._port.send(msg)
+
     def note_on(self, ch, note, vel):
         self._out("note_on", channel=ch, note=note, velocity=vel)
 

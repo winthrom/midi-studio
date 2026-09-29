@@ -28,6 +28,9 @@ except ImportError:
 
 # MIDI I/O initialisation
 # ─────────────────────────────────────────────────────────────────────────────
+import audio_backend  # v22ze-115: single routing point for all output
+from audio_backend import FluidSynthBackend, MidiPortBackend
+
 MIDI_OUT_OK = False
 MIDI_IN_OK = False
 _midi_out = None
@@ -752,32 +755,42 @@ def _init_midi():
         print(f"[MIDI IN ] FAILED: {e}")
 
 
+_be_src = None  # the legacy object audio_backend's active backend was built from
+
+
+def _sync_backend():
+    """v22ze-115a: make audio_backend's active backend match the legacy
+    state (_midi_out / _fs_active / _fs_synth) that gui.py still mutates
+    directly.  Cheap identity check; only rebuilds when the source changed.
+    stop_previous=False: we never close/delete anything here -- the code that
+    opened a port or synth (gui.py / _init_fluidsynth) still owns its lifetime,
+    and FluidSynth deliberately stays alive while a port is selected."""
+    global _be_src
+    if _midi_out is not None:
+        src = _midi_out
+    elif _fs_active and _fs_synth is not None:
+        src = _fs_synth
+    else:
+        src = None
+    if src is _be_src:
+        return
+    _be_src = src
+    if src is None:
+        backend = None
+    elif src is _midi_out:
+        backend = MidiPortBackend(port=src)
+    else:
+        backend = FluidSynthBackend(src, _fs_sfid)
+    audio_backend.set_active(backend, stop_previous=False)
+
+
 def _send(msg):
     """Route a mido Message to the active output backend.
     Priority: hardware/virtual MIDI port → FluidSynth soft-synth.
+    (v22ze-115a: routing now done by audio_backend; priority unchanged.)
     """
-    if _midi_out:
-        try:
-            _midi_out.send(msg)
-        except Exception:
-            pass
-        return
-    if _fs_active and _fs_synth:
-        try:
-            t = msg.type
-            if t == "note_on":
-                if msg.velocity > 0:
-                    _fs_synth.noteon(msg.channel, msg.note, msg.velocity)
-                else:
-                    _fs_synth.noteoff(msg.channel, msg.note)
-            elif t == "note_off":
-                _fs_synth.noteoff(msg.channel, msg.note)
-            elif t == "control_change":
-                _fs_synth.cc(msg.channel, msg.control, msg.value)
-            elif t == "program_change":
-                _fs_program_select(msg.channel, msg.program)
-        except Exception:
-            pass
+    _sync_backend()
+    audio_backend.send(msg)
 
 
 def _send_raw(status, d1, d2=0):
@@ -885,4 +898,5 @@ def midi_input_unsubscribe(token: int):
 # here caused _prompt_midi_output_choice()'s "pick a MIDI port" dialog
 # to pop up TWICE on every startup. Removed; only _start_dispatch_thread()
 # (which is idempotent and safe to call once) belongs here.
+_sync_backend()   # v22ze-115a: audio_backend.ready() is accurate from startup
 _start_dispatch_thread()   # start immediately so thru works before any record
