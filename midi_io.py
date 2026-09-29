@@ -75,6 +75,7 @@ TIMIDITY_ARGS = [
     "44100",
     "--reverb=d",
     "--chorus=d",
+    "-A150",  # v22ze-113: amplification 150% (TiMidity default is 70)
 ]
 TIMIDITY_HINT = "timidity " + " ".join(TIMIDITY_ARGS)
 
@@ -215,7 +216,13 @@ def _init_fluidsynth():
     try:
         # v22ze-112: default is channels=256, which made FluidSynth register
         # 16 separate ALSA ports (one per 16-channel group). MIDI only has 16.
-        fs = fluidsynth.Synth(channels=16)
+        # v22ze-113: default gain is 0.2 (quiet). Use a saved override if any.
+        try:
+            _gain = float(_load_settings().get("fluidsynth_gain", 0.7))
+        except (TypeError, ValueError):
+            _gain = 0.7
+        _gain = max(0.0, min(10.0, _gain))
+        fs = fluidsynth.Synth(channels=16, gain=_gain)
         _plat = platform.system()
         if _plat == "Linux":
             # v22w: try multiple drivers in order rather than hardcoding
