@@ -28,6 +28,13 @@ except ImportError:
 
 # MIDI I/O initialisation
 # ─────────────────────────────────────────────────────────────────────────────
+import app_resources  # v22ze-116: bundled-library / bundled-soundfont lookup
+
+# v22ze-116: must run BEFORE anything imports pyfluidsynth (it finds
+# libfluidsynth via ctypes.util.find_library at import time).  No-op unless a
+# libfluidsynth is bundled next to the app.
+app_resources.setup_fluidsynth_library()
+
 import audio_backend  # v22ze-115: single routing point for all output
 from audio_backend import FluidSynthBackend, MidiPortBackend
 
@@ -126,6 +133,7 @@ def _fluidsynth_importable():
 
 _fs_fail_reason = None
 _fs_fail_detail = ""  # the actual exception text, for the "Show details" expander
+_fs_driver = None  # v22ze-117: name of the audio driver that really opened
 
 
 def _detect_linux_distro():
@@ -179,8 +187,19 @@ _SF2_SEARCH_PATHS = [
 
 
 def _find_soundfont():
-    """Return the first .sf2 file found on this machine, or None."""
+    """Return the soundfont to use, or None.
+
+    v22ze-116 order: 1) "soundfont" path saved in the settings file (a user
+    override), 2) a soundfont bundled with the app (<app>/sound/), 3) the
+    system locations below (unchanged behaviour)."""
     import glob
+
+    _user_sf = _load_settings().get("soundfont")
+    if isinstance(_user_sf, str) and os.path.isfile(os.path.expanduser(_user_sf)):
+        return os.path.expanduser(_user_sf)
+    _bundled_sf = app_resources.find_bundled_soundfont()
+    if _bundled_sf:
+        return _bundled_sf
 
     for path in _SF2_SEARCH_PATHS:
         if os.path.isfile(path):
@@ -207,6 +226,29 @@ def _saved_master_volume():
     return audio_backend.DEFAULT_MASTER_VOLUME
 
 
+def _fs_audio_drivers():
+    """v22ze-117: audio drivers to try, best first, for this OS.  None means
+    "let FluidSynth pick its default"."""
+    plat = platform.system()
+    if plat == "Linux":
+        # v22w: pulseaudio (also served by pipewire-pulse) is the most broadly
+        # reliable on modern desktops; native pipewire, alsa, jack, oss follow.
+        return ["pulseaudio", "pipewire", "alsa", "jack", "oss"]
+    if plat == "Darwin":
+        return ["coreaudio"]
+    if plat == "Windows":
+        return ["dsound", "wasapi", "waveout"]
+    return [None]
+
+
+def _fs_delete(synth):
+    """v22ze-117: release a synth we decided not to use (never raises)."""
+    try:
+        synth.delete()
+    except Exception:
+        pass
+
+
 def _init_fluidsynth():
     """Try to set up a FluidSynth soft-synth as a MIDI output backend.
 
@@ -215,6 +257,11 @@ def _init_fluidsynth():
     Leaves _fs_synth, _fs_sfid, _fs_active in a consistent state.
     """
     global _fs_synth, _fs_sfid, _fs_active, _fs_fail_reason, _fs_fail_detail
+    global _fs_driver
+
+    # v22ze-117: every attempt starts clean, so a retry (e.g. from the Setup
+    # tab) reports ITS failure, not a stale reason from an earlier attempt.
+    _fs_fail_reason, _fs_fail_detail = None, ""
 
     # 1 — Can we import the Python binding?
     try:
@@ -232,54 +279,50 @@ def _init_fluidsynth():
         return False
 
     # 3 — Initialise the synth
+    # v22ze-117: pyfluidsynth's Synth.start() does NOT raise when the audio
+    # driver fails to open -- it prints an error, returns 0 and leaves
+    # fs.audio_driver as None.  The old loop therefore accepted the FIRST
+    # driver every time ("started successfully" / "Ready") even when nothing
+    # could play, never tried the fallbacks, and never showed the "No Music
+    # Synthesizer Found" dialog.  Now each driver gets a fresh synth and is
+    # accepted only if its audio_driver really opened.
+    fs = None
     try:
         # v22ze-112: default is channels=256, which made FluidSynth register
         # 16 separate ALSA ports (one per 16-channel group). MIDI only has 16.
         # v22ze-113/115b: library default gain is 0.2 (quiet). Use the saved
         # master volume (slider position) or the default (gain 0.7).
         _gain = _saved_master_volume() * audio_backend.FLUIDSYNTH_GAIN_MAX
-        fs = fluidsynth.Synth(channels=16, gain=_gain)
-        _plat = platform.system()
-        if _plat == "Linux":
-            # v22w: try multiple drivers in order rather than hardcoding
-            # "alsa".  Many current Linux distros (Arch included) default
-            # to PipeWire; its ALSA compatibility layer can let fs.start()
-            # succeed with no exception while producing no audible output
-            # at all — reported as "FluidSynth installed but silent".
-            # pulseaudio/pipewire-pulse is the most broadly reliable choice
-            # on modern desktop Linux; alsa and jack are fallbacks.
-            _drivers_to_try = ["pulseaudio", "alsa", "jack", "oss"]
-            _started = False
-            _last_exc = None
-            for _drv in _drivers_to_try:
-                try:
-                    fs.start(driver=_drv)
-                    print(
-                        f"[FluidSynth] Audio driver '{_drv}' started successfully",
-                        file=sys.stderr,
-                    )
-                    _started = True
-                    break
-                except Exception as _drv_exc:
-                    _last_exc = _drv_exc
-                    print(
-                        f"[FluidSynth] Driver '{_drv}' failed: {_drv_exc}",
-                        file=sys.stderr,
-                    )
-                    continue
-            if not _started:
-                _fs_fail_reason = "no_driver"
-                _fs_fail_detail = f"tried {_drivers_to_try}; last error: {_last_exc}"
-                raise RuntimeError(
-                    f"No audio driver succeeded (tried {_drivers_to_try}); "
-                    f"last error: {_last_exc}"
-                )
-        elif _plat == "Darwin":
-            fs.start(driver="coreaudio")
-        elif _plat == "Windows":
-            fs.start(driver="dsound")
-        else:
-            fs.start()
+        _drivers_to_try = _fs_audio_drivers()
+        _errors = []
+        for _drv in _drivers_to_try:
+            _label = _drv or "default"
+            _cand = fluidsynth.Synth(channels=16, gain=_gain)
+            try:
+                _cand.start(driver=_drv) if _drv else _cand.start()
+            except Exception as _drv_exc:
+                _errors.append(f"{_label}: {_drv_exc}")
+                print(f"[FluidSynth] Driver '{_label}' failed: {_drv_exc}", file=sys.stderr)
+                _fs_delete(_cand)
+                continue
+            if _drv and _cand.get_setting("audio.driver") != _drv:
+                _errors.append(f"{_label}: not supported by this FluidSynth build")
+                print(f"[FluidSynth] Driver '{_label}' is not supported here", file=sys.stderr)
+                _fs_delete(_cand)
+                continue
+            if not getattr(_cand, "audio_driver", None):
+                _errors.append(f"{_label}: could not open the audio device")
+                print(f"[FluidSynth] Driver '{_label}' could not open the audio device", file=sys.stderr)
+                _fs_delete(_cand)
+                continue
+            fs = _cand
+            _fs_driver = _label
+            print(f"[FluidSynth] Audio driver '{_label}' opened successfully", file=sys.stderr)
+            break
+        if fs is None:
+            _fs_fail_reason = "no_driver"
+            _fs_fail_detail = "tried " + "; ".join(_errors)
+            raise RuntimeError(f"No audio driver could be opened ({_fs_fail_detail})")
 
         sfid = fs.sfload(sf2)
         if sfid == -1:
@@ -293,7 +336,7 @@ def _init_fluidsynth():
         _fs_synth = fs
         _fs_sfid = sfid
         _fs_active = True
-        print(f"[FluidSynth] Ready — SoundFont: {sf2}", file=sys.stderr)
+        print(f"[FluidSynth] Ready — driver: {_fs_driver}, SoundFont: {sf2}", file=sys.stderr)
         return True
 
     except Exception as exc:
@@ -377,11 +420,12 @@ def _maybe_show_no_synth_dialog(root):
         "SoundFont (.sf2 file) could be found anywhere on "
         "this system. FluidSynth needs one to know what any "
         "instrument actually sounds like.",
-        "no_driver": "FluidSynth and a SoundFont were both found, but no "
-        "audio driver could be started (tried PulseAudio, "
-        "ALSA, JACK, and OSS in turn). This usually means "
-        "your audio server isn't running or isn't reachable "
-        "-- check that PipeWire/PulseAudio is active "
+        "no_driver": "FluidSynth and a SoundFont were both found, but none "
+        "of the audio drivers could open your sound device (every driver "
+        "FluidSynth offers on this system was tried -- see the details "
+        "below). This usually means your audio server isn't running, or "
+        "another program has the sound card to itself -- on Linux check "
+        "that PipeWire/PulseAudio is active "
         '("systemctl --user status pipewire-pulse").',
         "load_failed": "A SoundFont file was found, but FluidSynth rejected "
         "it -- it may be corrupt or not actually a valid "
