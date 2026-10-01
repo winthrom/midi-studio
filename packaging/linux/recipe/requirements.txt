@@ -1,0 +1,6 @@
+# Pure Python:
+mido
+pyfluidsynth
+python-ly
+# Native wheel (manylinux_2_28 x86_64 exists for CPython 3.8-3.12 only):
+python-rtmidi

@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=MIDI-Studio
+Exec=midi-studio
+Comment=MIDI keyboard recording, editing and notation
+Icon=midi-studio
+Categories=AudioVideo;Audio;Midi;Music;
+Terminal=false
