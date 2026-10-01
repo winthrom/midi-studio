@@ -216,3 +216,7 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+packaging/linux/payload/lib/*
+!packaging/linux/payload/lib/.gitkeep
+packaging/linux/payload/sound/*
+!packaging/linux/payload/sound/.gitkeep

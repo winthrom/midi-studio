@@ -5,7 +5,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 IMAGE="${IMAGE:-quay.io/pypa/manylinux_2_28_x86_64}"
 docker run --rm \
-    --user "$(id -u):$(id -g)" \
+    --user "${SUDO_UID:-$(id -u)}:${SUDO_GID:-$(id -g)}" \
     -e HOME=/tmp/home \
     -e PYTHON=/opt/python/cp312-cp312/bin/python \
     -v "$ROOT":/src -w /src \

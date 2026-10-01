@@ -50,6 +50,15 @@ try:
     try:
         import fluidsynth
         line("pyfluidsynth + libfluidsynth loads", True)
+        if sf:
+            # Load (decode) the soundfont WITHOUT opening any audio device.
+            try:
+                _s = fluidsynth.Synth()
+                _id = _s.sfload(sf)
+                line("soundfont loads (SF3/Vorbis decoding)", _id != -1, os.path.basename(sf))
+                _s.delete()
+            except Exception as e:
+                line("soundfont loads (SF3/Vorbis decoding)", False, e)
     except Exception as e:
         line("pyfluidsynth + libfluidsynth loads", False, e, required=False)
 except Exception as e:
