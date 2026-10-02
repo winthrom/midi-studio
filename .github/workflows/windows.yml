@@ -1,0 +1,42 @@
+name: Windows
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          architecture: x64
+
+      - name: Unit tests
+        shell: pwsh
+        run: |
+          python -m pip install mido
+          python test_audio_backend.py
+          python test_app_resources.py
+
+      - name: Build (PyInstaller)
+        shell: pwsh
+        run: ./packaging/windows/build_windows.ps1
+
+      - name: Selftest the built bundle
+        shell: pwsh
+        run: ./dist/windows/MIDI-Studio/MIDI-Studio-selftest.exe
+
+      - name: Zip
+        shell: pwsh
+        run: Compress-Archive -Path dist/windows/MIDI-Studio -DestinationPath MIDI-Studio-windows-x64.zip
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: MIDI-Studio-windows-x64
+          path: MIDI-Studio-windows-x64.zip
