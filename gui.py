@@ -7555,7 +7555,7 @@ class SplashScreen(tk.Toplevel):
         inner = tk.Frame(outer, bg=BG, padx=40, pady=30)
         inner.pack()
 
-        tk.Label(inner, text="🎹", bg=BG, fg=BLUE, font=("TkDefaultFont", 38)).pack()
+        tk.Label(inner, text="♬", bg=BG, fg=BLUE, font=("TkDefaultFont", 38)).pack()
 
         tk.Label(
             inner,
@@ -7637,8 +7637,8 @@ class SplashScreen(tk.Toplevel):
         lf = tk.Frame(inner, bg=BG)
         lf.pack()
         for txt, url in [
-            ("🦁  Make a Donation", LIONS_DONATE_URL),
-            ("🌐  https://e-clubhouse.org/sites/sterlingva", LIONS_WEBSITE_URL),
+            ("♌  Make a Donation", LIONS_DONATE_URL),
+            ("⊕  https://e-clubhouse.org/sites/sterlingva", LIONS_WEBSITE_URL),
         ]:
             lk = tk.Label(
                 lf,
@@ -13058,8 +13058,8 @@ class MidisoftStudio:
             "correctly at the current tempo.")
         tk.Frame(tb,width=8,bg="#161b22").pack(side=tk.LEFT)
         tk.Button(tb,text="+ Track",command=self._add_track,**bc).pack(side=tk.LEFT,padx=1)
-        tk.Button(tb,text="🎼 Score",command=self._open_score_view,**bc).pack(side=tk.LEFT,padx=1)
-        tk.Button(tb,text="🎹 Roll",command=self._open_piano_roll,**bc).pack(side=tk.LEFT,padx=1)
+        tk.Button(tb,text="♫ Score",command=self._open_score_view,**bc).pack(side=tk.LEFT,padx=1)
+        tk.Button(tb,text="♬ Roll",command=self._open_piano_roll,**bc).pack(side=tk.LEFT,padx=1)
         tk.Button(tb,text="📋 List",command=self._open_list_view,**bc).pack(side=tk.LEFT,padx=1)
         tk.Button(tb,text="🎚 Mixer",command=self._open_mixer,**bc).pack(side=tk.LEFT,padx=1)
         tk.Frame(tb,width=8,bg="#161b22").pack(side=tk.LEFT)
@@ -13634,7 +13634,7 @@ class MidisoftStudio:
             tk.Frame(parent, bg=SEP, height=1).pack(fill=tk.X, padx=10, pady=6)
 
         # ── Header ────────────────────────────────────────────────────────
-        _lbl(content, "🎼  Score Setup",
+        _lbl(content, "♫  Score Setup",
              fg=BLUE, font=("TkDefaultFont", 12, "bold"),
              anchor="center").pack(pady=(14, 2))
         _lbl(content,
@@ -14257,7 +14257,7 @@ class MidisoftStudio:
         # it no longer clips controls with no way back to them.
         content = _make_scrollable(dlg, bg=BG)
 
-        tk.Label(content, text="🎼  Rationalize Score",
+        tk.Label(content, text="♫  Rationalize Score",
                  bg=BG, fg=BLUE, font=("TkDefaultFont", 12, "bold")).pack(pady=(16, 4))
         tk.Label(content,
                  text="Convert a recorded performance into clean notation. "
@@ -14784,7 +14784,7 @@ class MidisoftStudio:
         self._score_pane = DockablePane(
             app=self, dock_parent=self._score_dock_slot,
             content_factory=_score_factory,
-            title="🎼 Score", floated=False, min_w=1100, min_h=400)
+            title="♫ Score", floated=False, min_w=1100, min_h=400)
 
         # ── Tracks DockablePane ───────────────────────────────────────────────
         self._tracks_pane = DockablePane(
@@ -14979,7 +14979,7 @@ class MidisoftStudio:
         if hasattr(self,'_ration_var'):
             if self._is_rationalized:
                 u=len(self._undo_stack); r=len(self._redo_stack)
-                self._ration_var.set(f"🎵 Rationalized  ↩{u}  ↪{r}")
+                self._ration_var.set(f"♪ Rationalized  ↩{u}  ↪{r}")
             else:
                 self._ration_var.set("")
 
@@ -15379,7 +15379,7 @@ class MidisoftStudio:
         dlg.grab_set()
         BG = "#0d1117"; FG = "#f0f6fc"; MUTED = "#8b949e"
 
-        tk.Label(dlg, text="🎼  LilyPond Export Options",
+        tk.Label(dlg, text="♫  LilyPond Export Options",
                  bg=BG, fg="#58a6ff",
                  font=("TkDefaultFont", 12, "bold")).pack(pady=(18, 12))
 
@@ -16096,7 +16096,7 @@ class MidisoftStudio:
 
         BG = "#0d1117"; FG = "white"; MUTED = "#8b949e"
 
-        tk.Label(dlg, text="🎹  Midi-Studio",
+        tk.Label(dlg, text="♬  Midi-Studio",
                  bg=BG, fg="#58a6ff",
                  font=("TkDefaultFont", 18, "bold")).pack(pady=(24, 4))
         tk.Label(dlg, text="Work-Alike — No code from the original",
@@ -16112,8 +16112,8 @@ class MidisoftStudio:
                  font=("TkDefaultFont", 10, "italic")).pack(pady=(14, 4))
 
         lf = tk.Frame(dlg, bg=BG); lf.pack()
-        for txt, url in [("🦁  Make a Donation", LIONS_DONATE_URL),
-                         ("🌐  Visit Website",   LIONS_WEBSITE_URL)]:
+        for txt, url in [("♌  Make a Donation", LIONS_DONATE_URL),
+                         ("⊕  Visit Website",   LIONS_WEBSITE_URL)]:
             lk = tk.Label(lf, text=txt, bg=BG, fg="#58a6ff",
                           font=("TkDefaultFont", 10, "underline"),
                           cursor="hand2")
