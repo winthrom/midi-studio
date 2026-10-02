@@ -5,7 +5,7 @@ import app_resources as ar
 
 
 def _mk(root, rel, data=b"x"):
-    p = os.path.join(root, rel); os.makedirs(os.path.dirname(p), exist_ok=True)
+    p = os.path.normpath(os.path.join(root, rel)); os.makedirs(os.path.dirname(p), exist_ok=True)
     open(p, "wb").write(data); return p
 
 def _env(root):
