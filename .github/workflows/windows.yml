@@ -24,13 +24,24 @@ jobs:
           python test_audio_backend.py
           python test_app_resources.py
 
+      - name: Fetch payload (FluidSynth DLLs + soundfont)
+        shell: pwsh
+        run: ./packaging/windows/fetch_payload.ps1
+
       - name: Build (PyInstaller)
         shell: pwsh
         run: ./packaging/windows/build_windows.ps1
 
       - name: Selftest the built bundle
         shell: pwsh
-        run: ./dist/windows/MIDI-Studio/MIDI-Studio-selftest.exe
+        run: |
+          $out = & ./dist/windows/MIDI-Studio/MIDI-Studio-selftest.exe
+          $out
+          if ($LASTEXITCODE -ne 0) { throw "selftest reported FAIL" }
+          $text = $out -join "`n"
+          foreach ($need in "[OK  ] bundled libfluidsynth", "[OK  ] pyfluidsynth + libfluidsynth loads", "[OK  ] bundled soundfont", "[OK  ] soundfont loads") {
+            if (-not $text.Contains($need)) { throw "selftest is missing: $need" }
+          }
 
       - name: Zip
         shell: pwsh

@@ -221,3 +221,5 @@ packaging/linux/payload/lib/*
 packaging/linux/payload/sound/*
 !packaging/linux/payload/sound/.gitkeep
 !packaging/windows/midi-studio.spec
+packaging/windows/payload/lib/*
+packaging/windows/payload/sound/*
