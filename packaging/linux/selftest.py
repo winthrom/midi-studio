@@ -53,9 +53,16 @@ try:
         if sf:
             # Load (decode) the soundfont WITHOUT opening any audio device.
             try:
+                import time
                 _s = fluidsynth.Synth()
+                _dyn = os.environ.get("MIDI_STUDIO_DYNAMIC_SAMPLES") == "1"
+                if _dyn:
+                    _s.setting("synth.dynamic-sample-loading", 1)
+                _t0 = time.time()
                 _id = _s.sfload(sf)
-                line("soundfont loads (SF3/Vorbis decoding)", _id != -1, os.path.basename(sf))
+                line("soundfont loads (SF3/Vorbis decoding)", _id != -1,
+                     "%s in %.1fs (on-demand samples: %s)" % (
+                         os.path.basename(sf), time.time() - _t0, "on" if _dyn else "off"))
                 _s.delete()
             except Exception as e:
                 line("soundfont loads (SF3/Vorbis decoding)", False, e)

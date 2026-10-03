@@ -324,7 +324,17 @@ def _init_fluidsynth():
             _fs_fail_detail = "tried " + "; ".join(_errors)
             raise RuntimeError(f"No audio driver could be opened ({_fs_fail_detail})")
 
+        # v22ze-124: optional on-demand sample decoding (opt-in, for A/B timing)
+        _dyn = os.environ.get("MIDI_STUDIO_DYNAMIC_SAMPLES") == "1"
+        if _dyn:
+            try:
+                fs.setting("synth.dynamic-sample-loading", 1)
+            except Exception as _dyn_exc:
+                print(f"[FluidSynth] dynamic sample loading not available: {_dyn_exc}", file=sys.stderr)
+        _t_sf = time.time()
         sfid = fs.sfload(sf2)
+        print(f"[FluidSynth] SoundFont loaded in {time.time() - _t_sf:.1f}s "
+              f"(on-demand samples: {'on' if _dyn else 'off'})", file=sys.stderr)
         if sfid == -1:
             _fs_fail_reason, _fs_fail_detail = "load_failed", f"sfload failed for {sf2}"
             raise RuntimeError(f"sfload failed for {sf2}")
