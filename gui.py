@@ -7162,6 +7162,17 @@ class TracksView(tk.Frame):
             lambda e: app.overview.yview_scroll(-1 if e.delta > 0 else 1, "units"),
         )
 
+        # v22ze-129: this build made a new, empty track_list Listbox; refill
+        # it (floating / docking / zooming all rebuild the pane).
+        def _refill():
+            try:
+                if self.winfo_exists():
+                    app._refresh_track_list()
+            except Exception:
+                pass
+
+        self.after(60, _refill)
+
 
 class MixerView(tk.Frame):
     def __init__(self, parent, app):
