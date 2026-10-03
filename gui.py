@@ -7535,6 +7535,13 @@ class SplashScreen(tk.Toplevel):
             x = max(px, x)
             y = max(py, y)
 
+            # v22ze-127: keep the whole splash (incl. the Continue button)
+            # on the primary screen, leaving room for a taskbar.
+            _sw, _sh = self.winfo_screenwidth(), self.winfo_screenheight()
+            if px < _sw and py < _sh:
+                x = max(0, min(x, _sw - w - 8))
+                y = max(0, min(y, _sh - h - 56))
+
             self.geometry(f"{w}x{h}+{x}+{y}")
             self.lift()
         except Exception:
@@ -12766,7 +12773,10 @@ class MidisoftStudio:
         root.title(APP_TITLE)
         sw, sh = root.winfo_screenwidth(), root.winfo_screenheight()
         win_w, win_h = min(1280, sw - 60), min(960, sh - 80)
-        root.geometry(f"{win_w}x{win_h}")
+        # v22ze-127: centre on screen (title bar / taskbar allowance).
+        _wx = max(0, (sw - win_w) // 2)
+        _wy = max(0, (sh - win_h) // 2 - 30)
+        root.geometry(f"{win_w}x{win_h}+{_wx}+{_wy}")
         root.configure(bg="#0d1117")
         self._build_menu(); self._build_toolbar(); self._build_track_area()
         self._build_status(); self._update_title(); self._update_status()
@@ -16080,11 +16090,12 @@ class MidisoftStudio:
         _out_label = midi_io.output_label()
         messagebox.showinfo("MIDI I/O",
             f"Output: {'OK  →  ' + _out_label if _out_ok else 'NOT CONNECTED'}\n\n"
-            f"Input:  {'OK  →  ' + in_port  if midi_io.MIDI_IN_OK  else 'NOT CONNECTED'}\n\n"
+            f"Input:  {'OK  →  ' + in_port  if midi_io.MIDI_IN_OK  else 'NOT CONNECTED (no MIDI keyboard found - only needed to record or play live)'}\n\n"
             f"All output ports:\n  {outs}\n\n"
-            f"All input ports:\n  {ins}\n\n"
-            "Tip: run  pkill timidity && timidity -B8,8 -Os -iA &\n"
-            "to ensure only one TiMidity instance is active.",parent=self.root)
+            f"All input ports:\n  {ins}"
+            + ("\n\nTip: run  pkill timidity && timidity -B8,8 -Os -iA &\n"
+               "to ensure only one TiMidity instance is active."
+               if sys.platform.startswith("linux") else ""),parent=self.root)
 
     def _about(self):
         import webbrowser

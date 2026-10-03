@@ -24,7 +24,7 @@ def main():
         _msg = tk.Toplevel(root)
         _msg.title("MIDI Studio")
         _msg.configure(bg="#0d1117")
-        _w, _h = 440, 120
+        _w, _h = 560, 130
         _msg.geometry(
             f"{_w}x{_h}+{max(0, (_msg.winfo_screenwidth() - _w) // 2)}"
             f"+{max(0, (_msg.winfo_screenheight() - _h) // 3)}"
@@ -34,14 +34,16 @@ def main():
             text="Starting MIDI Studio\u2026",
             bg="#0d1117",
             fg="#58a6ff",
-            font=("TkDefaultFont", 14, "bold"),
+            font=("TkDefaultFont", 18, "bold"),
         ).pack(pady=(24, 4))
         tk.Label(
             _msg,
             text="Loading sounds. This can take a while on older computers.",
             bg="#0d1117",
-            fg="#8b949e",
-            font=("TkDefaultFont", 9),
+            fg="#e6edf3",
+            font=("TkDefaultFont", 12),
+            wraplength=520,
+            justify=tk.CENTER,
         ).pack()
         _msg.update()
 
