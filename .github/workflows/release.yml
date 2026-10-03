@@ -1,0 +1,51 @@
+name: Release
+
+# Publish with:   git tag v0.2 && git push origin v0.2
+on:
+  push:
+    tags: ["v*"]
+
+jobs:
+  windows:
+    uses: ./.github/workflows/windows.yml
+
+  linux:
+    uses: ./.github/workflows/linux.yml
+
+  publish:
+    needs: [windows, linux]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dl
+          pattern: MIDI-Studio-*
+          merge-multiple: true
+
+      - name: Create the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ls -l dl
+          BASE="https://github.com/$GITHUB_REPOSITORY/releases/download/$GITHUB_REF_NAME"
+          cat > notes.md <<EOF
+          Test build $GITHUB_REF_NAME. Download the file for your computer:
+
+          - **Windows 10 / 11 (64-bit):** [MIDI-Studio-windows-x64.zip]($BASE/MIDI-Studio-windows-x64.zip)
+          - **Linux (64-bit):** [MIDI-Studio-x86_64.AppImage]($BASE/MIDI-Studio-x86_64.AppImage)
+          - **Mac:** not available yet.
+
+          **Windows:** unzip the whole folder (keep the _internal folder next to the program) and run MIDI-Studio.exe. Windows may say "Windows protected your PC": click More info, then Run anyway.
+
+          **Linux:** after downloading, make the file runnable (right-click, Properties, Allow executing as program, or run chmod +x MIDI-Studio-x86_64.AppImage), then double-click it.
+
+          The first start can take a while on older computers while the sounds load.
+          EOF
+          sed -i 's/^          //' notes.md
+          gh release create "$GITHUB_REF_NAME" \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "MIDI Studio $GITHUB_REF_NAME" \
+            --notes-file notes.md \
+            dl/MIDI-Studio-windows-x64.zip dl/MIDI-Studio-x86_64.AppImage
