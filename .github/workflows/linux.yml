@@ -1,0 +1,49 @@
+name: Linux
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  appimage:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache libfluidsynth build
+        id: libcache
+        uses: actions/cache@v4
+        with:
+          path: packaging/linux/payload/lib
+          key: linux-libs-${{ hashFiles('packaging/linux/build_fluidsynth.sh', 'packaging/linux/collect_libs.sh') }}
+
+      - name: Build libfluidsynth (old-glibc container)
+        if: steps.libcache.outputs.cache-hit != 'true'
+        run: bash packaging/linux/docker_build_fluidsynth.sh
+
+      - name: Fetch soundfont
+        run: bash packaging/linux/fetch_soundfont.sh
+
+      - name: Build AppImage
+        run: bash packaging/linux/docker_build.sh
+
+      - name: Selftest the AppImage
+        run: |
+          chmod +x dist/linux/MIDI-Studio-x86_64.AppImage
+          export APPIMAGE_EXTRACT_AND_RUN=1
+          set +e
+          out="$(dist/linux/MIDI-Studio-x86_64.AppImage --selftest 2>&1)"
+          rc=$?
+          set -e
+          echo "$out"
+          [ "$rc" -eq 0 ] || { echo "selftest reported FAIL"; exit 1; }
+          for need in "[OK  ] bundled libfluidsynth" "[OK  ] pyfluidsynth + libfluidsynth loads" "[OK  ] bundled soundfont" "[OK  ] soundfont loads"; do
+            echo "$out" | grep -qF "$need" || { echo "selftest is missing: $need"; exit 1; }
+          done
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: MIDI-Studio-linux-x86_64
+          path: dist/linux/MIDI-Studio-x86_64.AppImage
