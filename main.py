@@ -21,28 +21,29 @@ def main():
         pass
 
     try:
-        # v22ze-126: show a message first, then do the slow import.
-        root.title("MIDI Studio")
+        # v22ze-126b: the message lives in its OWN small window; the main
+        # root stays hidden and never gets a size/position of its own.
+        root.withdraw()
+        _msg = tk.Toplevel(root)
+        _msg.title("MIDI Studio")
+        _msg.configure(bg="#0d1117")
         _w, _h = 440, 120
-        root.geometry(
-            f"{_w}x{_h}+{max(0, (root.winfo_screenwidth() - _w) // 2)}"
-            f"+{max(0, (root.winfo_screenheight() - _h) // 3)}"
+        _msg.geometry(
+            f"{_w}x{_h}+{max(0, (_msg.winfo_screenwidth() - _w) // 2)}"
+            f"+{max(0, (_msg.winfo_screenheight() - _h) // 3)}"
         )
-        root.configure(bg="#0d1117")
-        tk.Label(root, text="Starting MIDI Studio\u2026", bg="#0d1117",
+        tk.Label(_msg, text="Starting MIDI Studio\u2026", bg="#0d1117",
                  fg="#58a6ff", font=("TkDefaultFont", 14, "bold")
                  ).pack(pady=(24, 4))
-        tk.Label(root, text="Loading sounds. This can take a while on older computers.",
+        tk.Label(_msg, text="Loading sounds. This can take a while on older computers.",
                  bg="#0d1117", fg="#8b949e", font=("TkDefaultFont", 9)
                  ).pack()
-        root.update()
+        _msg.update()
 
         from gui import MidisoftStudio, SplashScreen
 
-        # Remove the message and let the real window size itself.
-        for _child in root.winfo_children():
-            _child.destroy()
-        root.geometry("")
+        _msg.destroy()
+        root.deiconify()
 
         # Initialize the main application window.
         # (MidisoftStudio.__init__ shows the "no synthesizer detected"
