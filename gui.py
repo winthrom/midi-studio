@@ -8894,6 +8894,11 @@ class ScoreView(tk.Frame):
         # Draw per-measure status strip above the first stave
         self._draw_measure_strip(c, mmap, song, tracks)
 
+        # v22ze-132: instrument names for the staff labels
+        try:
+            self._staff_labels = self._make_staff_labels(tracks)
+        except Exception:
+            self._staff_labels = None
         for ti, tr in enumerate(tracks):
             self._draw_system(c, ti, tr, song, nm, mmap, total_w, tracks)
         if cursor_tick is not None:
@@ -8985,6 +8990,35 @@ class ScoreView(tk.Frame):
         except Exception:
             pass
 
+    def _make_staff_labels(self, tracks):
+        """v22ze-132: one display label per staff (see patch notes above)."""
+        import re as _sn_re
+
+        bases = []
+        for tr in tracks:
+            nm = (getattr(tr, "name", "") or "").strip()
+            if nm and not _sn_re.match(r"^(track\s*\d*|untitled)$", nm, _sn_re.I):
+                bases.append(nm)
+            elif getattr(tr, "channel", 0) == 9:
+                bases.append("Drums")
+            else:
+                try:
+                    bases.append(GM_INSTRUMENTS[int(tr.program)])
+                except Exception:
+                    bases.append(nm or "Instrument")
+        totals = {}
+        for b in bases:
+            totals[b] = totals.get(b, 0) + 1
+        seen = {}
+        labels = []
+        for b in bases:
+            if totals[b] > 1:
+                seen[b] = seen.get(b, 0) + 1
+                labels.append(f"{b} {seen[b]}")
+            else:
+                labels.append(b)
+        return labels
+
     def _draw_system(self, c, ti, tr, song, nm, mmap, total_w, tracks=None):
         grand = self._uses_grand_staff(tr)
         tt = self._treble_top(ti, tracks)
@@ -9002,7 +9036,10 @@ class ScoreView(tk.Frame):
         # are left untouched.
         import re as _lbl_re
 
-        if _lbl_re.match(r"^Track\s+\d+$", tr.name or ""):
+        _sl = getattr(self, "_staff_labels", None)
+        if _sl and ti < len(_sl):
+            label = _sl[ti]  # v22ze-132
+        elif _lbl_re.match(r"^Track\s+\d+$", tr.name or ""):
             label = f"Track {ti + 1}"
         else:
             label = f"{tr.name}"
