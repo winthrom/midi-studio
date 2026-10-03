@@ -2,8 +2,9 @@
 """Headless check of what a build contains (no window is opened).
 Run as:  MIDI-Studio-x86_64.AppImage --selftest      (exit 0 = all required OK)
 """
-import os, sys
+import os, sys, time
 
+_T0 = time.time()   # when the selftest script itself started
 ok = True
 
 
@@ -12,7 +13,8 @@ def line(label, good, detail="", required=True):
     mark = "OK  " if good else ("FAIL" if required else "warn")
     if required and not good:
         ok = False
-    print("[%s] %s%s" % (mark, label, (": " + str(detail)) if detail else ""))
+    print("[%s] %s%s  [+%.1fs]" % (mark, label, (": " + str(detail)) if detail else "",
+                                   time.time() - _T0))
 
 
 line("python", True, sys.version.split()[0])
@@ -71,5 +73,6 @@ try:
 except Exception as e:
     line("app_resources", False, e)
 
-print("RESULT:", "PASS" if ok else "FAIL")
+print("RESULT:", "PASS" if ok else "FAIL", " (script ran %.1fs; total wall time minus this = program start-up)"
+      % (time.time() - _T0))
 sys.exit(0 if ok else 1)
