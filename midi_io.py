@@ -657,7 +657,7 @@ def _prompt_midi_output_choice(trusted_ports):
         justify=tk.CENTER,
     ).pack(padx=20, pady=(0, 10))
 
-    var = tk.StringVar(value=trusted_ports[0])
+    var = tk.StringVar(master=_root, value=trusted_ports[0])  # v22ze-126
     for name in trusted_ports:
         tk.Radiobutton(
             _dlg,
@@ -672,7 +672,7 @@ def _prompt_midi_output_choice(trusted_ports):
             anchor="w",
         ).pack(fill=tk.X, padx=24, pady=2)
 
-    remember_var = tk.BooleanVar(value=False)  # unchecked by default
+    remember_var = tk.BooleanVar(master=_root, value=False)  # unchecked by default (v22ze-126: own root)
     tk.Checkbutton(
         _dlg,
         text="Remember this choice for next time",
