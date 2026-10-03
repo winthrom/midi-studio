@@ -37,7 +37,7 @@ jobs:
           - **Linux (64-bit):** [MIDI-Studio-x86_64.AppImage]($BASE/MIDI-Studio-x86_64.AppImage)
           - **Mac:** not available yet.
 
-          **Windows:** unzip the whole folder (keep the _internal folder next to the program) and run MIDI-Studio.exe. Windows may say "Windows protected your PC": click More info, then Run anyway.
+          **Windows:** unzip the whole folder (keep the _internal folder next to the program) and run MIDI-Studio.exe. Windows will probably show a window titled "Windows protected your PC" because this program is not code-signed (it says the publisher is unknown). Look for the small, faint "More info" link in that window, click it, then click "Run anyway". Windows should not ask again for that copy.
 
           **Linux:** after downloading, make the file runnable (right-click, Properties, Allow executing as program, or run chmod +x MIDI-Studio-x86_64.AppImage), then double-click it.
 
