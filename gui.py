@@ -1273,6 +1273,10 @@ class Song:
         # grid.  When present, consumers (bake_to_score, to_ly, ScoreView,
         # Score Setup) should prefer this over build_measure_map().
         self.rationalized_measure_map = None
+        # v22ze-137: every tempo change in the file [(tick, us_per_beat)],
+        # and the song tempo at load time (see effective_tempo_map()).
+        self.tempo_map: list = []
+        self._tempo_map_for = None
 
     @property
     def bpm(self):
@@ -1621,6 +1625,7 @@ class Song:
                 abs_t += msg.time
                 if msg.type == "set_tempo":
                     song.tempo = msg.tempo
+                    song.tempo_map.append((abs_t, msg.tempo))
                 elif msg.type == "time_signature":
                     # v22ze-45 fix: this used to overwrite time_sig_num/
                     # den on EVERY time_signature event, so a piece with
@@ -1684,6 +1689,7 @@ class Song:
                     abs_t += msg.time
                     if msg.type == "set_tempo":
                         song.tempo = msg.tempo
+                        song.tempo_map.append((abs_t, msg.tempo))
                         tr.events.append(MidiEvent(abs_t, msg))
                     elif msg.type == "time_signature":
                         # v22ze-45 fix: same issue as the Type-0 loop
@@ -1769,6 +1775,15 @@ class Song:
                     _deduped.append((_t, _n, _d))
             song.sig_changes = _deduped
 
+        # v22ze-137: remember every tempo change (a conductor track holding
+        # only tempo events is not kept as a track, so its tempo changes were
+        # lost before) and the tempo at load time.
+        if song.tempo_map:
+            _dd = {}
+            for _t, _tp in song.tempo_map:
+                _dd[_t] = _tp
+            song.tempo_map = sorted(_dd.items())
+        song._tempo_map_for = song.tempo
         return song
 
     # ── MIDI export ──────────────────────────────────────────────────────────
@@ -1784,7 +1799,8 @@ class Song:
 
         mid = mido.MidiFile(ticks_per_beat=self.ticks_per_beat)
         tt = mido.MidiTrack()
-        tt.append(mido.MetaMessage("set_tempo", tempo=self.tempo, time=0))
+        _tc = self.tempo_changes()  # v22ze-137: all tempo changes, not just one
+        tt.append(mido.MetaMessage("set_tempo", tempo=_tc[0][1], time=0))
         tt.append(
             mido.MetaMessage(
                 "time_signature",
@@ -1833,6 +1849,21 @@ class Song:
                 )
             )
             _last_sig_tick = _chg_tick
+        _later = [(t, tp) for t, tp in _tc if t > 0]
+        if _later:
+            _abs = []
+            _a = 0
+            for _m in tt:
+                _a += _m.time
+                _abs.append((_a, _m))
+            for _t, _tp in _later:
+                _abs.append((_t, mido.MetaMessage("set_tempo", tempo=_tp, time=0)))
+            _abs.sort(key=lambda x: x[0])
+            tt = mido.MidiTrack()
+            _p = 0
+            for _t, _m in _abs:
+                tt.append(_m.copy(time=_t - _p))
+                _p = _t
         mid.tracks.append(tt)
         for tr in self.tracks:
             # ── Merge tie-continuation notes ──────────────────────────────────
@@ -2115,6 +2146,157 @@ class Song:
             f.write("\n".join(lines))
 
     # ── Score Rationalization ────────────────────────────────────────────────
+    # ── v22ze-137: tempo changes ────────────────────────────────────────────
+    def effective_tempo_map(self):
+        """File tempo changes [(tick, us_per_beat)], or [] when not usable.
+
+        Read from the file on open.  If the user has since changed the song
+        tempo (self.tempo differs from the tempo at load time) the file's
+        tempo changes are ignored, as an explicit tempo edit wins.
+        """
+        tm = list(getattr(self, "tempo_map", None) or [])
+        if tm and getattr(self, "_tempo_map_for", None) == self.tempo:
+            return sorted(tm, key=lambda x: x[0])
+        return []
+
+    def tempo_changes(self):
+        """Complete tempo list [(tick, us_per_beat)], always starting at tick 0."""
+        em = self.effective_tempo_map()
+        pts = list(em)
+        for tr in self.tracks:
+            for ev in tr.events:
+                if ev.msg.type == "set_tempo":
+                    pts.append((ev.tick, ev.msg.tempo))
+        pts.sort(key=lambda x: x[0])
+        ded = []
+        for t, tp in pts:
+            if ded and ded[-1][0] == t:
+                ded[-1] = (t, tp)
+            else:
+                ded.append((t, tp))
+        if not ded or ded[0][0] > 0:
+            ded.insert(0, (0, 500000 if em else self.tempo))
+        return ded
+
+    # ── v22ze-137: hands without touching the sound ─────────────────────────
+    def rationalize_keep_audio(self, params=None, measure_range=None):
+        """Like rationalize(), but the SOUND of the file is not changed.
+
+        Runs the normal hand-separation / meter logic on the piano part to
+        learn which hand each note belongs to, then builds the result from the
+        ORIGINAL notes (same start, length, velocity) split into
+        "<name> (RH)" / "<name> (LH)".  Pedal and other events are kept
+        exactly.  Tracks of other instruments (and drums) are left untouched.
+        Tempo is never changed.
+        """
+        import bisect
+        import copy
+
+        p = dict(params or {})
+        p.update({"detect_tempo": False, "tempo_override": None,
+                  "correct_pedal_durations": False})
+        cand = [t for t in self.tracks if t.notes and t.channel != 9]
+        if not cand:
+            return copy.deepcopy(self)
+        piano = [t for t in cand if 0 <= t.program <= 7]
+        pool = piano or cand
+        best = max(pool, key=lambda t: len(t.notes))
+        sel = [t for t in pool if t.program == best.program]
+        sel_ids = {id(t) for t in sel}
+
+        sub = copy.copy(self)
+        sub.tracks = [copy.deepcopy(t) for t in sel]
+        res = sub.rationalize(params=p, measure_range=measure_range)
+
+        # hand (0=RH, 1=LH) the algorithm chose, per (pitch, onset)
+        win = max(1, self.ticks_per_beat)
+        by_pitch = {}
+        every = []
+        for hi, rt in enumerate(res.tracks[:2]):
+            for n in rt.notes:
+                if getattr(n, "articulation", "") == "tie_continuation":
+                    continue
+                by_pitch.setdefault(n.pitch, []).append([n.tick, hi, False])
+                every.append((n.tick, n.pitch, hi))
+        for v in by_pitch.values():
+            v.sort(key=lambda x: x[0])
+        every.sort()
+        every_ticks = [e[0] for e in every]
+
+        def hand_of(n):
+            lst = by_pitch.get(n.pitch)
+            if lst:
+                ticks = [x[0] for x in lst]
+                i = bisect.bisect_left(ticks, n.tick)
+                best_c = None
+                j = i - 1
+                while j >= 0 and lst[j][2]:
+                    j -= 1
+                if j >= 0:
+                    best_c = (n.tick - lst[j][0], j)
+                k = i
+                while k < len(lst) and lst[k][2]:
+                    k += 1
+                if k < len(lst) and (best_c is None or lst[k][0] - n.tick < best_c[0]):
+                    best_c = (lst[k][0] - n.tick, k)
+                if best_c is not None and best_c[0] <= win:
+                    lst[best_c[1]][2] = True
+                    return lst[best_c[1]][1]
+            # note was dropped by the cleanup: follow the closest-pitch
+            # neighbour in time
+            lo = bisect.bisect_left(every_ticks, n.tick - win)
+            hi_ = bisect.bisect_right(every_ticks, n.tick + win)
+            near = every[lo:hi_]
+            if near:
+                return min(near, key=lambda e: (abs(e[1] - n.pitch), abs(e[0] - n.tick)))[2]
+            return 0 if n.pitch >= 60 else 1
+
+        base = best.name
+        for sfx in (" (RH)", " (LH)"):
+            if base.endswith(sfx):
+                base = base[: -len(sfx)]
+                break
+        rh = Track(name=f"{base} (RH)", channel=best.channel,
+                   program=best.program, volume=best.volume)
+        lh = Track(name=f"{base} (LH)", channel=best.channel,
+                   program=best.program, volume=best.volume)
+        rh.mute = lh.mute = best.mute
+        rh.solo = lh.solo = best.solo
+        for tr in sel:
+            for n in sorted(tr.notes, key=lambda x: x.tick):
+                nc = copy.copy(n)
+                (rh if hand_of(n) == 0 else lh).notes.append(nc)
+            rh.events.extend(copy.deepcopy(tr.events))
+        rh.notes.sort(key=lambda n: n.tick)
+        lh.notes.sort(key=lambda n: n.tick)
+        rh.events.sort(key=lambda e: e.tick)
+
+        out = copy.deepcopy(self)
+        new_tracks = []
+        placed = False
+        for src_t, cp_t in zip(self.tracks, out.tracks):
+            if id(src_t) in sel_ids:
+                if not placed:
+                    new_tracks.extend([rh, lh])
+                    placed = True
+            else:
+                new_tracks.append(cp_t)
+        out.tracks = new_tracks
+        out.time_sig_num = res.time_sig_num
+        out.time_sig_den = res.time_sig_den
+        out.sig_changes = copy.deepcopy(res.sig_changes)
+        out.rationalized_measure_map = res.rationalized_measure_map
+        for attr in ("_measure_rests", "_rests_before_map"):
+            if hasattr(res, attr):
+                setattr(out, attr, getattr(res, attr))
+        out.modified = True
+        print(
+            f"[rationalize] keep-sound: {len(rh.notes)} RH + {len(lh.notes)} LH notes "
+            f"from {len(sel)} piano track(s); {len(self.tracks) - len(sel)} other track(s) untouched",
+            file=sys.stderr,
+        )
+        return out
+
     def rationalize(self, params=None, measure_range=None):
         """Return a NEW Song with rationalized notation.
 
@@ -2775,6 +2957,9 @@ class Song:
         else:
             new_song.sig_changes = list(self.sig_changes)
         new_song.key_sig = getattr(self, "key_sig", "C")
+        if new_song.tempo == self.tempo:  # v22ze-137: keep tempo changes
+            new_song.tempo_map = list(getattr(self, "tempo_map", None) or [])
+            new_song._tempo_map_for = getattr(self, "_tempo_map_for", None)
 
         # ── 3. Measure range filter ──────────────────────────────────────────
         mmap = self.build_measure_map()
@@ -3945,6 +4130,8 @@ class Song:
         out = Song()
         out.ticks_per_beat = tpb
         out.tempo = self.tempo
+        out.tempo_map = list(getattr(self, "tempo_map", None) or [])  # v22ze-137
+        out._tempo_map_for = getattr(self, "_tempo_map_for", None)
         out.time_sig_num = self.time_sig_num
         out.time_sig_den = self.time_sig_den
         out.sig_changes = _bk.deepcopy(self.sig_changes)
@@ -6055,11 +6242,9 @@ class Transport:
     def _build_tempo_map(self):
         """Build a list of (abs_tick, tempo_us) change points from track events.
         Always starts with the song's base tempo at tick 0."""
-        map_ = [(0, self.song.tempo)]
-        for tr in self.song.tracks:
-            for ev in tr.events:
-                if ev.msg.type == "set_tempo":
-                    map_.append((ev.tick, ev.msg.tempo))
+        # v22ze-137: includes the file's tempo changes even when they lived
+        # on a note-less conductor track.
+        map_ = list(self.song.tempo_changes())
         map_.sort(key=lambda x: x[0])
         # Deduplicate: keep last tempo at each tick
         deduped = []
@@ -14560,6 +14745,25 @@ class MidisoftStudio:
                  bg=BG, fg=FG, font=("TkDefaultFont", 9)).pack(
             side=tk.LEFT, padx=4)
 
+        # v22ze-137: keep the original sound (default ON)
+        keep_sound_var = tk.BooleanVar(value=True)
+        ks_row = tk.Frame(pfrm, bg=BG)
+        ks_row.grid(row=99, column=0, columnspan=2, sticky="w", pady=(8, 0))
+        ks_check = _tt(tk.Checkbutton(
+            ks_row, variable=keep_sound_var, bg=BG, fg="#3fb950",
+            selectcolor="#21262d", activebackground=BG),
+            "ON: every note keeps its original start, length and velocity, "
+            "pedal and other events are untouched, other instruments are not "
+            "touched and the tempo is never changed. Rationalize only works "
+            "out the hands and the bars; the score tidies the display. "
+            "OFF: the old behaviour - notes are snapped/merged/shortened so "
+            "the sound changes to match the cleaned score (quantize, "
+            "arpeggio and pedal settings then apply).")
+        ks_check.pack(side=tk.LEFT)
+        tk.Label(ks_row, text="Keep the original sound (recommended)",
+                 bg=BG, fg="#3fb950", font=("TkDefaultFont", 9, "bold")).pack(
+            side=tk.LEFT, padx=4)
+
         # Quantize strength
         q_str_var = tk.IntVar(value=85)
         _tt(_row(pfrm, "Quantize strength (%):", lambda p: tk.Spinbox(
@@ -14690,8 +14894,12 @@ class MidisoftStudio:
                 _before_song = (self._original_song or self.song)
                 before = _copy.deepcopy(_before_song.tracks)
                 before_map = _copy.deepcopy(_before_song.rationalized_measure_map)
-                rationalized = src.rationalize(params=params,
-                                               measure_range=m_range)
+                if keep_sound_var.get():
+                    rationalized = src.rationalize_keep_audio(
+                        params=params, measure_range=m_range)
+                else:
+                    rationalized = src.rationalize(params=params,
+                                                   measure_range=m_range)
                 # v22ze-47 fix: this used to show the RAW rationalize()
                 # result in Preview, while Accept separately ran
                 # bake_to_score() (duration-vocabulary snapping, tie
@@ -14704,7 +14912,8 @@ class MidisoftStudio:
                 # what Preview displays and plays IS byte-for-byte what
                 # Accept will commit -- no second, potentially-different
                 # computation.
-                rationalized = rationalized.bake_to_score()
+                if not keep_sound_var.get():
+                    rationalized = rationalized.bake_to_score()
                 after = _copy.deepcopy(rationalized.tracks)
                 after_map = _copy.deepcopy(rationalized.rationalized_measure_map)
                 # Push undo action
@@ -15771,8 +15980,9 @@ class MidisoftStudio:
                                               # "nothing else changes" promise
                                               # above; see gui.py step 0.5.
             }
-            result = self.song.rationalize(params=params)
-            result = result.bake_to_score()
+            # v22ze-137: keep every note's original start/length/velocity
+            # and every other instrument; only decide RH/LH.
+            result = self.song.rationalize_keep_audio(params=params)
             after = _copy.deepcopy(result.tracks)
             after_map = _copy.deepcopy(result.rationalized_measure_map)
             action = RationalizationAction(
