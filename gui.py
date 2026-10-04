@@ -2394,6 +2394,11 @@ class Song:
                 if npd is not None:
                     bounds = [b for b in (nsp, npd) if b is not None]
                     new_dur = max(n.duration, min(bounds) - tick)
+                elif not p.get("pedal_extend_outside_pedal", False):
+                    # v22ze-136: the pedal is not down at this note's onset,
+                    # so the pedal has no say over it -- leave the duration
+                    # exactly as read from the file.
+                    new_dur = n.duration
                 elif nsp is not None and (nsp - tick) <= _decay_ticks:
                     new_dur = max(n.duration, nsp - tick)
                 else:
@@ -14545,12 +14550,13 @@ class MidisoftStudio:
         cp_check = _tt(tk.Checkbutton(
             cp_row, variable=correct_pedal_var, bg=BG, fg=FG,
             selectcolor="#21262d", activebackground=BG),
-            "Extend each note's written duration to the next onset of "
-            "the same pitch, or to the sustain pedal's release if that "
-            "comes first (whichever bound is closer). Off = leave "
-            "note durations exactly as read from the file.")
+            "While the sustain pedal is down, extend each note's written "
+            "duration to the next onset of the same pitch, or to the "
+            "pedal's release if that comes first (whichever is closer). "
+            "Notes struck when the pedal is up are left exactly as read. "
+            "Off = leave all note durations exactly as read from the file.")
         cp_check.pack(side=tk.LEFT)
-        tk.Label(cp_row, text="Correct pedal/harmonic-boundary durations",
+        tk.Label(cp_row, text="Hold notes while the sustain pedal is down",
                  bg=BG, fg=FG, font=("TkDefaultFont", 9)).pack(
             side=tk.LEFT, padx=4)
 
