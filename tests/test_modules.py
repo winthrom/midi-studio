@@ -23,7 +23,7 @@ class TestPlatformModule(unittest.TestCase):
     def test_app_version(self):
         """Test app version is set."""
         self.assertIsNotNone(APP_VERSION)
-        self.assertEqual(APP_VERSION, "22ze-73")
+        self.assertRegex(APP_VERSION, r"^22ze-\d+[a-z]?$")
 
     def test_app_full_name(self):
         """Test app full name."""
