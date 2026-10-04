@@ -8073,6 +8073,7 @@ class ScoreView(tk.Frame):
         self._flash_ticks_only = None
         self._currently_lit = {}
         self.configure(bg="#fffff8")
+        self._space = 0  # v22ze-134: extra staff spacing steps (see _apply_zoom)
         self._apply_zoom()  # set self.SLG / SH / TPAD … from _vzoom
         self._build_ui()
         self._draw()
@@ -8085,9 +8086,11 @@ class ScoreView(tk.Frame):
         self.TPAD = max(18, int(self._B_TPAD * z))
         self.TPAD1 = max(12, int(self._B_TPAD1 * z))
         self.TPAD1_TOP = max(8, int(self._B_TPAD1_TOP * z))
-        self.BGAP = max(8, int(self._B_BGAP * z))
-        self.BPAD = max(6, int(self._B_BPAD * z))
-        self.BPAD1 = max(4, int(self._B_BPAD1 * z))
+        # v22ze-134: user-adjustable extra space between staves
+        _ex = int(getattr(self, "_space", 0) * 12 * z)
+        self.BGAP = max(8, int(self._B_BGAP * z) + _ex)
+        self.BPAD = max(6, int(self._B_BPAD * z) + _ex)
+        self.BPAD1 = max(4, int(self._B_BPAD1 * z) + _ex)
         self.LM = max(20, int(self._B_LM * z))
         self.STRIP_RESERVE = max(20, int(self._B_STRIP_RESERVE * z))
 
@@ -8197,6 +8200,15 @@ class ScoreView(tk.Frame):
             tk.Button(tb, text="Fit Width −", command=self._fit_narrower, **bs),
             "Show one fewer measure across the screen (zooms in by one "
             "measure's width, without changing vertical zoom).",
+        ).pack(side=tk.LEFT, padx=2)
+        _tt(
+            tk.Button(tb, text="Space +", command=self._space_more, **bs),
+            "Move the staves further apart vertically (treble from bass, "
+            "and one instrument from the next). Note size does not change.",
+        ).pack(side=tk.LEFT, padx=2)
+        _tt(
+            tk.Button(tb, text="Space −", command=self._space_less, **bs),
+            "Move the staves closer together vertically.",
         ).pack(side=tk.LEFT, padx=2)
         # ── Editing toolbar: tabbed tool palette ──────────────────────────────
         # v22ze-35: replaces the standalone "Note value" dropdown with a
@@ -8519,6 +8531,19 @@ class ScoreView(tk.Frame):
         self._zoom = max(0.2, self._zoom / 1.33)
         self._vzoom = max(0.2, self._vzoom / 1.33)
         self._last_sr = None  # force scrollregion recalc at new zoom
+        self._apply_zoom()
+        self._draw(cursor_tick=self._current_cursor_tick())
+
+    def _space_more(self):
+        self._space = min(12, self._space + 1)
+        self._space_redraw()
+
+    def _space_less(self):
+        self._space = max(-3, self._space - 1)
+        self._space_redraw()
+
+    def _space_redraw(self):
+        self._last_sr = None  # force scrollregion recalc
         self._apply_zoom()
         self._draw(cursor_tick=self._current_cursor_tick())
 
