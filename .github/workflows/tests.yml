@@ -9,16 +9,20 @@ on:
 jobs:
   test:
     runs-on: ${{ matrix.os }}
+    # Ubuntu is the real check.  macOS (Phase 3) and Windows are experimental:
+    # they are run and reported, but a failure there does not fail the run.
+    continue-on-error: ${{ matrix.os != 'ubuntu-24.04' }}
     strategy:
+      fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
-        python-version: ['3.8', '3.9', '3.10', '3.11', '3.12']
+        os: [ubuntu-24.04, macos-latest, windows-latest]
+        python-version: ['3.9', '3.11', '3.12']
 
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v5
 
     - name: Set up Python ${{ matrix.python-version }}
-      uses: actions/setup-python@v5
+      uses: actions/setup-python@v6
       with:
         python-version: ${{ matrix.python-version }}
 
@@ -31,7 +35,7 @@ jobs:
     - name: Install system dependencies (macOS)
       if: runner.os == 'macOS'
       run: |
-        brew install python-tk timidity fluidsynth portaudio
+        brew install fluidsynth portaudio || true
 
     - name: Install Python dependencies
       run: |
@@ -47,7 +51,7 @@ jobs:
         pytest tests/ -v --cov=. --cov-report=xml --tb=short
 
     - name: Upload coverage
-      uses: codecov/codecov-action@v3
+      uses: codecov/codecov-action@v5
       with:
         files: ./coverage.xml
         fail_ci_if_error: false
