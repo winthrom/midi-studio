@@ -9202,6 +9202,25 @@ class ScoreView(tk.Frame):
             lo, _ = self.canvas.xview()
             if abs(target_lo - lo) * live_total_w >= _MIN_PX_MOVE:
                 self.canvas.xview_moveto(target_lo)
+
+            # v22ze-138 safety net: make sure the cursor is really inside the
+            # visible part of the score.  xview_moveto works on the canvas'
+            # REAL scroll width, which can differ from live_total_w above
+            # (e.g. after a floated score window was closed and another file
+            # opened); then the cursor ends up off the right edge.
+            try:
+                _w = self.canvas.winfo_width()
+                _sr = [float(v) for v in str(self.canvas.cget("scrollregion")).split()]
+                if _w > 50 and len(_sr) == 4 and _sr[2] > _sr[0]:
+                    _vis_lo = self.canvas.canvasx(0)
+                    if not (_vis_lo <= cx_clamped <= _vis_lo + _w):
+                        if cx_clamped <= _sr[2]:
+                            _f = (cx_clamped - _w / 2.0 - _sr[0]) / (_sr[2] - _sr[0])
+                            self.canvas.xview_moveto(max(0.0, min(1.0, _f)))
+                        else:
+                            self._score_dirty = True  # beyond what is drawn: redraw
+            except Exception:
+                pass
         except Exception:
             pass
 

@@ -1,12 +1,36 @@
 #!/usr/bin/env python3
 """Main entry point for MIDI Studio application."""
 
+import os
 import sys
+import time
 import tkinter as tk
 from tkinter import messagebox
 
 # Import modules
 from sys_platform import APP_FULL_NAME, APP_VERSION
+
+# v22ze-138: the "Starting..." window is only worth showing on a slow
+# computer.  The seconds the sounds took to load last time are kept in a
+# tiny file; fast starts (< 3 s) skip the window.  No record = show it.
+_LOAD_FILE = os.path.join(os.path.expanduser("~"), ".midi_studio_load_seconds")
+_SLOW_SECONDS = 3.0
+
+
+def _last_load_seconds():
+    try:
+        with open(_LOAD_FILE, encoding="utf-8") as f:
+            return float(f.read().strip())
+    except Exception:
+        return None
+
+
+def _save_load_seconds(seconds):
+    try:
+        with open(_LOAD_FILE, "w", encoding="utf-8") as f:
+            f.write(f"{seconds:.2f}\n")
+    except Exception:
+        pass
 
 
 def main():
@@ -23,6 +47,10 @@ def main():
         root.withdraw()
         _msg = tk.Toplevel(root)
         _msg.title("MIDI Studio")
+        _t_start = time.time()
+        _last = _last_load_seconds()
+        if _last is not None and _last < _SLOW_SECONDS:
+            _msg.withdraw()  # fast computer: never shown
         _msg.configure(bg="#0d1117")
         _w, _h = 560, 130
         _msg.geometry(
@@ -51,6 +79,7 @@ def main():
         # (~12 s on old PCs), so the message above must already be showing.
         from gui import MidisoftStudio, SplashScreen
 
+        _save_load_seconds(time.time() - _t_start)
         _msg.destroy()
         root.deiconify()
 
