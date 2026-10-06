@@ -7522,8 +7522,20 @@ class MixerView(tk.Frame):
 
             def mk_p(idx, v):
                 def cb(val):
-                    self.app.song.tracks[idx].program = GM_INSTRUMENTS.index(val)
+                    _tr = self.app.song.tracks[idx]
+                    _tr.program = GM_INSTRUMENTS.index(val)
                     self.app.song.modified = True
+                    # v22ze-141: keep a program-made name ("Ch 1 - <instrument>")
+                    # in step with the new instrument; typed names stay as they are.
+                    try:
+                        import re as _re
+
+                        _mm = _re.match(r"^(Ch \d+ - ).*$", _tr.name or "")
+                        if _mm:
+                            _tr.name = _mm.group(1) + val
+                        self.app._refresh_views()
+                    except Exception:
+                        pass
 
                 return cb
 
