@@ -7224,6 +7224,15 @@ class DockablePane:
         body.pack(fill=tk.BOTH, expand=True)
         self.content.pack(fill=tk.BOTH, expand=True)
         win.protocol("WM_DELETE_WINDOW", self.toggle)
+        # v22ze-140: keys bound on the main window do not reach a floated
+        # window, so give it the same shortcuts (undo, redo, play, ...).
+        try:
+            _keys = list(getattr(self.app, "_shortcut_binds", []))
+            _keys += [("<Control-z>", self.app._undo), ("<Control-y>", self.app._redo)]
+            for _k, _f in _keys:
+                win.bind(_k, lambda e, f=_f: f())
+        except Exception:
+            pass
         self.shell = win
 
     def toggle(self):
@@ -13316,6 +13325,7 @@ class MidisoftStudio:
                ("<Left>",lambda e=None:self._seek(-1)),("<Right>",lambda e=None:self._seek(1)),
                ("<Control-q>",lambda: QuantizeDlg(self.root, self)),
                ("<Control-g>",lambda e=None: self._open_score_setup())]
+        self._shortcut_binds = list(binds)  # v22ze-140: reused by floated panes
         for key,fn in binds: self.root.bind(key,lambda e,f=fn:f())
 
     # ── Toolbar ───────────────────────────────────────────────────────────────
@@ -15953,6 +15963,82 @@ class MidisoftStudio:
     def _quantize_armed_track(self):
         QuantizeDlg(self.root, self)
 
+    def _ask_separate_hands_options(self):
+        """v22ze-140: ask the hand size for Separate Hands.
+
+        Returns (max_span_semitones, max_notes_per_hand) or None if cancelled.
+        """
+        BG = "#0d1117"
+        FG = "#f0f6fc"
+        MUTED = "#8b949e"
+        dlg = tk.Toplevel(self.root)
+        dlg.title("Separate Hands")
+        dlg.configure(bg=BG)
+        dlg.resizable(False, False)
+        try:
+            dlg.transient(self.root)
+        except Exception:
+            pass
+        result = [None]
+        span_var = tk.IntVar(value=14)
+        notes_var = tk.IntVar(value=5)
+        tk.Label(
+            dlg,
+            text=(
+                "Sort the piano notes into a right-hand staff and a\n"
+                "left-hand staff. The sound is not changed."
+            ),
+            bg=BG,
+            fg=FG,
+            justify=tk.LEFT,
+        ).grid(row=0, column=0, columnspan=2, padx=16, pady=(14, 8), sticky="w")
+        tk.Label(dlg, text="Widest stretch of one hand (semitones):", bg=BG, fg=FG).grid(
+            row=1, column=0, padx=(16, 6), pady=4, sticky="w"
+        )
+        tk.Spinbox(dlg, from_=8, to=30, textvariable=span_var, width=5).grid(
+            row=1, column=1, padx=(0, 16), pady=4
+        )
+        tk.Label(
+            dlg,
+            text="12 = one octave. Raise this for music written for very large hands.",
+            bg=BG,
+            fg=MUTED,
+            font=("TkDefaultFont", 8),
+        ).grid(row=2, column=0, columnspan=2, padx=16, sticky="w")
+        tk.Label(dlg, text="Most notes one hand plays at once:", bg=BG, fg=FG).grid(
+            row=3, column=0, padx=(16, 6), pady=(10, 4), sticky="w"
+        )
+        tk.Spinbox(dlg, from_=3, to=10, textvariable=notes_var, width=5).grid(
+            row=3, column=1, padx=(0, 16), pady=(10, 4)
+        )
+        tk.Label(
+            dlg,
+            text="5 = one note per finger. Raise it only if the music needs more.",
+            bg=BG,
+            fg=MUTED,
+            font=("TkDefaultFont", 8),
+        ).grid(row=4, column=0, columnspan=2, padx=16, sticky="w")
+
+        def _ok():
+            try:
+                result[0] = (int(span_var.get()), int(notes_var.get()))
+            except Exception:
+                result[0] = (14, 5)
+            dlg.destroy()
+
+        bfrm = tk.Frame(dlg, bg=BG)
+        bfrm.grid(row=5, column=0, columnspan=2, pady=(14, 14))
+        bs = dict(relief=tk.FLAT, padx=14, pady=5, bg="#21262d", fg=FG,
+                  activebackground="#30363d", activeforeground=FG)
+        tk.Button(bfrm, text="Separate", command=_ok, **bs).pack(side=tk.LEFT, padx=6)
+        tk.Button(bfrm, text="Cancel", command=dlg.destroy, **bs).pack(side=tk.LEFT, padx=6)
+        try:
+            dlg.grab_set()
+        except Exception:
+            pass
+        self.root.wait_window(dlg)
+        return result[0]
+
     def _separate_hands(self):
         """Standalone one-click hand separation.
 
@@ -15977,12 +16063,8 @@ class MidisoftStudio:
             messagebox.showinfo("Separate Hands", "No tracks to separate.",
                                 parent=self.root)
             return
-        if not messagebox.askyesno(
-                "Separate Hands",
-                "This will reassign notes between Right Hand and Left "
-                "Hand staves based on pitch and hand span, without "
-                "changing note timing. Continue?",
-                parent=self.root):
+        _hand_opts = self._ask_separate_hands_options()  # v22ze-140
+        if _hand_opts is None:
             return
         import copy as _copy
         try:
@@ -15999,6 +16081,8 @@ class MidisoftStudio:
                                               # "nothing else changes" promise
                                               # above; see gui.py step 0.5.
             }
+            params["max_span"] = _hand_opts[0]  # v22ze-140
+            params["max_notes_per_hand"] = _hand_opts[1]
             # v22ze-137: keep every note's original start/length/velocity
             # and every other instrument; only decide RH/LH.
             result = self.song.rationalize_keep_audio(params=params)
@@ -16142,6 +16226,12 @@ class MidisoftStudio:
         if not self.transport.is_playing():
             meas=self.transport.position_ticks//self.song.ticks_per_measure()+1
             self._pos_var.set(f"Meas {meas}  Beat 1")
+            # v22ze-140: show the new position on the score right away
+            try:
+                if self._score_view and self._score_view.winfo_exists():
+                    self._score_view.update_cursor(self.transport.position_ticks)
+            except Exception:
+                pass
 
     def _offer_trim_leading_measures(self):
         # After recording, detect empty leading measures and offer to remove them.
