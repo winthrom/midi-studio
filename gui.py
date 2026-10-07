@@ -15992,7 +15992,7 @@ class MidisoftStudio:
         except Exception:
             pass
         result = [None]
-        span_var = tk.IntVar(value=14)
+        span_var = tk.IntVar(value=12)  # v22ze-142: 12 = an octave; 14 is a very large hand
         notes_var = tk.IntVar(value=5)
         tk.Label(
             dlg,

@@ -223,3 +223,15 @@ packaging/linux/payload/sound/*
 !packaging/windows/midi-studio.spec
 packaging/windows/payload/lib/*
 packaging/windows/payload/sound/*
+archive/backups/
+archive/screenshots/
+archive/builds/
+
+# --- v22ze-142: keep MIDI files and documents out of the repo, except in docs/ ---
+*.mid
+*.midi
+*.pdf
+*.docx
+!docs/
+!docs/*.pdf
+!docs/*.docx
