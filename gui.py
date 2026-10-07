@@ -15074,6 +15074,14 @@ class MidisoftStudio:
 
         dlg.protocol("WM_DELETE_WINDOW", dlg.destroy)
 
+        # v22ze-144: open wide and tall enough to show every control (the
+        # scroll area alone is only ~370 px wide, which hid the value boxes).
+        dlg.update_idletasks()
+        _w = min(content.winfo_reqwidth() + 24, max(400, dlg.winfo_screenwidth() - 40))
+        _h = min(content.winfo_reqheight() + 4, max(300, dlg.winfo_screenheight() - 90))
+        _x = max(0, min(dlg.winfo_x(), dlg.winfo_screenwidth() - _w - 10))
+        dlg.geometry(f"{_w}x{_h}+{_x}+20")
+
     def _apply_bpm(self):
         self.song.bpm=self.bpm_var.get(); self.song.modified=True
         self._update_title(); self._update_status()

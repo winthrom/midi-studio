@@ -53,10 +53,9 @@ def main():
             _msg.withdraw()  # fast computer: never shown
         _msg.configure(bg="#0d1117")
         _w, _h = 560, 130
-        _msg.geometry(
-            f"{_w}x{_h}+{max(0, (_msg.winfo_screenwidth() - _w) // 2)}"
-            f"+{max(0, (_msg.winfo_screenheight() - _h) // 3)}"
-        )
+        # v22ze-144: upper-left corner, so the synthesizer-choice window
+        # (which opens in the middle) can never cover it.
+        _msg.geometry(f"{_w}x{_h}+20+20")
         tk.Label(
             _msg,
             text="Starting MIDI Studio\u2026",
