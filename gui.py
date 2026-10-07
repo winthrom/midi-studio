@@ -14522,8 +14522,12 @@ class MidisoftStudio:
         # user can actually see and use, rather than opening already
         # off-screen with no way to tell anything is missing.
         dlg.update_idletasks()
-        req_w = dlg.winfo_reqwidth()
-        req_h = dlg.winfo_reqheight()
+        # v22ze-143: the window used to be sized from the empty scroll
+        # canvas (about 400 px wide), so the adjustment boxes at the right
+        # were cut off. Size it from the real content instead.
+        req_w = max(dlg.winfo_reqwidth(), content.winfo_reqwidth() + 24)
+        req_w = min(req_w, max(400, dlg.winfo_screenwidth() - 40))
+        req_h = max(dlg.winfo_reqheight(), content.winfo_reqheight())
         screen_h = dlg.winfo_screenheight()
         margin = 80   # leave room for title bar / taskbar
         fit_h = min(req_h, max(300, screen_h - margin))

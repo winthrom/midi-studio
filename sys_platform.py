@@ -11,9 +11,9 @@ import time
 from datetime import datetime
 
 # Application identity (update APP_VERSION each release)
-APP_VERSION = "22ze-142"
+APP_VERSION = "22ze-143"
 APP_FULL_NAME = "Midi-Studio — a Synthesizer in the Spirit of MidiSoft Studio4"
-APP_TIMESTAMP = "2026-10-06"  # build date (was: launch time)
+APP_TIMESTAMP = "2026-10-07"  # build date (was: launch time)
 APP_TITLE = f"{APP_FULL_NAME}  —  v{APP_VERSION}  {APP_TIMESTAMP}"
 
 # Sterling Lions Club links
