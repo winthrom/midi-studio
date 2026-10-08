@@ -9893,6 +9893,20 @@ class ScoreView(tk.Frame):
             if bass_notes and all(n.pitch > 59 for n in bass_notes):
                 bass_treble_measures.add(m_idx)
 
+        # v22ze-147: bars where the LEFT HAND has notes but every one of them
+        # sits above middle C (e.g. both hands high up the keyboard) also get
+        # the treble clef on the lower staff.  The check above never fired
+        # there because it only looks at notes that are already low, so the
+        # left hand was drawn in bass clef with a tall stack of ledger lines
+        # running up into the treble staff.
+        if bt is not None and getattr(tr, "_prehand_split", False):
+            for m_idx, ms, me, num, den, tpm in mmap:
+                if m_idx in bass_treble_measures:
+                    continue
+                _lh = [n for n in tr.notes if ms <= n.tick < me and n.channel == 1]
+                if _lh and min(n.pitch for n in _lh) > 59:
+                    bass_treble_measures.add(m_idx)
+
         # v22ze: symmetric case -- runs of measures where TREBLE notes go
         # low. This was entirely missing before; only the LH-climbs-high
         # direction existed, so a passage like a low opening theme (RH
@@ -10144,6 +10158,12 @@ class ScoreView(tk.Frame):
                 if v2:
                     entries.append((v2, force_t, True))
 
+        # v22ze-147: very high passages are DISPLAYED 8va / 15ma (the copy of
+        # each note used for drawing is lowered; the real notes never change).
+        _ottava_runs = self._apply_ottava(
+            entries, mmap, bass_treble_measures, treble_bass_measures, _use_flats, tt, bt
+        )
+
         # ── Pass 2: predict beam groups and their shared stem direction ──
         forced_dir = self._predict_beam_stem_directions(
             entries,
@@ -10214,12 +10234,106 @@ class ScoreView(tk.Frame):
 
         # Draw beams (replaces flags for beamed groups)
         self._draw_beams(c, stems, tpb, song)
+        self._draw_ottava(c, _ottava_runs)  # v22ze-147
         # Draw ties for notes crossing barlines
         self._draw_ties(c, tr, tt, bt, nr, tpb, mmap, ti=ti)
         # Draw pedal marks
         self._draw_pedal(c, tr, tt, bt, tpb, mmap)
         # Draw dynamics markings (v22ze-50 fix -- see qtr.markings above)
         self._draw_dynamics(c, tr, tt, bt, tpb, mmap)
+
+    def _apply_ottava(self, entries, mmap, bass_treble_measures, treble_bass_measures, use_flats, tt, bt):
+        """v22ze-147: find runs of chords sitting far above the staff and lower
+        their DISPLAY pitch by one octave (8va) or two (15ma).  Only the
+        render-only note copies are changed.  Returns a list of
+        (tick_start, tick_end, shift, bracket_y) for _draw_ottava.
+
+        A run starts at a chord whose top note is A6 (MIDI 93) or higher and
+        continues while the chord's top note stays at C6 (84) or higher.  Every
+        note in a chord must be C5 (72) or higher so nothing drops below the
+        staff.  Runs shorter than 3 chords are left alone.  15ma is used only
+        when the run reaches G7 (103) and every note is C6 (84) or higher.
+        The left hand (when it is drawn with a treble clef) uses lower limits:
+        start at G#5 (79), continue at C5 (72), lowest note E4 (64) or higher.
+        """
+        starts = [m[1] for m in mmap]
+
+        def meas(tick):
+            i = bisect.bisect_right(starts, tick) - 1
+            return mmap[i][0] if 0 <= i < len(mmap) else 0
+
+        result = []
+        for hand in (True, False):
+            if hand:
+                # right hand, on the treble staff
+                ON, OFF, LOW12, LOW24, HI15 = 93, 84, 72, 84, 103
+            else:
+                # left hand drawn with a treble clef on the lower staff: that staff
+                # starts a whole line lower, so the limits are lower too
+                ON, OFF, LOW12, LOW24, HI15 = 79, 72, 64, 84, 103
+            chords = []
+            for notes, ft, _v2 in entries:
+                if (ft is not hand) or not notes:
+                    continue
+                t0 = notes[0].tick
+                if chords and t0 - chords[-1][0] <= self.CHORD_TOL:
+                    chords[-1][1].extend(notes)
+                else:
+                    chords.append([t0, list(notes)])
+
+            def eligible(t0):
+                m = meas(t0)
+                if hand:
+                    return treble_bass_measures is None or m not in treble_bass_measures
+                return m in bass_treble_measures
+
+            runs, cur = [], []
+            for ch in chords:
+                ps = [n.pitch for n in ch[1]]
+                ok_cont = eligible(ch[0]) and min(ps) >= LOW12 and max(ps) >= OFF
+                ok_start = ok_cont and max(ps) >= ON
+                if cur:
+                    if ok_cont:
+                        cur.append(ch)
+                        continue
+                    runs.append(cur)
+                    cur = []
+                if ok_start:
+                    cur = [ch]
+            if cur:
+                runs.append(cur)
+
+            for run in runs:
+                if len(run) < 3:
+                    continue
+                allp = [n.pitch for ch in run for n in ch[1]]
+                shift = 24 if (max(allp) >= HI15 and min(allp) >= LOW24) else 12
+                for ch in run:
+                    for n in ch[1]:
+                        n.pitch -= shift
+                top_pos = max(note_staff_pos(n, use_flats)[0] for ch in run for n in ch[1])
+                top_y = tt if hand else bt
+                y_note = self._sp_to_y_treble(top_pos, top_y)
+                y_br = max(28, y_note - 1.9 * self.SLG)  # 28 keeps clear of the measure strip
+                last = run[-1]
+                t_end = last[0] + min(max(int(n.duration) for n in last[1]), self.app.song.ticks_per_beat)
+                result.append((run[0][0], t_end, shift, y_br))
+        return result
+
+    def _draw_ottava(self, c, runs):
+        """v22ze-147: dashed 8va / 15ma bracket with an end hook."""
+        for t0, t1, shift, y in runs or []:
+            label = "15ma" if shift == 24 else "8va"
+            x0 = self._tick_to_x(t0) - int(self.SLG * 0.9)
+            x1 = max(self._tick_to_x(t1), x0 + int(self.SLG * 4))
+            lw = int(self.SLG * (3.4 if shift == 24 else 2.6))
+            c.create_text(
+                x0, y, text=label, anchor="w", fill="black",
+                font=("serif", max(8, int(self.SLG * 1.05)), "italic bold"),
+                tags="ottava",
+            )
+            c.create_line(x0 + lw, y, x1, y, fill="#222", width=1, dash=(5, 3), tags="ottava")
+            c.create_line(x1, y, x1, y + int(self.SLG * 0.9), fill="#222", width=1, tags="ottava")
 
     def _clef_branch_for_chord(
         self,
