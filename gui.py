@@ -14,6 +14,30 @@ import webbrowser
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from tkinter import filedialog, messagebox, simpledialog, ttk
+
+_APP_ROOT = [None]  # the main window, set when the app starts
+_orig_toplevel_init = tk.Toplevel.__init__ if isinstance(tk.Toplevel, type) else None
+
+
+def _toplevel_init_stay_on_top(self, master=None, *args, **kw):
+    """v22ze-148: a window opened from the main window (floated Score, Mixer,
+    dialogs...) is made "transient" for it, so the window manager always keeps
+    it ABOVE the main window.  Windows whose parent is hidden (the start-up
+    windows) are left alone."""
+    _orig_toplevel_init(self, master, *args, **kw)
+    try:
+        if (
+            master is not None
+            and master is _APP_ROOT[0]
+            and master.winfo_viewable()
+        ):
+            self.transient(master)
+    except Exception:
+        pass
+
+
+if _orig_toplevel_init is not None:
+    tk.Toplevel.__init__ = _toplevel_init_stay_on_top
 from xml.dom import minidom
 
 import mido
@@ -13277,6 +13301,7 @@ class MidisoftStudio:
         self.midi_thru_enabled.trace_add('write', _sync_thru_enabled)
         self.midi_thru_volume.trace_add('write', _sync_thru_volume)
         self.root=root; self.song=Song(); self.transport=Transport(self.song)
+        _APP_ROOT[0] = root  # v22ze-148
         self._original_song = None   # preserved when in rationalized mode
         self._is_rationalized = False
         self._undo_stack = []         # list of RationalizationAction
@@ -16032,46 +16057,108 @@ class MidisoftStudio:
         if opts is None:
             return
         show_bar_numbers, staff_size = opts
+        # v22ze-148: LilyPond runs in a background thread so the program does
+        # not freeze while it works (a long piece can take a minute or more).
+        import threading
         try:
-            with tempfile.TemporaryDirectory() as tmpdir:
-                ly_path  = os.path.join(tmpdir, "score.ly")
-                pdf_path = os.path.join(tmpdir, "score.pdf")
-                self.song.to_ly(ly_path,
-                                show_bar_numbers=show_bar_numbers,
-                                staff_size=staff_size)  # uses active song
-                result = subprocess.run(
+            tmpdir = tempfile.mkdtemp(prefix="midistudio_print_")
+            ly_path = os.path.join(tmpdir, "score.ly")
+            pdf_path = os.path.join(tmpdir, "score.pdf")
+            self.song.to_ly(ly_path,
+                            show_bar_numbers=show_bar_numbers,
+                            staff_size=staff_size)  # uses active song
+        except Exception as exc:
+            messagebox.showerror("Print Error", str(exc), parent=self.root)
+            return
+
+        state = {"proc": None, "done": False, "err": "", "rc": None, "cancel": False}
+
+        def _worker():
+            try:
+                _kw = {}
+                if platform.system() == "Windows":
+                    _kw["creationflags"] = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+                proc = subprocess.Popen(
                     [lp, "--pdf", "-o", os.path.join(tmpdir, "score"), ly_path],
-                    capture_output=True, text=True)
-                if result.returncode != 0 or not os.path.isfile(pdf_path):
-                    err = result.stderr if result.stderr else "(no output)"
+                    stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
+                    text=True, **_kw)
+                state["proc"] = proc
+                _o, _e = proc.communicate()
+                state["err"] = _e or ""
+                state["rc"] = proc.returncode
+            except Exception as exc:  # noqa: BLE001
+                state["err"] = str(exc)
+                state["rc"] = -1
+            state["done"] = True
+
+        threading.Thread(target=_worker, daemon=True).start()
+
+        wait = tk.Toplevel(self.root)
+        wait.title("Making your score")
+        wait.configure(bg="#0d1117")
+        wait.resizable(False, False)
+        tk.Label(wait, text="LilyPond is making your score...",
+                 bg="#0d1117", fg="#58a6ff",
+                 font=("TkDefaultFont", 12, "bold")).pack(padx=28, pady=(18, 4))
+        tk.Label(wait, text="A long piece can take a minute or more.\n"
+                            "You can keep using the program meanwhile.",
+                 bg="#0d1117", fg="#f0f6fc",
+                 font=("TkDefaultFont", 10)).pack(padx=28, pady=(0, 10))
+
+        def _cancel():
+            state["cancel"] = True
+            _p = state["proc"]
+            if _p is not None:
+                try:
+                    _p.kill()
+                except Exception:
+                    pass
+
+        tk.Button(wait, text="Cancel", bg="#21262d", fg="#f0f6fc",
+                  relief=tk.FLAT, padx=14, pady=5,
+                  command=_cancel).pack(pady=(0, 16))
+        wait.protocol("WM_DELETE_WINDOW", _cancel)
+
+        def _finish():
+            import shutil as _sh
+            try:
+                wait.destroy()
+            except Exception:
+                pass
+            try:
+                if state["cancel"]:
+                    return
+                if state["rc"] != 0 or not os.path.isfile(pdf_path):
+                    err = state["err"] if state["err"] else "(no output)"
                     _show_long_text_dialog(
                         self.root, "LilyPond Error",
                         "LilyPond could not make the PDF. The reason is "
                         "usually in the last lines below (use the scroll "
                         "bar). Click Copy text to send it to me.", err)
                     return
-                # Copy PDF to a stable temp location so the viewer can open it
-                # after tmpdir context exits
-                import shutil as _sh
                 stable = tempfile.NamedTemporaryFile(
-                    suffix=".pdf", delete=False,
-                    prefix="midistudio_score_")
+                    suffix=".pdf", delete=False, prefix="midistudio_score_")
                 stable.close()
                 _sh.copy2(pdf_path, stable.name)
+                _plat = platform.system()
+                if _plat == "Windows":
+                    os.startfile(stable.name)
+                elif _plat == "Darwin":
+                    subprocess.Popen(["open", stable.name])
+                else:
+                    subprocess.Popen(["xdg-open", stable.name])
+            except Exception as exc:  # noqa: BLE001
+                messagebox.showerror("Print Error", str(exc), parent=self.root)
+            finally:
+                _sh.rmtree(tmpdir, ignore_errors=True)
 
-            # Open with system PDF viewer
-            _plat = platform.system()
-            if _plat == "Linux":
-                subprocess.Popen(["xdg-open", stable.name])
-            elif _plat == "Darwin":
-                subprocess.Popen(["open", stable.name])
-            elif _plat == "Windows":
-                os.startfile(stable.name)
+        def _poll():
+            if state["done"]:
+                _finish()
             else:
-                subprocess.Popen(["xdg-open", stable.name])
+                self.root.after(300, _poll)
 
-        except Exception as exc:
-            messagebox.showerror("Print Error", str(exc), parent=self.root)
+        self.root.after(300, _poll)
 
     # ── Track ops ─────────────────────────────────────────────────────────────
     def _selected_track_idx(self):
