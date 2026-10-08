@@ -741,8 +741,14 @@ def _init_midi():
         outs = mido.get_output_names()
         print(f"[MIDI OUT] Available: {outs}")
 
-        # If no TiMidity port visible yet, try to launch one
-        if not any("timidity" in o.lower() for o in outs):
+        # If no TiMidity port visible yet, try to launch one.
+        # v22ze-145: not when built-in FluidSynth is available (unless the
+        # user's remembered choice IS a TiMidity port) -- TiMidity crashed
+        # with an error pop-up on Ubuntu 26.04 and is not needed.
+        _pref_saved = str(_load_settings().get("preferred_midi_port") or "")
+        if not any("timidity" in o.lower() for o in outs) and (
+            not _fluidsynth_importable() or "timidity" in _pref_saved.lower()
+        ):
             if _launch_timidity():
                 outs = mido.get_output_names()  # refresh after launch
                 print(f"[MIDI OUT] Available (post-launch): {outs}")

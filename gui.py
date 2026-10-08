@@ -407,6 +407,80 @@ class TkMenuBar(tk.Frame):
         self.after(150, _watch_close)
 
 
+_LY_VERSION_CACHE = []
+
+
+def _lilypond_version_string():
+    """v22ze-145: the version to write after \\version in exported .ly files.
+    LilyPond refuses files that ask for a NEWER version than the program, so
+    use the installed program's own version.  If LilyPond cannot be asked,
+    use 2.24.0, which both 2.24 and 2.26 accept."""
+    if _LY_VERSION_CACHE:
+        return _LY_VERSION_CACHE[0]
+    ver = "2.24.0"
+    try:
+        import re as _re
+        import shutil as _sh
+        import subprocess as _sp
+        _lp = _sh.which("lilypond")
+        if _lp:
+            _out = _sp.run([_lp, "--version"], capture_output=True,
+                           text=True, timeout=15).stdout
+            _m = _re.search(r"(\d+\.\d+\.\d+)", _out or "")
+            if _m:
+                ver = _m.group(1)
+    except Exception:
+        pass
+    _LY_VERSION_CACHE.append(ver)
+    return ver
+
+
+def _show_long_text_dialog(parent, title, intro, text):
+    """v22ze-145: a window that always fits the screen, with a scrollbar for
+    long text (LilyPond error output) and Copy / Close buttons that stay
+    visible.  Scrolled to the END, where the real error usually is."""
+    BG, FG, MUTED = "#0d1117", "#f0f6fc", "#8b949e"
+    dlg = tk.Toplevel(parent)
+    dlg.title(title)
+    dlg.configure(bg=BG)
+    sw, sh = dlg.winfo_screenwidth(), dlg.winfo_screenheight()
+    w, h = min(900, sw - 80), min(520, sh - 160)
+    dlg.geometry(f"{w}x{h}+40+40")
+    dlg.minsize(400, 240)
+    tk.Label(dlg, text=intro, bg=BG, fg=FG, justify=tk.LEFT, anchor="w",
+             wraplength=w - 40, font=("TkDefaultFont", 10)).pack(
+        fill=tk.X, padx=16, pady=(14, 6))
+    btns = tk.Frame(dlg, bg=BG)
+    btns.pack(side=tk.BOTTOM, fill=tk.X, pady=10)
+    frm = tk.Frame(dlg, bg=BG)
+    frm.pack(fill=tk.BOTH, expand=True, padx=16)
+    sb = tk.Scrollbar(frm, orient="vertical")
+    txt = tk.Text(frm, wrap="word", bg="#161b22", fg=FG, relief=tk.FLAT,
+                  font=("TkFixedFont", 9), yscrollcommand=sb.set)
+    sb.config(command=txt.yview)
+    sb.pack(side=tk.RIGHT, fill=tk.Y)
+    txt.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+    txt.insert("1.0", text)
+    txt.see("end")
+    txt.config(state="disabled")
+
+    def _copy():
+        dlg.clipboard_clear()
+        dlg.clipboard_append(text)
+
+    bs = dict(relief=tk.FLAT, padx=14, pady=6, font=("TkDefaultFont", 10))
+    tk.Button(btns, text="Copy text", bg="#21262d", fg=FG,
+              command=_copy, **bs).pack(side=tk.LEFT, padx=(16, 6))
+    tk.Button(btns, text="Close", bg="#238636", fg="white",
+              command=dlg.destroy, **bs).pack(side=tk.RIGHT, padx=16)
+    try:
+        dlg.transient(parent)
+    except Exception:
+        pass
+    dlg.lift()
+    return dlg
+
+
 def _make_scrollable(toplevel, bg="#0d1117"):
     """Wrap a Toplevel's content area in a Canvas + vertical Scrollbar,
     and return the inner Frame to build content into (in place of the
@@ -5248,7 +5322,7 @@ class Song:
 
         with open(path, "w") as f:
             print(f"[LY] Writing: {path}")
-            W(f, r'\version "2.26.0"')
+            W(f, '\\version "' + _lilypond_version_string() + '"')
             W(f)
             # ── Global staff size — smaller than default (20) packs more
             # systems per page.  16 pt is readable on US Letter at full size;
@@ -15825,10 +15899,12 @@ class MidisoftStudio:
                     [lp, "--pdf", "-o", os.path.join(tmpdir, "score"), ly_path],
                     capture_output=True, text=True)
                 if result.returncode != 0 or not os.path.isfile(pdf_path):
-                    err = result.stderr[-800:] if result.stderr else "(no output)"
-                    messagebox.showerror("LilyPond Error",
-                        f"LilyPond failed to compile the score:\n\n{err}",
-                        parent=self.root)
+                    err = result.stderr if result.stderr else "(no output)"
+                    _show_long_text_dialog(
+                        self.root, "LilyPond Error",
+                        "LilyPond could not make the PDF. The reason is "
+                        "usually in the last lines below (use the scroll "
+                        "bar). Click Copy text to send it to me.", err)
                     return
                 # Copy PDF to a stable temp location so the viewer can open it
                 # after tmpdir context exits
