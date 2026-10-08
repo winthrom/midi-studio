@@ -764,9 +764,11 @@ def _init_midi():
                 _settings = _load_settings()
                 _saved_port = _settings.get("preferred_midi_port")
                 # v22ze-112: built-in FluidSynth counts as one more option.
-                _options = trusted + (
+                # v22ze-146: built-in FluidSynth goes FIRST so it is the
+                # pre-selected answer in the choice window.
+                _options = (
                     [FLUIDSYNTH_BUILTIN] if _fluidsynth_importable() else []
-                )
+                ) + trusted
                 if _saved_port == FLUIDSYNTH_BUILTIN and len(_options) > len(trusted):
                     pref = FLUIDSYNTH_BUILTIN
                     print("[MIDI OUT] Using remembered choice: built-in FluidSynth")

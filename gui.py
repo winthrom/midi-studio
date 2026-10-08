@@ -1673,9 +1673,39 @@ class Song:
             self.modified = True
 
     # ── MIDI import ──────────────────────────────────────────────────────────
+    @staticmethod
+    def _read_midi_tolerant(path):
+        """v22ze-146: read a MIDI file; if it holds a key signature that mido
+        cannot decode (e.g. "3 flats and mode 255"), repair that one meta
+        message in memory (major key, or C if the count is impossible) and
+        read it again.  The file on disk is never changed."""
+        try:
+            return mido.MidiFile(path)
+        except Exception as exc:
+            if "key" not in str(exc).lower():
+                raise
+            import io
+            import re as _re
+            with open(path, "rb") as fh:
+                data = fh.read()
+
+            def _fix(m):
+                sf = m.group(1)[0]
+                mode = m.group(2)[0]
+                sf_signed = sf - 256 if sf > 127 else sf
+                if not -7 <= sf_signed <= 7:
+                    sf = 0
+                if mode not in (0, 1):
+                    mode = 0
+                return b"\xff\x59\x02" + bytes([sf, mode])
+
+            fixed = _re.sub(rb"\xff\x59\x02(.)(.)", _fix, data, flags=_re.S)
+            print(f"[load] repaired an invalid key signature ({exc})")
+            return mido.MidiFile(file=io.BytesIO(fixed))
+
     @classmethod
     def from_mid(cls, path):
-        mid = mido.MidiFile(path)
+        mid = cls._read_midi_tolerant(path)
         song = cls()
         song.filename = path
         song.ticks_per_beat = mid.ticks_per_beat
