@@ -10273,9 +10273,9 @@ class ScoreView(tk.Frame):
         (tick_start, tick_end, shift, bracket_y) for _draw_ottava.
 
         A run starts at a chord whose top note is A6 (MIDI 93) or higher and
-        continues while the chord's top note stays at C6 (84) or higher.  Every
-        note in a chord must be C5 (72) or higher so nothing drops below the
-        staff.  Runs shorter than 3 chords are left alone.  15ma is used only
+        continues, before and after, while the chord's top note stays at C6 (84) or
+        higher.  Every note in a chord must be C5 (72) or higher so nothing drops
+        below the staff.  A stretch that only reaches F#6 (88) needs 2 chords.  15ma is used only
         when the run reaches G7 (103) and every note is C6 (84) or higher.
         The left hand (when it is drawn with a treble clef) uses lower limits:
         start at G#5 (79), continue at C5 (72), lowest note E4 (64) or higher.
@@ -10311,25 +10311,29 @@ class ScoreView(tk.Frame):
                     return treble_bass_measures is None or m not in treble_bass_measures
                 return m in bass_treble_measures
 
+            # A chord is "high" if it needs 8va: its top note is at OFF or above and
+            # its lowest note is at LOW12 or above.  Neighbouring high chords form a
+            # group, so a bracket stretches before and after the very highest chords
+            # for as long as the notes still need extra ledger lines.  A group gets a
+            # bracket if it reaches ON, or reaches ON-6 with at least 2 chords.
             runs, cur = [], []
             for ch in chords:
                 ps = [n.pitch for n in ch[1]]
-                ok_cont = eligible(ch[0]) and min(ps) >= LOW12 and max(ps) >= OFF
-                ok_start = ok_cont and max(ps) >= ON
-                if cur:
-                    if ok_cont:
-                        cur.append(ch)
-                        continue
-                    runs.append(cur)
+                if eligible(ch[0]) and min(ps) >= LOW12 and max(ps) >= OFF:
+                    cur.append(ch)
+                else:
+                    if cur:
+                        runs.append(cur)
                     cur = []
-                if ok_start:
-                    cur = [ch]
             if cur:
                 runs.append(cur)
+            runs = [
+                r for r in runs
+                if max(n.pitch for ch in r for n in ch[1]) >= ON
+                or (len(r) >= 2 and max(n.pitch for ch in r for n in ch[1]) >= ON - 6)
+            ]
 
             for run in runs:
-                if len(run) < 3:
-                    continue
                 allp = [n.pitch for ch in run for n in ch[1]]
                 shift = 24 if (max(allp) >= HI15 and min(allp) >= LOW24) else 12
                 for ch in run:
