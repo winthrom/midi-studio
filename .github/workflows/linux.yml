@@ -28,6 +28,8 @@ jobs:
         run: bash packaging/linux/fetch_soundfont.sh
 
       - name: Build AppImage
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: bash packaging/linux/docker_build.sh
 
       - name: Selftest the AppImage

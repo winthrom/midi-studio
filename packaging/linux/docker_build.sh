@@ -8,6 +8,8 @@ docker run --rm \
     --user "${SUDO_UID:-$(id -u)}:${SUDO_GID:-$(id -g)}" \
     -e HOME=/tmp/home \
     -e PYTHON=/opt/python/cp312-cp312/bin/python \
+    -e GITHUB_TOKEN \
+    -e PYTHONPATH=/src/packaging/linux/ghauth \
     -v "$ROOT":/src -w /src \
     "$IMAGE" \
     bash -c 'mkdir -p /tmp/home && packaging/linux/build_appimage.sh'
