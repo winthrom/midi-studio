@@ -5243,6 +5243,9 @@ class Song:
                     cluster = [n for n in mn if note_staff_pos(n, _use_flats)[0] < 2]
                     if cluster and all(n.pitch > 59 for n in cluster):
                         opposite_measures.add(m_idx)
+                    elif not cluster and all(n.pitch > 59 for n in mn):
+                        # v22ze-154: every note is far above the bass staff
+                        opposite_measures.add(m_idx)
                 elif home_clef == "treble":
                     cluster = [n for n in mn if note_staff_pos(n, _use_flats)[0] >= -2]
                     if cluster and all(n.pitch < 64 for n in cluster):
@@ -5278,6 +5281,9 @@ class Song:
                     cur = clef_name
                 eff[m_idx] = cur
             TH = {"treble": (93, 84, 72, 84, 103), "bass": (79, 72, 64, 84, 103)}
+            # v22ze-154: same rule as the screen: limits depend on the hand (staff), and a
+            # bar only gets 8va/15ma while it is drawn in the treble clef.
+            _hand = clef_name
             info = {}
             for m_idx, ms, me, num, den, tpm in mmap:
                 mn = sorted((n for n in notes if ms <= n.tick < me), key=lambda n: n.tick)
@@ -5299,7 +5305,9 @@ class Song:
                 ch = info[m_idx]
                 if not ch:
                     continue
-                ON, OFF, LOW12, LOW24, HI15 = TH[eff[m_idx]]
+                if eff[m_idx] != "treble":
+                    continue
+                ON, OFF, LOW12, LOW24, HI15 = TH[_hand]
                 top = max(max(c) for c in ch)
                 if frac(m_idx, LOW12, OFF) >= 0.7 and (top >= ON or (len(ch) >= 2 and top >= ON - 6)):
                     lvl[m_idx] = 2 if (top >= HI15 and frac(m_idx, LOW24, HI15 - 12) >= 0.7) else 1
@@ -5307,7 +5315,9 @@ class Song:
             for m_idx in sorted(info):
                 if m_idx in core or not info[m_idx]:
                     continue
-                ON, OFF, LOW12, LOW24, HI15 = TH[eff[m_idx]]
+                if eff[m_idx] != "treble":
+                    continue
+                ON, OFF, LOW12, LOW24, HI15 = TH[_hand]
                 for nb in (m_idx - 1, m_idx + 1):
                     if nb in core and frac(m_idx, LOW12, OFF) >= 0.5:
                         lvl[m_idx] = 1
