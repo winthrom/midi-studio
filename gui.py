@@ -10684,12 +10684,14 @@ class ScoreView(tk.Frame):
             sy = max(sy, mid_y - self.SLG * 4)  # not >4 spaces above it
             # prevent up-stem from a bass-staff chord entering the treble area
             sy = max(sy, top_y - self.SLG * 1.5)
+            sy = min(sy, tip_anchor - self.SLG * 3.0)  # v22ze-153: always clear the top note
         else:
             stem_root_y = min(t[2] for t in ys)  # TOP notehead (smallest y)
             tip_anchor = max(t[2] for t in ys)  # BOTTOM notehead (largest y)
             sy = tip_anchor + sl  # tip below bottommost note
             sy = max(sy, mid_y)  # must reach middle line
             sy = min(sy, mid_y + self.SLG * 4)  # not >4 spaces below it
+            sy = max(sy, tip_anchor + self.SLG * 3.0)  # v22ze-153: always clear the bottom note
 
         sx = x + (nr if stem_up else -nr)
 
