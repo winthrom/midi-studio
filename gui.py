@@ -5265,6 +5265,58 @@ class Song:
                     revert_at.add(re + 1)
             return enter_at, revert_at
 
+        def _ly_ottava_levels(notes, mmap, clef_name, enter_at, revert_at):
+            """v22ze-151: {measure index: 1 (8va) or 2 (15ma)} for very high bars of
+            one staff, with the bars just before/after a high stretch included so the
+            bracket does not stop and restart.  Same idea as the on-screen 8va."""
+            opposite = "bass" if clef_name == "treble" else "treble"
+            cur, eff = clef_name, {}
+            for m_idx, ms, me, num, den, tpm in mmap:
+                if m_idx in enter_at:
+                    cur = opposite
+                elif m_idx in revert_at:
+                    cur = clef_name
+                eff[m_idx] = cur
+            TH = {"treble": (93, 84, 72, 84, 103), "bass": (79, 72, 64, 84, 103)}
+            info = {}
+            for m_idx, ms, me, num, den, tpm in mmap:
+                mn = sorted((n for n in notes if ms <= n.tick < me), key=lambda n: n.tick)
+                chords, last = [], None
+                for n in mn:
+                    if last is not None and n.tick - last <= 30:
+                        chords[-1].append(n.pitch)
+                    else:
+                        chords.append([n.pitch])
+                    last = n.tick
+                info[m_idx] = chords
+            def frac(m_idx, need_low, need_max):
+                ch = info.get(m_idx) or []
+                if not ch:
+                    return 0.0
+                return sum(1 for c in ch if min(c) >= need_low and max(c) >= need_max) / len(ch)
+            lvl = {}
+            for m_idx in info:
+                ch = info[m_idx]
+                if not ch:
+                    continue
+                ON, OFF, LOW12, LOW24, HI15 = TH[eff[m_idx]]
+                top = max(max(c) for c in ch)
+                if frac(m_idx, LOW12, OFF) >= 0.7 and (top >= ON or (len(ch) >= 2 and top >= ON - 6)):
+                    lvl[m_idx] = 2 if (top >= HI15 and frac(m_idx, LOW24, HI15 - 12) >= 0.7) else 1
+            core = dict(lvl)
+            for m_idx in sorted(info):
+                if m_idx in core or not info[m_idx]:
+                    continue
+                ON, OFF, LOW12, LOW24, HI15 = TH[eff[m_idx]]
+                for nb in (m_idx - 1, m_idx + 1):
+                    if nb in core and frac(m_idx, LOW12, OFF) >= 0.5:
+                        lvl[m_idx] = 1
+            # a bar of rests between two high bars stays inside the bracket
+            for m_idx in sorted(info):
+                if not info[m_idx] and lvl.get(m_idx - 1) and lvl.get(m_idx + 1):
+                    lvl[m_idx] = min(lvl[m_idx - 1], lvl[m_idx + 1])
+            return lvl
+
         def write_voice(f, vn, notes, clef_name, mmap, density_map=None, emit_spacing=False):
             """Write a single \\absolute voice variable with per-measure time sigs.
 
@@ -5309,6 +5361,8 @@ class Song:
             min_vel, max_vel, mean_vel, vel_by_meas = analyze_velocity(notes)
             use_dynamics = (max_vel - min_vel) > 20
             prev_dyn = None
+            _ott_levels = _ly_ottava_levels(notes, mmap, clef_name, clef_enter_at, clef_revert_at)
+            _ott_now = 0
             prev_num, prev_den = None, None  # force \time on first measure
 
             for m_idx, ms, me, num, den, tpm in mmap:
@@ -5316,6 +5370,11 @@ class Song:
                     W(f, r"  \clef " + opposite_clef)
                 elif m_idx in clef_revert_at:
                     W(f, r"  \clef " + clef_name)
+
+                _ott_want = _ott_levels.get(m_idx, 0)
+                if _ott_want != _ott_now:
+                    W(f, r"  \ottava #" + str(_ott_want))
+                    _ott_now = _ott_want
 
                 if emit_spacing and density_map is not None:
                     _incr = spacing_increment_for_density(density_map.get(m_idx, 0))
@@ -5369,6 +5428,8 @@ class Song:
                             mstr = " ".join(tokens)
 
                 W(f, "  " + mstr + " |")
+            if _ott_now:
+                W(f, r"  \ottava #0")
             W(f, "}\n")
             W(f)
 
