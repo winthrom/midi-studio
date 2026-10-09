@@ -10241,6 +10241,10 @@ class ScoreView(tk.Frame):
                 durs = sorted(set(n.duration for n in notes), reverse=True)
                 if len(durs) == 1:
                     return notes, []
+                # v22ze-155: slightly different lengths (uneven or staccato playing)
+                # are still ONE chord; only a clear difference makes two voices.
+                if durs[0] - durs[-1] < tpb // 2 or durs[0] < durs[-1] * 1.75:
+                    return notes, []
                 # Split at median duration
                 med = durs[len(durs) // 2]
                 v1 = [n for n in notes if n.duration >= med]
@@ -16543,9 +16547,40 @@ class MidisoftStudio:
             lh = result.tracks[1] if len(result.tracks) > 1 else None
             rh_n = len(rh.notes) if rh else 0
             lh_n = len(lh.notes) if lh else 0
+            _warn = ""
+            try:
+                _lim_span, _lim_notes = _hand_opts
+                _mmap = result.get_measure_map()
+                _starts = [_m[1] for _m in _mmap]
+                import bisect as _bs
+                _bad_bars = set()
+                for _t in (rh, lh):
+                    if not _t:
+                        continue
+                    _ns = sorted(_t.notes, key=lambda n: n.tick)
+                    _i = 0
+                    while _i < len(_ns):
+                        _j = _i
+                        while _j + 1 < len(_ns) and _ns[_j + 1].tick - _ns[_i].tick <= 20:
+                            _j += 1
+                        _ps = {n.pitch for n in _ns[_i:_j + 1]}
+                        if len(_ps) > _lim_notes or (max(_ps) - min(_ps)) > _lim_span:
+                            _bad_bars.add(_mmap[max(0, _bs.bisect_right(_starts, _ns[_i].tick) - 1)][0] + 1)
+                        _i = _j + 1
+                if _bad_bars:
+                    _lst = sorted(_bad_bars)
+                    _warn = (
+                        f"\n{len(_lst)} bar(s) hold chords that one hand of this size cannot play "
+                        f"(too many notes or too wide a stretch): "
+                        + ", ".join(str(b) for b in _lst[:12])
+                        + (" ..." if len(_lst) > 12 else "")
+                        + ".\nThey are shown as the file has them.\n"
+                    )
+            except Exception:
+                _warn = ""
             messagebox.showinfo(
                 "Separate Hands",
-                f"Done.  RH: {rh_n} notes   LH: {lh_n} notes\n\n"
+                f"Done.  RH: {rh_n} notes   LH: {lh_n} notes\n" + _warn + "\n"
                 "Open Setup \u25b8 Rationalize Score if you'd like to "
                 "Discard and revert to the original.",
                 parent=self.root)
