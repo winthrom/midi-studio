@@ -10186,6 +10186,10 @@ class ScoreView(tk.Frame):
         # that answer already known, fixes this at the root instead of
         # patching stems after they're already on the canvas.
         entries = []  # (notes, force_treble, is_v2)
+        _cross_ids = set()    # v22ze-152: left-hand chords drawn on the treble staff
+        _cross_meas = set()
+        import bisect as _bisect
+        _m_starts = [_m[1] for _m in mmap]
         for group in self._group_chords(tr.notes):
             if bt is None:
                 # v22ze-30 fix: this was the root cause of the orchestral-
@@ -10234,6 +10238,25 @@ class ScoreView(tk.Frame):
                 if not v2:
                     return notes, []
                 return v1, v2
+
+            # v22ze-152: a left-hand chord that lies entirely at or above C5 (hand
+            # crossing into the right hand's range) is drawn on the treble staff as
+            # a stem-down second voice, not in the bass staff under a huge ledger
+            # stack.  Bars already shown with a treble clef in the lower strip keep
+            # that treatment.
+            if (
+                lh
+                and bt is not None
+                and getattr(tr, "_prehand_split", False)
+                and min(n.pitch for n in lh) >= 72
+                and mmap
+            ):
+                _mi = mmap[max(0, _bisect.bisect_right(_m_starts, lh[0].tick) - 1)][0]
+                if _mi not in bass_treble_measures:
+                    entries.append((lh, True, True))
+                    _cross_ids.add(id(lh))
+                    _cross_meas.add(_mi)
+                    lh = []
 
             for hand_notes, force_t in [(rh, True), (lh, False)]:
                 if not hand_notes:
@@ -10299,6 +10322,16 @@ class ScoreView(tk.Frame):
             # rule (voice separation within one chord), not something
             # beam-group prediction should override.
             fsu = True if is_v2 else forced_dir.get(id(notes))
+            if id(notes) in _cross_ids:
+                fsu = False  # v22ze-152: crossing left hand, stems down
+            elif (
+                force_t
+                and not is_v2
+                and notes
+                and _cross_meas
+                and mmap[max(0, _bisect.bisect_right(_m_starts, notes[0].tick) - 1)][0] in _cross_meas
+            ):
+                fsu = True  # right hand in a bar with crossing: stems up
             si = self._draw_chord(
                 c,
                 notes,
@@ -10315,6 +10348,8 @@ class ScoreView(tk.Frame):
                 next_onset_tick=next_onset_for_entry.get(_entry_idx),
             )
             if si:
+                if id(notes) in _cross_ids:
+                    si = si._replace(staff="treble_x")  # v22ze-152: beams separately
                 stems.append(si)
 
         # Draw beams (replaces flags for beamed groups)
@@ -11147,7 +11182,7 @@ class ScoreView(tk.Frame):
         bw = max(2, int(self.SLG * 0.38))  # beam bar thickness
         tpm = song.ticks_per_measure()  # hard break at barlines
 
-        for staff_id in ("treble", "bass"):
+        for staff_id in ("treble", "bass", "treble_x"):
             ss = [s for s in stems if s.staff == staff_id]
             if not ss:
                 continue
