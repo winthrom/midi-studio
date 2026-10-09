@@ -10251,6 +10251,10 @@ class ScoreView(tk.Frame):
                 v2 = [n for n in notes if n.duration < med]
                 if not v2:
                     return notes, []
+                # v22ze-156: two voices only when the shorter notes all lie ABOVE the
+                # longer ones; interleaved notes stay one chord with one stem.
+                if min(n.pitch for n in v2) <= max(n.pitch for n in v1):
+                    return notes, []
                 return v1, v2
 
             # v22ze-152: a left-hand chord that lies entirely at or above C5 (hand
