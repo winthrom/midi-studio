@@ -8598,18 +8598,14 @@ class ScoreView(tk.Frame):
             "Zoom out on the score.",
         ).pack(side=tk.LEFT, padx=2)
         _tt(
-            tk.Button(tb, text="Fit Width", command=self._fit, **bs),
-            "Scale the whole piece to fit the visible window width exactly.",
+            tk.Button(tb, text="Fit Width +", command=self._fit_narrower, **bs),
+            "Make the notes wider: one fewer measure across the screen "
+            "(vertical size does not change).",
         ).pack(side=tk.LEFT, padx=2)
         _tt(
-            tk.Button(tb, text="Fit Width +", command=self._fit_wider, **bs),
-            "Show one more measure across the screen (zooms out by one "
-            "measure's width, without changing vertical zoom).",
-        ).pack(side=tk.LEFT, padx=2)
-        _tt(
-            tk.Button(tb, text="Fit Width −", command=self._fit_narrower, **bs),
-            "Show one fewer measure across the screen (zooms in by one "
-            "measure's width, without changing vertical zoom).",
+            tk.Button(tb, text="Fit Width −", command=self._fit_wider, **bs),
+            "Make the notes narrower: one more measure across the screen "
+            "(vertical size does not change).",
         ).pack(side=tk.LEFT, padx=2)
         _tt(
             tk.Button(tb, text="Space +", command=self._space_more, **bs),
@@ -8957,17 +8953,6 @@ class ScoreView(tk.Frame):
         self._apply_zoom()
         self._draw(cursor_tick=self._current_cursor_tick())
 
-    def _fit(self):
-        song = self.app.song
-        total_ticks = song.total_ticks()
-        if total_ticks <= 0:
-            return
-        w = self.canvas.winfo_width() - self.LM - int(self._fe()) - 40
-        tpb = song.ticks_per_beat
-        # _px_per_tick * total_ticks == w  →  zoom = w*tpb*4 / (total_ticks*MW)
-        self._zoom = max(0.2, w * tpb * 4 / (total_ticks * self.MW))
-        self._draw(cursor_tick=self._current_cursor_tick())
-
     def _n_visible_measures(self):
         """Return the number of measures currently visible across the canvas width."""
         w = self.canvas.winfo_width() - self.LM - int(self._fe()) - 40
@@ -9002,6 +8987,45 @@ class ScoreView(tk.Frame):
         Minimum is 1 measure visible.
         """
         self._fit_n(max(1, self._n_visible_measures() - 1))
+
+    def _view_save(self):
+        """v22ze-157: remember which part of the score is on screen."""
+        try:
+            c = self.canvas
+            left = c.canvasx(0)
+            at_start = left <= self.LM + self._fe() + 2
+            return (self._x_to_tick(left), at_start, c.yview()[0])
+        except Exception:
+            return None
+
+    def _view_restore(self, st):
+        """v22ze-157: show the same place again after a zoom / fit / space change."""
+        if not st:
+            return
+        try:
+            c = self.canvas
+            tick, at_start, yf = st
+            c.update_idletasks()
+            sr = [float(v) for v in str(c.cget("scrollregion")).split()]
+            if len(sr) == 4 and sr[2] > sr[0]:
+                x = 0 if at_start else self._tick_to_x(tick)
+                c.xview_moveto(max(0.0, min(1.0, (x - sr[0]) / (sr[2] - sr[0]))))
+                c.yview_moveto(max(0.0, min(1.0, yf)))
+        except Exception:
+            pass
+
+    def _keepview(method):
+        def _wrapped(self, *a, **k):
+            st = self._view_save()
+            r = method(self, *a, **k)
+            self._view_restore(st)
+            return r
+        return _wrapped
+
+    _zoom_in = _keepview(_zoom_in)
+    _zoom_out = _keepview(_zoom_out)
+    _space_redraw = _keepview(_space_redraw)
+    _fit_n = _keepview(_fit_n)
 
     def _ui_tick_update(self, tick):
         """
