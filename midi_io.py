@@ -657,6 +657,13 @@ def _prompt_midi_output_choice(trusted_ports):
         justify=tk.CENTER,
     ).pack(padx=20, pady=(0, 10))
 
+    tk.Label(  # v22ze-163
+        _dlg,
+        text="Using Pianoteq? It has no MIDI input port that other programs can see,\nso choose \u201cMidi Through Port-0\u201d here and set Pianoteq's own MIDI\ninput to it.  Then untick Midi Thru in the Mixer, or you will hear\nevery note twice.  (Tested on Linux only; Windows and macOS not verified.)",
+        bg="#0d1117", fg="#d29922", font=("TkDefaultFont", 8),
+        justify=tk.LEFT,
+    ).pack(padx=20, pady=(0, 8), anchor="w")
+
     var = tk.StringVar(master=_root, value=trusted_ports[0])  # v22ze-126
     for name in trusted_ports:
         tk.Radiobutton(

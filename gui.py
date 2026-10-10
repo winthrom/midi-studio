@@ -16983,6 +16983,10 @@ class MidisoftStudio:
                  bg="#0d1117", fg="#58a6ff",
                  font=("TkDefaultFont", 11, "bold")).pack(padx=20, pady=(16, 4))
 
+        tk.Label(dlg, text="Using Pianoteq? It has no MIDI input port that other programs can see,\nso choose \u201cMidi Through Port-0\u201d here and set Pianoteq's own MIDI\ninput to it.  Then untick Midi Thru in the Mixer, or you will hear\nevery note twice.  (Tested on Linux only; Windows and macOS not verified.)",  # v22ze-163
+                 bg="#0d1117", fg="#d29922", font=("TkDefaultFont", 8),
+                 justify=tk.LEFT).pack(padx=20, pady=(0, 8), anchor="w")
+
         # v22ze-110 fix (picker overflow): with enough MIDI ports, the old plain-packed list of
         # radiobuttons could grow taller than the screen. The dialog was
         # non-resizable with no scroll mechanism, so the 'Use This' button
