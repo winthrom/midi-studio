@@ -3501,7 +3501,12 @@ class Song:
                     descending = sum(1 for d in diffs if d < 0)
                     directional = ascending >= len(diffs) // 2 or descending >= len(diffs) // 2
 
-                    if span >= min_span and directional:
+                    # v22ze-160: a sweep wider than one hand that is over in less than an
+                    # eighth note cannot be played by one hand -- leave it to the DP.
+                    _one_hand_impossible = (
+                        span > p["max_span"] and (run[-1].tick - run[0].tick) < self.ticks_per_beat // 2
+                    )
+                    if span >= min_span and directional and not _one_hand_impossible:
                         grp_idx = _next_group[0]
                         _next_group[0] += 1
                         for n in run:
