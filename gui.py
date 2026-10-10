@@ -3540,7 +3540,7 @@ class Song:
         MAX_NOTES_PER_HAND = p["max_notes_per_hand"]
         INF = float("inf")
 
-        def _split_cost(pitches_lh, pitches_rh, prev_lh, prev_rh):
+        def _split_cost(pitches_lh, pitches_rh, prev_lh, prev_rh, dt_lh=None, dt_rh=None):
             if not pitches_lh and not pitches_rh:
                 return INF
             cost = 0.0
@@ -3595,6 +3595,16 @@ class Song:
             # Hand travel
             cost += abs(lh_c - prev_lh) * 0.5
             cost += abs(rh_c - prev_rh) * 0.5
+            # v22ze-160/161: a hand cannot make a big leap in a very short time.
+            _tpb_h = self.ticks_per_beat
+            if pitches_lh and dt_lh is not None and 0 <= dt_lh < _tpb_h:
+                _d = abs(lh_c - prev_lh)
+                if _d > 12:
+                    cost += (_d - 12) * 3 * (1 - dt_lh / _tpb_h)
+            if pitches_rh and dt_rh is not None and 0 <= dt_rh < _tpb_h:
+                _d = abs(rh_c - prev_rh)
+                if _d > 12:
+                    cost += (_d - 12) * 3 * (1 - dt_rh / _tpb_h)
             # Voice crossing
             if pitches_lh and pitches_rh:
                 if max(pitches_lh) > min(pitches_rh):
@@ -3647,9 +3657,23 @@ class Song:
                 continue
 
             new_beam = []
+            _gt = group[0].tick if group else 0
+
+            def _since(assigns, hand):
+                """Ticks since this hand (0 = LH, 1 = RH) last played, or None."""
+                _j = len(assigns) - 1
+                _stop = max(-1, _j - 64)
+                while _j > _stop:
+                    if assigns[_j][hand]:
+                        return _gt - q_groups[_j][0].tick if q_groups[_j] else None
+                    _j -= 1
+                return None
+
             for cost, lh_c, rh_c, assigns in beam:
+                _dt_lh = _since(assigns, 0)
+                _dt_rh = _since(assigns, 1)
                 for lh_p, rh_p in _enumerate_splits(pitches):
-                    result = _split_cost(lh_p, rh_p, lh_c, rh_c)
+                    result = _split_cost(lh_p, rh_p, lh_c, rh_c, _dt_lh, _dt_rh)
                     if result == INF:
                         continue
                     step_cost, new_lh_c, new_rh_c = result
