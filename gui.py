@@ -7084,7 +7084,7 @@ class MidiListView(tk.Toplevel):
         Sortable by column.  Read-only.
     """
 
-    COLS = ("Tick", "Pitch", "Note", "Velocity", "Duration", "Channel")
+    COLS = ("Bar", "Tick", "Pitch", "Note", "Velocity", "Duration", "Channel")
     EV_COLS = ("Tick", "Type", "Channel", "Detail")
 
     def __init__(self, parent, app, track_idx):
@@ -7112,6 +7112,10 @@ class MidiListView(tk.Toplevel):
 
         tk.Button(tb, text="Delete Selected", command=self._delete_sel).pack(side=tk.LEFT, padx=2)
         tk.Button(tb, text="Refresh", command=self._reload).pack(side=tk.LEFT, padx=2)
+        self._show_bar = tk.BooleanVar(value=True)
+        tk.Checkbutton(
+            tb, text="Show bar", variable=self._show_bar, command=self._apply_bar_column
+        ).pack(side=tk.LEFT, padx=6)
 
         # Populate the combobox values
         self._refresh_track_list()
@@ -7128,7 +7132,7 @@ class MidiListView(tk.Toplevel):
         self.tree = ttk.Treeview(
             notes_frame, columns=self.COLS, show="headings", selectmode="extended"
         )
-        col_widths = [70, 50, 60, 70, 70, 60]
+        col_widths = [50, 70, 50, 60, 70, 70, 60]
         for col, w in zip(self.COLS, col_widths):
             self.tree.heading(col, text=col, command=lambda c=col: self._sort(c))
             self.tree.column(col, width=w, anchor="center")
@@ -7137,6 +7141,7 @@ class MidiListView(tk.Toplevel):
         vsb.pack(side=tk.RIGHT, fill=tk.Y)
         self.tree.pack(fill=tk.BOTH, expand=True)
         self.tree.bind("<Double-1>", self._on_double)
+        self._apply_bar_column()
 
         # Tab 2 — Raw Events
         ev_frame = tk.Frame(nb)
@@ -7187,15 +7192,37 @@ class MidiListView(tk.Toplevel):
         self._populate_events()
 
     # ── Notes tab ─────────────────────────────────────────────────────────
+    def _apply_bar_column(self):
+        """v22ze-159: show or hide the Bar column."""
+        try:
+            cols = list(self.COLS) if self._show_bar.get() else [c for c in self.COLS if c != "Bar"]
+            self.tree.configure(displaycolumns=cols)
+        except Exception:
+            pass
+
+    def _bar_of(self, starts, mmap, tick):
+        import bisect as _bisect
+
+        if not starts:
+            return ""
+        i = max(0, _bisect.bisect_right(starts, tick) - 1)
+        return mmap[i][0] + 1
+
     def _populate(self):
         self.tree.delete(*self.tree.get_children())
         tr = self.app.song.tracks[self.track_idx]
+        try:
+            _mmap = self.app.song.get_measure_map()
+            _starts = [m[1] for m in _mmap]
+        except Exception:
+            _mmap, _starts = [], []
         for i, n in enumerate(sorted(tr.notes, key=lambda n: n.tick)):
             self.tree.insert(
                 "",
                 tk.END,
                 iid=str(i),
                 values=(
+                    self._bar_of(_starts, _mmap, n.tick),
                     n.tick,
                     n.pitch,
                     note_name(n.pitch),
@@ -7208,6 +7235,7 @@ class MidiListView(tk.Toplevel):
     def _sort(self, col):
         tr = self.app.song.tracks[self.track_idx]
         m = {
+            "Bar": "tick",
             "Tick": "tick",
             "Pitch": "pitch",
             "Velocity": "velocity",
