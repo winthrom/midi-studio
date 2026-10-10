@@ -13,6 +13,21 @@ $FsZip = "fluidsynth-v$FsVersion-win10-x64-cpp11.zip"
 $FsUrl = "https://github.com/FluidSynth/fluidsynth/releases/download/v$FsVersion/$FsZip"
 $SfBase = "https://ftp.osuosl.org/pub/musescore/soundfont/MuseScore_General"
 
+# v22ze-158: a short network/DNS hiccup on the build machine must not fail the whole build.
+function Get-WithRetry([string]$Uri, [string]$OutFile) {
+    for ($i = 1; $i -le 6; $i++) {
+        try {
+            Invoke-WebRequest -Uri $Uri -OutFile $OutFile -UseBasicParsing
+            return
+        } catch {
+            if ($i -eq 6) { throw }
+            $wait = 10 * $i
+            Write-Host "Download failed ($($_.Exception.Message)); retry $i of 5 in $wait s"
+            Start-Sleep -Seconds $wait
+        }
+    }
+}
+
 $tmp = Join-Path $env:TEMP "midistudio-fetch"
 if (Test-Path $tmp) { Remove-Item -Recurse -Force $tmp }
 New-Item -ItemType Directory -Force -Path $tmp, $Lib, $Snd | Out-Null
@@ -20,7 +35,7 @@ New-Item -ItemType Directory -Force -Path $tmp, $Lib, $Snd | Out-Null
 # ---- FluidSynth ---------------------------------------------------------------
 Write-Host "Downloading $FsZip"
 $zip = Join-Path $tmp $FsZip
-Invoke-WebRequest -Uri $FsUrl -OutFile $zip -UseBasicParsing
+Get-WithRetry $FsUrl $zip
 Write-Host ("sha256 " + (Get-FileHash $zip -Algorithm SHA256).Hash + "  " + $FsZip)
 Expand-Archive -Path $zip -DestinationPath (Join-Path $tmp "fs") -Force
 
@@ -62,7 +77,7 @@ Get-ChildItem $Lib -Filter *.dll | ForEach-Object { Write-Host ("  " + $_.Name +
 # ---- Soundfont ----------------------------------------------------------------
 foreach ($f in "MuseScore_General.sf3","MuseScore_General_License.md","MuseScore_General_Readme.md","MuseScore_General_Sample_Sources.csv") {
     Write-Host "Downloading $f"
-    Invoke-WebRequest -Uri "$SfBase/$f" -OutFile (Join-Path $Snd $f) -UseBasicParsing
+    Get-WithRetry "$SfBase/$f" (Join-Path $Snd $f)
 }
 $sf = Join-Path $Snd "MuseScore_General.sf3"
 $head = [System.IO.File]::ReadAllBytes($sf)[0..11]
