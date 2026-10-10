@@ -13556,6 +13556,13 @@ class MidisoftStudio:
             # runs on the MIDI dispatcher's background thread.
             if not self._midi_thru_enabled_val:
                 return
+            # v22ze-162: echo only what the player plays; never the keyboard's own
+            # housekeeping messages (clock, active sensing, sysex, start/stop...).
+            if msg.type not in (
+                "note_on", "note_off", "control_change", "program_change",
+                "pitchwheel", "aftertouch", "polytouch",
+            ):
+                return
             try:
                 if msg.type == "note_on" and msg.velocity > 0:
                     scale = self._midi_thru_volume_val / 127.0
