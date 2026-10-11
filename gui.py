@@ -6494,6 +6494,18 @@ class Transport:
         if was:
             self.play(self._on_tick_cb)
 
+    def clock_tick(self):
+        """v22ze-166: exact playback tick from the wall clock (None when not playing)."""
+        ck = getattr(self, "_clock", None)
+        if not ck or not self._playing:
+            return None
+        try:
+            wall0, tempo_map, start_t = ck
+            t = self._tmap_sec_to_tick(time.perf_counter() - wall0, tempo_map, start_t)
+            return max(start_t, min(t, self.song.total_ticks()))
+        except Exception:
+            return None
+
     def is_playing(self):
         return self._playing
 
@@ -6579,6 +6591,7 @@ class Transport:
             print(f"[Transport._run] CRASHED: {_run_exc}")
             traceback.print_exc()
         finally:
+            self._clock = None  # v22ze-166
             self._playing = False
             self._recording = False
 
@@ -6588,6 +6601,7 @@ class Transport:
         start_t = self.position_ticks
         wall0 = time.perf_counter()
         tempo_map = self._build_tempo_map()
+        self._clock = (wall0, tempo_map, start_t)  # v22ze-166
 
         def t2s(tick):
             return self._tmap_tick_to_sec(tick, tempo_map, start_t)
@@ -8716,6 +8730,14 @@ class ScoreView(tk.Frame):
             tk.Button(tb, text="Space −", command=self._space_less, **bs),
             "Move the staves closer together vertically.",
         ).pack(side=tk.LEFT, padx=2)
+        # v22ze-166: page-turn or smooth following while playing
+        self._follow_btn = tk.Button(tb, text="Follow: Page", command=self._toggle_follow, **bs)
+        _tt(
+            self._follow_btn,
+            "While playing: Page = the score stays still while the red line crosses a "
+            "page of measures, then turns to the next page (the measure you are in stays "
+            "on screen).  Smooth = the score slides under the red line.",
+        ).pack(side=tk.LEFT, padx=2)
         # ── Editing toolbar: tabbed tool palette ──────────────────────────────
         # v22ze-35: replaces the standalone "Note value" dropdown with a
         # full tabbed palette (Note/Rest, Accidental, Dynamics,
@@ -9513,6 +9535,57 @@ class ScoreView(tk.Frame):
             # Thin bar line at left margin
             c.create_line(self.LM, tt, self.LM, tt + self.SH, fill="#bbb", width=1)
 
+    def _page_scroll(self, cx):
+        """v22ze-166: page-turn following.  Returns True when it handled the scroll."""
+        try:
+            import bisect as _bs
+            song = self.app.song
+            mmap = song.get_measure_map()
+            if not mmap:
+                return False
+            W = self.canvas.winfo_width()
+            sr = [float(v) for v in str(self.canvas.cget("scrollregion")).split()]
+            if W < 200 or len(sr) != 4 or sr[2] <= sr[0]:
+                return False
+            starts = [self._tick_to_x(m[1]) for m in mmap]
+            bounds = starts + [self._tick_to_x(mmap[-1][2] if len(mmap[-1]) > 2 else song.total_ticks())]
+            n = len(starts)
+            pad = 10
+
+            def page_last(first):
+                left = bounds[first] - pad
+                j = first
+                while j + 2 <= n and bounds[j + 2] - left <= W:
+                    j += 1
+                return j
+
+            i = max(0, min(_bs.bisect_right(starts, cx) - 1, n - 1))
+            first = getattr(self, "_page_first", None)
+            if first is None or first >= n or i < first or i > page_last(first):
+                first = i                      # first call or a jump: page starts at the cursor's measure
+            else:
+                last = page_last(first)
+                if last > first and i == last and cx >= (bounds[last] + bounds[last + 1]) / 2.0:
+                    first = last               # flip: next page starts at this measure
+            if page_last(first) <= first:
+                return False                   # measures too wide for a page: slide instead
+            self._page_first = first
+            lo_px = sr[0] if first == 0 else max(sr[0], bounds[first] - pad)
+            cur = self.canvas.canvasx(0)
+            if abs(cur - lo_px) > 1:
+                self.canvas.xview_moveto((lo_px - sr[0]) / (sr[2] - sr[0]))
+            return True
+        except Exception:
+            return False
+
+    def _toggle_follow(self):
+        self._follow_mode = "smooth" if getattr(self, "_follow_mode", "page") == "page" else "page"
+        self._page_first = None
+        try:
+            self._follow_btn.configure(text="Follow: Page" if self._follow_mode == "page" else "Follow: Smooth")
+        except Exception:
+            pass
+
     def _scroll_to(self, cx, total_w):
         """Center-lock scrolling (v22p/q).
 
@@ -9523,6 +9596,8 @@ class ScoreView(tk.Frame):
         (far left) — the "cursor jumps off left immediately on Play" bug.
         """
         _MIN_PX_MOVE = 1
+        if getattr(self, "_follow_mode", "page") == "page" and self._page_scroll(cx):  # v22ze-166
+            return
         try:
             # Always recompute from current song geometry — never use the
             # passed-in total_w which may be stale after song replacement.
@@ -13659,6 +13734,9 @@ class MidisoftStudio:
                 tick = self.transport.position_ticks
                 self._cursor_anchor = None
 
+            _ct = self.transport.clock_tick()  # v22ze-166
+            if _ct is not None:
+                tick = _ct
             if self._score_view and _winfo_exists(self._score_view):
                 self._score_view.update_cursor(tick)
                 self._score_view._sync_transport_btns()
