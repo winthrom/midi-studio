@@ -3648,6 +3648,8 @@ class Song:
                 # Extra penalty: RH notes below E3 (52) — almost always LH territory
                 if pitches_rh and min(pitches_rh) < 52:
                     cost += 60 * sum(1 for p in pitches_rh if p < 52)
+            elif pitches_rh and not pitches_lh:  # v22ze-168
+                cost += 60 * sum(1 for p in pitches_rh if p < 52)
             return cost, lh_c, rh_c
 
         def _enumerate_splits(pitches):
