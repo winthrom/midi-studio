@@ -3519,6 +3519,13 @@ class Song:
                     _run_sec = (run[-1].tick - run[0].tick) * (self.tempo if self.tempo > 0 else 500_000) / (self.ticks_per_beat * 1e6)
                     if span > p["max_span"] + 24 * _run_sec:
                         _one_hand_impossible = True
+                    # v22ze-172: judge every single leap by the time it has
+                    _tus = self.tempo if self.tempo > 0 else 500_000
+                    for _k in range(len(run) - 1):
+                        _dts = (run[_k + 1].tick - run[_k].tick) * _tus / (self.ticks_per_beat * 1e6)
+                        if abs(run[_k + 1].pitch - run[_k].pitch) > 12 + 48 * _dts:
+                            _one_hand_impossible = True
+                            break
                     if span >= min_span and directional and not _one_hand_impossible:
                         grp_idx = _next_group[0]
                         _next_group[0] += 1
