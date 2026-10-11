@@ -9923,7 +9923,16 @@ class ScoreView(tk.Frame):
                 cur = [n]
                 anchor_tick = n.tick  # new anchor for next chord
         groups.append(sorted(cur, key=lambda n: n.pitch))
-        return groups
+        # v22ze-165: the same pitch twice in one chord is drawn once (longest note)
+        _out = []
+        for _g in groups:
+            _best = {}
+            for _n in _g:
+                _b = _best.get(_n.pitch)
+                if _b is None or _n.duration > _b.duration:
+                    _best[_n.pitch] = _n
+            _out.append(_g if len(_best) == len(_g) else sorted(_best.values(), key=lambda n: n.pitch))
+        return _out
 
     # v22ze-27 fix (housekeeping item 8): _find_gap_split used to live
     # here as a SEPARATE, per-chord hand-split algorithm -- see
