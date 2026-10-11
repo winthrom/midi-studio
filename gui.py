@@ -10462,6 +10462,11 @@ class ScoreView(tk.Frame):
                 else:
                     rh = [n for n in group if n.channel == 0]
                     lh = [n for n in group if n.channel == 1]
+                # v22ze-170: one head for a pitch both hands have at this moment
+                _common = {n.pitch for n in rh} & {n.pitch for n in lh}
+                if _common:
+                    rh = [n for n in rh if not (n.pitch in _common and n.pitch < 60)]
+                    lh = [n for n in lh if not (n.pitch in _common and n.pitch >= 60)]
             else:
                 split = manual_split if manual_split > 0 else auto_split
                 rh = [n for n in group if n.pitch >= split]
