@@ -3540,7 +3540,8 @@ class Song:
         MAX_NOTES_PER_HAND = p["max_notes_per_hand"]
         INF = float("inf")
 
-        def _split_cost(pitches_lh, pitches_rh, prev_lh, prev_rh, dt_lh=None, dt_rh=None):
+        def _split_cost(pitches_lh, pitches_rh, prev_lh, prev_rh, dt_lh=None, dt_rh=None,
+                        held_lh=None, held_rh=None):
             if not pitches_lh and not pitches_rh:
                 return INF
             cost = 0.0
@@ -3589,6 +3590,21 @@ class Song:
                 span = max(pitches_rh) - min(pitches_rh)
                 if span > MAX_SPAN:
                     cost += (span - MAX_SPAN) * 15
+            # v22ze-164: notes this hand is still holding down take up fingers and
+            # stretch the span too.  Only the EXTRA cost over the new notes alone
+            # is added, so nothing is counted twice.
+            for _P, _H in ((pitches_lh, held_lh), (pitches_rh, held_rh)):
+                if _P and _H:
+                    _H2 = [h for h in _H if h not in _P]
+                    if _H2:
+                        _all = set(_P) | set(_H2)
+                        if len(_all) > MAX_NOTES_PER_HAND:
+                            cost += (len(_all) - max(len(_P), MAX_NOTES_PER_HAND)) * 40
+                        _sa = max(_all) - min(_all)
+                        _sp = (max(_P) - min(_P)) if len(_P) > 1 else 0
+                        _ex = max(0, _sa - MAX_SPAN) - max(0, _sp - MAX_SPAN)
+                        if _ex > 0:
+                            cost += _ex * 15
             # Centers
             lh_c = statistics.mean(pitches_lh) if pitches_lh else prev_lh
             rh_c = statistics.mean(pitches_rh) if pitches_rh else prev_rh
@@ -3648,6 +3664,18 @@ class Song:
         lh_start = 45.0  # E2 — typical LH starting position
         rh_start = 65.0  # F4 — typical RH starting position
         beam = [(0.0, lh_start, rh_start, [])]
+        # v22ze-164: per group, the end tick of each pitch and the latest end
+        _g_ends = []
+        _g_max = []
+        for _g in q_groups:
+            _d = {}
+            for _n in _g:
+                _e = _n.tick + _n.duration
+                if _e > _d.get(_n.pitch, -1):
+                    _d[_n.pitch] = _e
+            _g_ends.append(_d)
+            _g_max.append(max(_d.values()) if _d else -1)
+        _HOLD_MIN = self.ticks_per_beat // 2  # longer than an eighth note = held
 
         for group in q_groups:
             pitches = sorted(set(n.pitch for n in group))
@@ -3669,11 +3697,26 @@ class Song:
                     _j -= 1
                 return None
 
+            def _held(assigns, hand):
+                """Pitches this hand (0 = LH, 1 = RH) is still holding at this onset."""
+                _out = set()
+                _j = len(assigns) - 1
+                _stop = max(-1, _j - 64)
+                while _j > _stop:
+                    if _g_max[_j] - _gt > _HOLD_MIN:
+                        for _p in assigns[_j][hand]:
+                            if _g_ends[_j].get(_p, -1) - _gt > _HOLD_MIN:
+                                _out.add(_p)
+                    _j -= 1
+                return _out
+
             for cost, lh_c, rh_c, assigns in beam:
                 _dt_lh = _since(assigns, 0)
                 _dt_rh = _since(assigns, 1)
+                _held_lh = _held(assigns, 0)  # v22ze-164
+                _held_rh = _held(assigns, 1)
                 for lh_p, rh_p in _enumerate_splits(pitches):
-                    result = _split_cost(lh_p, rh_p, lh_c, rh_c, _dt_lh, _dt_rh)
+                    result = _split_cost(lh_p, rh_p, lh_c, rh_c, _dt_lh, _dt_rh, _held_lh, _held_rh)
                     if result == INF:
                         continue
                     step_cost, new_lh_c, new_rh_c = result
