@@ -3515,6 +3515,10 @@ class Song:
                     _one_hand_impossible = (
                         span > p["max_span"] and (run[-1].tick - run[0].tick) < self.ticks_per_beat // 2
                     )
+                    # v22ze-169: normal span + about two octaves of travel per second
+                    _run_sec = (run[-1].tick - run[0].tick) * (self.tempo if self.tempo > 0 else 500_000) / (self.ticks_per_beat * 1e6)
+                    if span > p["max_span"] + 24 * _run_sec:
+                        _one_hand_impossible = True
                     if span >= min_span and directional and not _one_hand_impossible:
                         grp_idx = _next_group[0]
                         _next_group[0] += 1
