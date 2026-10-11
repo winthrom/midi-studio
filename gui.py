@@ -13509,6 +13509,61 @@ def _tt(widget, text, delay=500):
 import copy as _copy
 
 
+# v22ze-171: chord thinning (used by Edit > Thin Chords...)
+def _thin_hand_chord(pitches, hand, max_notes, max_span):
+    """Return the set of pitches to leave out so one hand can play the chord.
+    hand 'R': the top note is kept (melody); hand 'L': the bottom note is kept (bass)."""
+    c = sorted(set(pitches))
+    removed = set()
+    if len(c) <= 1:
+        return removed
+    # 1. reach: keep only what one hand can span, anchored on the note that matters
+    if hand == "R":
+        keep = [p for p in c if p >= c[-1] - max_span]
+    else:
+        keep = [p for p in c if p <= c[0] + max_span]
+    removed |= set(c) - set(keep)
+    c = keep
+    # 2. fingers: leave out octave doublings first, then middle notes
+    while len(c) > max_notes:
+        inner = c[1:-1]
+        doubled = [p for p in inner if any(q != p and (q - p) % 12 == 0 for q in c)]
+        r = doubled[0] if doubled else inner[len(inner) // 2]
+        removed.add(r)
+        c.remove(r)
+    return removed
+
+
+def _thin_two_hand_tracks(song, rh_i, lh_i, max_notes, max_span, win=20):
+    """Return (removed_keys, report).  removed_keys = {(track_index, tick, pitch)};
+    report = [(bar_number, 'R'|'L', notes_before, notes_after, 'G#4 D5')]."""
+    import bisect as _bs
+    mmap = song.get_measure_map()
+    starts = [m[1] for m in mmap]
+    removed_keys = set()
+    report = []
+    for ti, hand in ((rh_i, "R"), (lh_i, "L")):
+        ns = sorted(song.tracks[ti].notes, key=lambda n: n.tick)
+        i = 0
+        while i < len(ns):
+            j = i
+            while j + 1 < len(ns) and ns[j + 1].tick - ns[i].tick <= win:
+                j += 1
+            grp = ns[i:j + 1]
+            ps = sorted({n.pitch for n in grp})
+            rem = _thin_hand_chord(ps, hand, max_notes, max_span)
+            if rem:
+                for n in grp:
+                    if n.pitch in rem:
+                        removed_keys.add((ti, n.tick, n.pitch))
+                bar = max(0, _bs.bisect_right(starts, ns[i].tick) - 1) + 1
+                names = " ".join(NOTE_NAMES[p % 12] + str(p // 12 - 1) for p in sorted(rem))
+                report.append((bar, hand, len(ps), len(ps) - len(rem), names))
+            i = j + 1
+    report.sort(key=lambda r: (r[0], r[1]))
+    return removed_keys, report
+
+
 class RationalizationAction:
     """Memento for a single rationalization edit (undo/redo)."""
 
@@ -13868,6 +13923,7 @@ class MidisoftStudio:
         em.add_command(label="Separate Channels…",command=self._separate_channels)
         em.add_separator()
         em.add_command(label="Separate Hands…",command=self._separate_hands)
+        em.add_command(label="Thin Chords…",command=self._thin_chords)  # v22ze-171
         vm=TkPopupMenu(mb,tearoff=0); mb.add_cascade(label="View",menu=vm)
         vm.add_command(label="Score View\tCtrl+1",command=self._open_score_view,accelerator="Ctrl+1")
         vm.add_command(label="Piano Roll\tCtrl+2",command=self._open_piano_roll,accelerator="Ctrl+2")
@@ -16845,6 +16901,108 @@ class MidisoftStudio:
         except Exception as exc:
             messagebox.showerror("Separate Hands", f"Error: {exc}",
                                  parent=self.root)
+
+    def _thin_chords(self):
+        """v22ze-171: optional - leave out notes one hand cannot play; hear before accepting."""
+        import copy as _copy
+        song = self.song
+        names = [(t.name or "") for t in song.tracks]
+        rh_i = next((i for i, n in enumerate(names) if n.endswith(" (RH)")), None)
+        lh_i = next((i for i, n in enumerate(names) if n.endswith(" (LH)")), None)
+        if rh_i is None or lh_i is None:
+            messagebox.showinfo("Thin Chords",
+                "Run Edit \u25b8 Separate Hands first, so the music is split into a "
+                "right-hand part and a left-hand part.", parent=self.root)
+            return
+        opts = self._ask_separate_hands_options()
+        if opts is None:
+            return
+        max_span, max_notes = opts
+        removed, report = _thin_two_hand_tracks(song, rh_i, lh_i, max_notes, max_span)
+        if not report:
+            messagebox.showinfo("Thin Chords",
+                "Every chord can already be played by one hand of this size.\nNothing to thin.",
+                parent=self.root)
+            return
+        thin_song = _copy.deepcopy(song)
+        for ti in (rh_i, lh_i):
+            thin_song.tracks[ti].notes = [
+                n for n in thin_song.tracks[ti].notes if (ti, n.tick, n.pitch) not in removed]
+        mmap = song.get_measure_map()
+        pv = Transport(song)  # separate player used only for listening
+
+        dlg = tk.Toplevel(self.root)
+        dlg.title("Thin Chords")
+        dlg.configure(bg="#0d1117")
+        tk.Label(dlg, bg="#0d1117", fg="#58a6ff", font=("TkDefaultFont", 11, "bold"),
+                 text=f"{len(report)} chord(s) are too big for one hand").pack(padx=16, pady=(14, 2))
+        tk.Label(dlg, bg="#0d1117", fg="#8b949e", justify=tk.LEFT, font=("TkDefaultFont", 9),
+                 text="Select a line, then listen to that bar as it is or thinned.\n"
+                      "Nothing is changed until you press Accept (Undo will take it back).").pack(padx=16)
+        fr = tk.Frame(dlg, bg="#0d1117")
+        fr.pack(fill=tk.BOTH, expand=True, padx=16, pady=8)
+        sb = tk.Scrollbar(fr)
+        lb = tk.Listbox(fr, width=78, height=14, yscrollcommand=sb.set, exportselection=False,
+                        bg="#161b22", fg="white", selectbackground="#1f6feb", font=("TkFixedFont", 10))
+        sb.config(command=lb.yview)
+        lb.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        sb.pack(side=tk.LEFT, fill=tk.Y)
+        for bar, hand, nb, na, nm in report:
+            lb.insert(tk.END, f"Bar {bar:<4} {'RH' if hand == 'R' else 'LH'}  {nb} notes \u2192 {na}   leaves out: {nm}")
+        lb.selection_set(0)
+
+        def _stop_pv():
+            try:
+                pv.stop()
+            except Exception:
+                pass
+
+        def _hear(which):
+            sel = lb.curselection()
+            bar = report[sel[0] if sel else 0][0]
+            a = mmap[max(0, bar - 2)][1]
+            b = mmap[min(bar - 1, len(mmap) - 1)][2]
+            try:
+                self.transport.stop()
+            except Exception:
+                pass
+            _stop_pv()
+            pv.song = song if which == "orig" else thin_song
+            pv.position_ticks = a
+            pv._play_until_tick = b
+            pv.play()
+
+        def _accept():
+            _stop_pv()
+            before = _copy.deepcopy(song.tracks)
+            before_map = _copy.deepcopy(song.rationalized_measure_map)
+            for ti in (rh_i, lh_i):
+                song.tracks[ti].notes = [n for n in song.tracks[ti].notes if (ti, n.tick, n.pitch) not in removed]
+            after = _copy.deepcopy(song.tracks)
+            after_map = _copy.deepcopy(song.rationalized_measure_map)
+            self._push_undo(RationalizationAction(
+                description="Thin Chords", before_tracks=before, after_tracks=after,
+                before_map=before_map, after_map=after_map))
+            song.modified = True
+            self._update_title()
+            self._refresh_views()
+            dlg.destroy()
+            messagebox.showinfo("Thin Chords", f"Done. {len(removed)} note position(s) left out.\n"
+                                "Use Undo to bring them back.", parent=self.root)
+
+        def _cancel():
+            _stop_pv()
+            dlg.destroy()
+
+        bf = tk.Frame(dlg, bg="#0d1117")
+        bf.pack(pady=(0, 14))
+        bs = dict(relief=tk.FLAT, padx=10, pady=4, fg="white")
+        tk.Button(bf, text="Hear original", command=lambda: _hear("orig"), bg="#30363d", **bs).pack(side=tk.LEFT, padx=4)
+        tk.Button(bf, text="Hear thinned", command=lambda: _hear("thin"), bg="#30363d", **bs).pack(side=tk.LEFT, padx=4)
+        tk.Button(bf, text="Stop", command=_stop_pv, bg="#30363d", **bs).pack(side=tk.LEFT, padx=4)
+        tk.Button(bf, text="Accept", command=_accept, bg="#238636", **bs).pack(side=tk.LEFT, padx=(16, 4))
+        tk.Button(bf, text="Cancel", command=_cancel, bg="#6e7681", **bs).pack(side=tk.LEFT, padx=4)
+        dlg.protocol("WM_DELETE_WINDOW", _cancel)
 
     def _combine_tracks(self):
         if len(self.song.tracks)<2:
