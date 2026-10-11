@@ -1672,6 +1672,15 @@ class Song:
 
         return problems
 
+    def total_ticks_fast(self, max_age=0.5):  # v22ze-167
+        now = time.perf_counter()
+        c = getattr(self, "_tt_cache", None)
+        if c and now - c[0] < max_age:
+            return c[1]
+        v = self.total_ticks()
+        self._tt_cache = (now, v)
+        return v
+
     def total_ticks(self):
         mx = self.ticks_per_beat * 4
         for t in self.tracks:
@@ -6502,7 +6511,7 @@ class Transport:
         try:
             wall0, tempo_map, start_t = ck
             t = self._tmap_sec_to_tick(time.perf_counter() - wall0, tempo_map, start_t)
-            return max(start_t, min(t, self.song.total_ticks()))
+            return max(start_t, min(t, self.song.total_ticks_fast()))
         except Exception:
             return None
 
@@ -8731,7 +8740,7 @@ class ScoreView(tk.Frame):
             "Move the staves closer together vertically.",
         ).pack(side=tk.LEFT, padx=2)
         # v22ze-166: page-turn or smooth following while playing
-        self._follow_btn = tk.Button(tb, text="Follow: Page", command=self._toggle_follow, **bs)
+        self._follow_btn = tk.Button(tb, text="Follow: Smooth", command=self._toggle_follow, **bs)
         _tt(
             self._follow_btn,
             "While playing: Page = the score stays still while the red line crosses a "
@@ -9598,6 +9607,17 @@ class ScoreView(tk.Frame):
         _MIN_PX_MOVE = 1
         if getattr(self, "_follow_mode", "page") == "page" and self._page_scroll(cx):  # v22ze-166
             return
+        # v22ze-167: exact-pixel lock, red line one third across the screen
+        try:
+            _W = self.canvas.winfo_width()
+            _sr = [float(v) for v in str(self.canvas.cget("scrollregion")).split()]
+            if _W > 100 and len(_sr) == 4 and _sr[2] > _sr[0]:
+                _lo = int(round(max(_sr[0], min(cx - _W / 3.0, _sr[2] - _W))))
+                if _lo != int(round(self.canvas.canvasx(0))):
+                    self.canvas.xview_moveto((_lo - _sr[0]) / (_sr[2] - _sr[0]))
+                return
+        except Exception:
+            pass
         try:
             # Always recompute from current song geometry — never use the
             # passed-in total_w which may be stale after song replacement.
@@ -9975,6 +9995,7 @@ class ScoreView(tk.Frame):
 
     # ─── Chord-aware note drawing ────────────────────────────────────────────
 
+    _follow_mode = "smooth"  # v22ze-167: smooth | page
     CHORD_TOL = 20  # ticks — notes within this range are treated as one chord
 
     def _group_chords(self, notes):
@@ -13343,7 +13364,7 @@ class ScoreView(tk.Frame):
 
         # Fast path: just move the cursor line
         tpm = song.ticks_per_measure()
-        nm = max(4, math.ceil(song.total_ticks() / tpm) + 1)
+        nm = max(4, math.ceil(song.total_ticks_fast() / tpm) + 1)
         total_w = self.LM + self._fe() + nm * self._mw() + 40
         # v22ze-61 fix: defensively clamp the tick used for drawing to
         # the CURRENT song's own range. Playback position is reported
@@ -13358,7 +13379,7 @@ class ScoreView(tk.Frame):
         # (see _scroll_to's docstring). Clamping here can't fix whatever
         # is feeding a bad tick value, but it does guarantee the cursor
         # itself always stays within the bounds of what's actually drawn.
-        clamped_tick = max(0, min(tick, song.total_ticks()))
+        clamped_tick = max(0, min(tick, song.total_ticks_fast()))
         cx = self._tick_to_x(clamped_tick)
         existing = c.find_withtag("playhead")
         if existing:
@@ -13700,6 +13721,7 @@ class MidisoftStudio:
 
     # ── tick loop ─────────────────────────────────────────────────────────────
     def _tick_loop(self):
+        _t_frame = time.perf_counter()  # v22ze-167
         # Prune dead windows so the list doesn't grow forever
         self._open_windows = [w for w in self._open_windows
                               if _winfo_exists(w)]
@@ -13749,7 +13771,8 @@ class MidisoftStudio:
             # Update active keys in any open piano roll windows
             active = set()
             tpb = self.song.ticks_per_beat
-            for tr in self.song.tracks:
+            _any_roll = any(isinstance(_w, PianoRollView) for _w in self._open_windows)  # v22ze-167
+            for tr in (self.song.tracks if _any_roll else ()):
                 if tr.mute: continue
                 for n in tr.notes:
                     if n.tick <= tick < n.tick + n.duration:
@@ -13764,14 +13787,16 @@ class MidisoftStudio:
             self._cursor_anchor = None   # reset anchor when stopped
 
         if not getattr(self, "_shutting_down", False):
-            self._tick_job = self.root.after(40, self._tick_loop)   # 40ms = ~25 fps
+            _d = 16 if self.transport.is_playing() else 40  # v22ze-167: ~60 fps while playing
+            _d = max(1, int(_d - (time.perf_counter() - _t_frame) * 1000))
+            self._tick_job = self.root.after(_d, self._tick_loop)
 
     def _update_overview_playhead(self, tick):
         # Move the overview playhead line without redrawing everything.
         c = self.overview
         W = c.winfo_width()
         if W < 10: return
-        total = max(self.song.total_ticks(), 1)
+        total = max(self.song.total_ticks_fast(), 1)
         if self._overview_rolling:
             tpm = self.song.ticks_per_measure(); win = tpm * 4
             t0  = max(0, tick - int(win * 0.75))
