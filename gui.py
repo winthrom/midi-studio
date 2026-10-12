@@ -3526,6 +3526,18 @@ class Song:
                         if abs(run[_k + 1].pitch - run[_k].pitch) > 12 + 48 * _dts:
                             _one_hand_impossible = True
                             break
+                    # v22ze-174: other notes sounding during the run must fit the hand too
+                    if not _one_hand_impossible:
+                        _t0, _t1 = run[0].tick, run[-1].tick
+                        _run_ids = {id(_rn) for _rn in run}
+                        _ps_all = set(pitches)
+                        for _g in groups_list:
+                            if _g and _t0 <= _g[0].tick <= _t1:
+                                for _gn in _g:
+                                    if id(_gn) not in _run_ids:
+                                        _ps_all.add(_gn.pitch)
+                        if max(_ps_all) - min(_ps_all) > p["max_span"] + 24 * _run_sec:
+                            _one_hand_impossible = True
                     if span >= min_span and directional and not _one_hand_impossible:
                         grp_idx = _next_group[0]
                         _next_group[0] += 1
