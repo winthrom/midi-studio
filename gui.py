@@ -17178,8 +17178,10 @@ class MidisoftStudio:
 
         def _change(i, p, act):
             plan[i]["actions"][p] = act
-            if plan[i]["state"] == "no":
-                plan[i]["state"] = "pending"
+            # v22ze-178: a choice made here is a decision: Y, unless every note stays
+            plan[i]["state"] = (
+                "no" if all(plan[i]["actions"].get(q) == "keep" for q in plan[i]["rem"]) else "yes"
+            )
             _select(i)
             _refresh_row(i)
             _update_title()
@@ -17240,6 +17242,12 @@ class MidisoftStudio:
 
         def _apply(include):
             _stop_pv()
+            if not any(include(e) for e in plan):  # v22ze-178
+                messagebox.showinfo("Thin Chords",
+                    "Nothing is marked Y yet, so there is nothing to apply.\n"
+                    "Press Y on a line (or choose a note action under Change\u2026), "
+                    "or use Accept all remaining.", parent=dlg)
+                return
             before = _copy.deepcopy(song.tracks)
             before_map = _copy.deepcopy(song.rationalized_measure_map)
             n_drop, n_add = _thin_apply(song, plan, include)
