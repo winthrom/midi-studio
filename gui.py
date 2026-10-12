@@ -10304,7 +10304,32 @@ class ScoreView(tk.Frame):
                 runs.append((run_start, run_end))
             return runs
 
-        runs = _find_runs(bass_treble_measures)
+        # v22ze-175: bars where the left hand is high for the first part and low
+        # after (or the reverse): the lower staff changes clef inside the bar.
+        # {measure: (tick_from, tick_to, "first"|"second")} = ticks read in treble clef
+        _bp0 = {}
+        if bt is not None and getattr(tr, "_prehand_split", False):
+            for m_idx, ms, me, num, den, tpm in mmap:
+                if m_idx in bass_treble_measures:
+                    continue
+                _lhn = sorted(
+                    (n for n in tr.notes if ms <= n.tick < me and n.channel == 1),
+                    key=lambda n: n.tick,
+                )
+                if len(_lhn) < 3:
+                    continue
+                _hi = [n.pitch >= 60 for n in _lhn]
+                _sw = [i for i in range(1, len(_hi)) if _hi[i] != _hi[i - 1]]
+                if len(_sw) != 1:
+                    continue
+                _k = _sw[0]
+                _hn = _lhn[:_k] if _hi[0] else _lhn[_k:]
+                if len(_hn) < 2 or max(n.pitch for n in _hn) < 72:
+                    continue
+                _bp0[m_idx] = (ms, _lhn[_k].tick, "first") if _hi[0] else (_lhn[_k].tick, me, "second")
+        self._bt_partial = _bp0
+
+        runs = _find_runs(bass_treble_measures | set(_bp0))
         treble_bass_runs = _find_runs(treble_bass_measures)
 
         # Draw: small inline treble clef at run start, dashed line through run,
@@ -10350,6 +10375,10 @@ class ScoreView(tk.Frame):
                 else self._tick_to_x(0) - clef_sz * 0.9
             )
             x1 = (self._tick_to_x(mmap[re][2]) - 4) if re < len(mmap) else self._tick_to_x(0)
+            if rs in _bp0 and _bp0[rs][2] == "second":  # v22ze-175
+                x0 = self._tick_to_x(_bp0[rs][0]) - clef_sz * 0.9
+            if re in _bp0 and _bp0[re][2] == "first":
+                x1 = self._tick_to_x(_bp0[re][1]) - clef_sz * 0.95
             # v22ze-25 fix: if this run starts at measure 0, the opening
             # staff clef (item 7) already shows the correct clef for the
             # whole line -- drawing the small inline clef glyph again
@@ -10376,11 +10405,16 @@ class ScoreView(tk.Frame):
             # Closing bracket at end of run
             c.create_line(x1, dash_y, x1, dash_y + self.SLG, fill="#444", width=1)
             # Return bass clef (now matches main opening clef size)
-            if re + 1 < nm:
+            _fp = re in _bp0 and _bp0[re][2] == "first"  # v22ze-175
+            if _fp or re + 1 < nm:
                 rx = (
-                    (self._tick_to_x(mmap[re + 1][1]) - clef_sz * 0.9)
-                    if re + 1 < len(mmap)
-                    else self._tick_to_x(mmap[-1][2]) - clef_sz * 0.9
+                    (self._tick_to_x(_bp0[re][1]) - clef_sz * 0.9)
+                    if _fp
+                    else (
+                        (self._tick_to_x(mmap[re + 1][1]) - clef_sz * 0.9)
+                        if re + 1 < len(mmap)
+                        else self._tick_to_x(mmap[-1][2]) - clef_sz * 0.9
+                    )
                 )
                 c.create_text(
                     rx,
@@ -10529,7 +10563,8 @@ class ScoreView(tk.Frame):
                 and mmap
             ):
                 _mi = mmap[max(0, _bisect.bisect_right(_m_starts, lh[0].tick) - 1)][0]
-                if _mi not in bass_treble_measures:
+                _pp = _bp0.get(_mi)  # v22ze-175
+                if _mi not in bass_treble_measures and not (_pp and _pp[0] <= lh[0].tick < _pp[1]):
                     entries.append((lh, True, True))
                     _cross_ids.add(id(lh))
                     _cross_meas.add(_mi)
@@ -10682,7 +10717,8 @@ class ScoreView(tk.Frame):
                 m = meas(t0)
                 if hand:
                     return treble_bass_measures is None or m not in treble_bass_measures
-                return m in bass_treble_measures
+                _pq2 = (getattr(self, "_bt_partial", None) or {}).get(m)  # v22ze-175
+                return m in bass_treble_measures or bool(_pq2 and _pq2[0] <= t0 < _pq2[1])
 
             # A chord is "high" if it needs 8va: its top note is at OFF or above and
             # its lowest note is at LOW12 or above.  Neighbouring high chords form a
@@ -10773,7 +10809,11 @@ class ScoreView(tk.Frame):
             if ms <= notes[0].tick < me:
                 measure = m_idx
                 break
-        use_treble_clef_in_bass = not use_treble and measure in bass_treble_measures
+        _bpp = getattr(self, "_bt_partial", None) or {}  # v22ze-175
+        _pq = _bpp.get(measure)
+        use_treble_clef_in_bass = not use_treble and (
+            measure in bass_treble_measures or bool(_pq and _pq[0] <= notes[0].tick < _pq[1])
+        )
         use_bass_clef_in_treble = (
             use_treble and treble_bass_measures is not None and measure in treble_bass_measures
         )
