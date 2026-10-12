@@ -13646,6 +13646,105 @@ def _thin_two_hand_tracks(song, rh_i, lh_i, max_notes, max_span, win=20):
     return removed_keys, report
 
 
+# v22ze-177: Thin Chords plan - one entry per chord a hand cannot play, with a
+# per-note choice of MOVE (to the other hand, keeps sounding) or DELETE.
+def _thin_plan(song, rh_i, lh_i, max_notes, max_span, win=20):
+    """Return a list of dict entries, one per unplayable chord:
+    ti, other_i, hand ('R'|'L'), bar, chord_no, tick, ps (all pitches), keys
+    {pitch: [ticks]}, rem (sorted pitches proposed to leave this hand),
+    actions {pitch: 'move'|'delete'}, other_ps (other hand's pitches at that
+    moment), state ('pending'|'yes'|'no')."""
+    import bisect as _bs
+    mmap = song.get_measure_map()
+    starts = [m[1] for m in mmap]
+
+    def _groups(ti):
+        ns = sorted(song.tracks[ti].notes, key=lambda n: n.tick)
+        out, i = [], 0
+        while i < len(ns):
+            j = i
+            while j + 1 < len(ns) and ns[j + 1].tick - ns[i].tick <= win:
+                j += 1
+            out.append(ns[i:j + 1])
+            i = j + 1
+        return out
+
+    grp = {rh_i: _groups(rh_i), lh_i: _groups(lh_i)}
+    gtick = {k: [g[0].tick for g in v] for k, v in grp.items()}
+    plan = []
+    for ti, oi, hand in ((rh_i, lh_i, "R"), (lh_i, rh_i, "L")):
+        per_bar = {}
+        for g in grp[ti]:
+            bar = max(0, _bs.bisect_right(starts, g[0].tick) - 1) + 1
+            per_bar[bar] = per_bar.get(bar, 0) + 1
+            ps = sorted({n.pitch for n in g})
+            rem = _thin_hand_chord(ps, hand, max_notes, max_span)
+            if not rem:
+                continue
+            keys = {}
+            for n in g:
+                keys.setdefault(n.pitch, []).append(n.tick)
+            # the other hand's chord at this moment
+            k = _bs.bisect_left(gtick[oi], g[0].tick - win)
+            other = set()
+            while k < len(gtick[oi]) and gtick[oi][k] <= g[0].tick + win:
+                other |= {n.pitch for n in grp[oi][k]}
+                k += 1
+            cur = set(other)
+            actions = {}
+            for p in sorted(rem):
+                if p in cur:
+                    actions[p] = "delete"   # the other hand already plays this pitch
+                    continue
+                cand = cur | {p}
+                if len(cand) <= max_notes and max(cand) - min(cand) <= max_span:
+                    actions[p] = "move"
+                    cur = cand
+                else:
+                    actions[p] = "delete"
+            plan.append(dict(ti=ti, other_i=oi, hand=hand, bar=bar, chord_no=per_bar[bar],
+                             tick=g[0].tick, ps=ps, keys=keys, rem=sorted(rem),
+                             actions=actions, other_ps=other, state="pending"))
+    plan.sort(key=lambda e: (e["bar"], e["tick"], e["hand"]))
+    return plan
+
+
+def _thin_apply(song, plan, include):
+    """Edit song's tracks in place: apply every plan entry for which include(entry)
+    is true.  'move' re-homes the note in the other hand's track; 'delete' removes it."""
+    import copy as _cp
+    idx = {}
+    def _find(ti, tick, pitch):
+        if ti not in idx:
+            idx[ti] = {(n.tick, n.pitch): n for n in song.tracks[ti].notes}
+        return idx[ti].get((tick, pitch))
+    drop, add = set(), []
+    for e in plan:
+        if not include(e):
+            continue
+        oi = e["other_i"]
+        oc = 0 if e["hand"] == "L" else 1   # channel tag of the destination hand
+        for p, act in e["actions"].items():
+            if act not in ("move", "delete"):
+                continue
+            for tk in e["keys"].get(p, []):
+                n = _find(e["ti"], tk, p)
+                if n is None:
+                    continue
+                drop.add((e["ti"], tk, p))
+                if act == "move" and _find(oi, tk, p) is None:
+                    nc = _cp.copy(n)
+                    nc.channel = oc
+                    add.append((oi, nc))
+    for ti in {k[0] for k in drop} | {a[0] for a in add}:
+        song.tracks[ti].notes = [n for n in song.tracks[ti].notes if (ti, n.tick, n.pitch) not in drop]
+    for oi, nc in add:
+        song.tracks[oi].notes.append(nc)
+    for ti in {a[0] for a in add}:
+        song.tracks[ti].notes.sort(key=lambda n: n.tick)
+    return len(drop), len(add)
+
+
 class RationalizationAction:
     """Memento for a single rationalization edit (undo/redo)."""
 
@@ -16985,7 +17084,8 @@ class MidisoftStudio:
                                  parent=self.root)
 
     def _thin_chords(self):
-        """v22ze-171: optional - leave out notes one hand cannot play; hear before accepting."""
+        """v22ze-177: optional - fix chords one hand cannot play, chord by chord:
+        move a note to the other hand (keeps sounding) or delete it; hear before accepting."""
         import copy as _copy
         song = self.song
         names = [(t.name or "") for t in song.tracks]
@@ -16993,45 +17093,125 @@ class MidisoftStudio:
         lh_i = next((i for i, n in enumerate(names) if n.endswith(" (LH)")), None)
         if rh_i is None or lh_i is None:
             messagebox.showinfo("Thin Chords",
-                "Run Edit \u25b8 Separate Hands first, so the music is split into a "
+                "Run Edit ▸ Separate Hands first, so the music is split into a "
                 "right-hand part and a left-hand part.", parent=self.root)
             return
         opts = self._ask_separate_hands_options()
         if opts is None:
             return
         max_span, max_notes = opts
-        removed, report = _thin_two_hand_tracks(song, rh_i, lh_i, max_notes, max_span)
-        if not report:
+        plan = _thin_plan(song, rh_i, lh_i, max_notes, max_span)
+        if not plan:
             messagebox.showinfo("Thin Chords",
                 "Every chord can already be played by one hand of this size.\nNothing to thin.",
                 parent=self.root)
             return
-        thin_song = _copy.deepcopy(song)
-        for ti in (rh_i, lh_i):
-            thin_song.tracks[ti].notes = [
-                n for n in thin_song.tracks[ti].notes if (ti, n.tick, n.pitch) not in removed]
         mmap = song.get_measure_map()
         pv = Transport(song)  # separate player used only for listening
-
+        BG = "#0d1117"
         dlg = tk.Toplevel(self.root)
         dlg.title("Thin Chords")
-        dlg.configure(bg="#0d1117")
-        tk.Label(dlg, bg="#0d1117", fg="#58a6ff", font=("TkDefaultFont", 11, "bold"),
-                 text=f"{len(report)} chord(s) are too big for one hand").pack(padx=16, pady=(14, 2))
-        tk.Label(dlg, bg="#0d1117", fg="#8b949e", justify=tk.LEFT, font=("TkDefaultFont", 9),
-                 text="Select a line, then listen to that bar as it is or thinned.\n"
-                      "Nothing is changed until you press Accept (Undo will take it back).").pack(padx=16)
-        fr = tk.Frame(dlg, bg="#0d1117")
-        fr.pack(fill=tk.BOTH, expand=True, padx=16, pady=8)
-        sb = tk.Scrollbar(fr)
-        lb = tk.Listbox(fr, width=78, height=14, yscrollcommand=sb.set, exportselection=False,
-                        bg="#161b22", fg="white", selectbackground="#1f6feb", font=("TkFixedFont", 10))
-        sb.config(command=lb.yview)
-        lb.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        dlg.configure(bg=BG)
+        title = tk.Label(dlg, bg=BG, fg="#58a6ff", font=("TkDefaultFont", 11, "bold"))
+        title.pack(padx=16, pady=(14, 2))
+        tk.Label(dlg, bg=BG, fg="#8b949e", justify=tk.LEFT, font=("TkDefaultFont", 9),
+                 text="Y = do the change shown   N = leave that chord alone   Change… = choose per note\n"
+                      "Click a line to select it, then listen to that bar.  Nothing changes until you apply."
+                 ).pack(padx=16)
+        outer = tk.Frame(dlg, bg=BG)
+        outer.pack(fill=tk.BOTH, expand=True, padx=16, pady=8)
+        cv = tk.Canvas(outer, bg="#161b22", highlightthickness=0, width=900, height=380)
+        sb = tk.Scrollbar(outer, command=cv.yview)
+        cv.configure(yscrollcommand=sb.set)
+        cv.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         sb.pack(side=tk.LEFT, fill=tk.Y)
-        for bar, hand, nb, na, nm in report:
-            lb.insert(tk.END, f"Bar {bar:<4} {'RH' if hand == 'R' else 'LH'}  {nb} notes \u2192 {na}   leaves out: {nm}")
-        lb.selection_set(0)
+        inner = tk.Frame(cv, bg="#161b22")
+        cv.create_window((0, 0), window=inner, anchor="nw")
+        inner.bind("<Configure>", lambda e: cv.configure(scrollregion=cv.bbox("all")))
+
+        def _nm(p):
+            return NOTE_NAMES[p % 12] + str(p // 12 - 1)
+
+        sel = [0]
+        rows = []   # per entry: dict(frame, label, status)
+
+        def _describe(e):
+            hn = "RH" if e["hand"] == "R" else "LH"
+            other = "LH" if e["hand"] == "R" else "RH"
+            acts = []
+            for p in e["rem"]:
+                a = e["actions"].get(p, "delete")
+                acts.append(f"{_nm(p)} " + {"move": f"moves to {other}", "delete": "left out",
+                                            "keep": "stays"}[a])
+            left = sum(1 for p in e["rem"] if e["actions"].get(p) in ("move", "delete"))
+            return (f"Bar {e['bar']}: {hn} {len(e['ps'])} notes [chord {e['chord_no']}] "
+                    f"→ {len(e['ps']) - left} notes   (" + ", ".join(acts) + ")")
+
+        def _refresh_row(i):
+            e, r = plan[i], rows[i]
+            r["label"].config(text=_describe(e))
+            st = e["state"]
+            r["status"].config(text={"pending": "•", "yes": "✓", "no": "✗"}[st],
+                               fg={"pending": "#8b949e", "yes": "#3fb950", "no": "#f85149"}[st])
+            r["frame"].config(bg="#1f3b73" if i == sel[0] else "#161b22")
+            r["label"].config(bg="#1f3b73" if i == sel[0] else "#161b22")
+            r["status"].config(bg="#1f3b73" if i == sel[0] else "#161b22")
+
+        def _update_title():
+            n_yes = sum(1 for e in plan if e["state"] == "yes")
+            n_no = sum(1 for e in plan if e["state"] == "no")
+            n_p = len(plan) - n_yes - n_no
+            title.config(text=f"{len(plan)} chord(s) are too big for one hand   "
+                              f"(Y: {n_yes}   N: {n_no}   undecided: {n_p})")
+
+        def _select(i):
+            old = sel[0]
+            sel[0] = i
+            _refresh_row(old)
+            _refresh_row(i)
+
+        def _set(i, state):
+            plan[i]["state"] = state
+            _select(i)
+            _refresh_row(i)
+            _update_title()
+
+        def _change(i, p, act):
+            plan[i]["actions"][p] = act
+            if plan[i]["state"] == "no":
+                plan[i]["state"] = "pending"
+            _select(i)
+            _refresh_row(i)
+            _update_title()
+
+        for i, e in enumerate(plan):
+            fr = tk.Frame(inner, bg="#161b22")
+            fr.pack(fill=tk.X, pady=1)
+            st = tk.Label(fr, text="•", width=2, bg="#161b22", fg="#8b949e", font=("TkDefaultFont", 11, "bold"))
+            st.pack(side=tk.LEFT)
+            lb = tk.Label(fr, text="", anchor="w", justify=tk.LEFT, bg="#161b22", fg="white",
+                          font=("TkFixedFont", 10))
+            lb.pack(side=tk.LEFT, fill=tk.X, expand=True)
+            bs = dict(relief=tk.FLAT, padx=6, pady=1, fg="white")
+            tk.Button(fr, text="Y", command=lambda i=i: _set(i, "yes"), bg="#238636", **bs).pack(side=tk.LEFT, padx=2)
+            tk.Button(fr, text="N", command=lambda i=i: _set(i, "no"), bg="#da3633", **bs).pack(side=tk.LEFT, padx=2)
+            mb = tk.Menubutton(fr, text="Change…", relief=tk.FLAT, padx=6, pady=1, fg="white", bg="#30363d",
+                               activebackground="#484f58", activeforeground="white")
+            menu = tk.Menu(mb, tearoff=0)
+            other = "LH" if e["hand"] == "R" else "RH"
+            for p in e["rem"]:
+                sub_m = tk.Menu(menu, tearoff=0)
+                sub_m.add_command(label=f"Move to {other}", command=lambda i=i, p=p: _change(i, p, "move"))
+                sub_m.add_command(label="Leave out (delete)", command=lambda i=i, p=p: _change(i, p, "delete"))
+                sub_m.add_command(label="Keep in this hand", command=lambda i=i, p=p: _change(i, p, "keep"))
+                menu.add_cascade(label=_nm(p), menu=sub_m)
+            mb.config(menu=menu)
+            mb.pack(side=tk.LEFT, padx=(2, 6))
+            for w in (fr, lb, st):
+                w.bind("<Button-1>", lambda ev, i=i: _select(i))
+            rows.append(dict(frame=fr, label=lb, status=st))
+            _refresh_row(i)
+        _update_title()
 
         def _stop_pv():
             try:
@@ -17040,8 +17220,7 @@ class MidisoftStudio:
                 pass
 
         def _hear(which):
-            sel = lb.curselection()
-            bar = report[sel[0] if sel else 0][0]
+            bar = plan[sel[0]]["bar"]
             a = mmap[max(0, bar - 2)][1]
             b = mmap[min(bar - 1, len(mmap) - 1)][2]
             try:
@@ -17049,17 +17228,21 @@ class MidisoftStudio:
             except Exception:
                 pass
             _stop_pv()
-            pv.song = song if which == "orig" else thin_song
+            if which == "orig":
+                pv.song = song
+            else:
+                ts = _copy.deepcopy(song)
+                _thin_apply(ts, plan, lambda e: e["state"] != "no")
+                pv.song = ts
             pv.position_ticks = a
             pv._play_until_tick = b
             pv.play()
 
-        def _accept():
+        def _apply(include):
             _stop_pv()
             before = _copy.deepcopy(song.tracks)
             before_map = _copy.deepcopy(song.rationalized_measure_map)
-            for ti in (rh_i, lh_i):
-                song.tracks[ti].notes = [n for n in song.tracks[ti].notes if (ti, n.tick, n.pitch) not in removed]
+            n_drop, n_add = _thin_apply(song, plan, include)
             after = _copy.deepcopy(song.tracks)
             after_map = _copy.deepcopy(song.rationalized_measure_map)
             self._push_undo(RationalizationAction(
@@ -17069,20 +17252,24 @@ class MidisoftStudio:
             self._update_title()
             self._refresh_views()
             dlg.destroy()
-            messagebox.showinfo("Thin Chords", f"Done. {len(removed)} note position(s) left out.\n"
-                                "Use Undo to bring them back.", parent=self.root)
+            messagebox.showinfo("Thin Chords",
+                f"Done. {n_add} note(s) moved to the other hand, {n_drop - n_add} left out.\n"
+                "Use Undo to bring everything back.", parent=self.root)
 
         def _cancel():
             _stop_pv()
             dlg.destroy()
 
-        bf = tk.Frame(dlg, bg="#0d1117")
+        bf = tk.Frame(dlg, bg=BG)
         bf.pack(pady=(0, 14))
         bs = dict(relief=tk.FLAT, padx=10, pady=4, fg="white")
         tk.Button(bf, text="Hear original", command=lambda: _hear("orig"), bg="#30363d", **bs).pack(side=tk.LEFT, padx=4)
-        tk.Button(bf, text="Hear thinned", command=lambda: _hear("thin"), bg="#30363d", **bs).pack(side=tk.LEFT, padx=4)
+        tk.Button(bf, text="Hear changed", command=lambda: _hear("thin"), bg="#30363d", **bs).pack(side=tk.LEFT, padx=4)
         tk.Button(bf, text="Stop", command=_stop_pv, bg="#30363d", **bs).pack(side=tk.LEFT, padx=4)
-        tk.Button(bf, text="Accept", command=_accept, bg="#238636", **bs).pack(side=tk.LEFT, padx=(16, 4))
+        tk.Button(bf, text="Apply my Y choices", command=lambda: _apply(lambda e: e["state"] == "yes"),
+                  bg="#1f6feb", **bs).pack(side=tk.LEFT, padx=(16, 4))
+        tk.Button(bf, text="Accept all remaining", command=lambda: _apply(lambda e: e["state"] != "no"),
+                  bg="#238636", **bs).pack(side=tk.LEFT, padx=4)
         tk.Button(bf, text="Cancel", command=_cancel, bg="#6e7681", **bs).pack(side=tk.LEFT, padx=4)
         dlg.protocol("WM_DELETE_WINDOW", _cancel)
 
