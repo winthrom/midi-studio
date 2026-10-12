@@ -17084,8 +17084,9 @@ class MidisoftStudio:
                                  parent=self.root)
 
     def _thin_chords(self):
-        """v22ze-177: optional - fix chords one hand cannot play, chord by chord:
-        move a note to the other hand (keeps sounding) or delete it; hear before accepting."""
+        """v22ze-179: optional - fix chords one hand cannot play, chord by chord:
+        move a note to the other hand (keeps sounding) or delete it; hear before accepting.
+        The window stays open after Apply; fixed chords drop off the list."""
         import copy as _copy
         song = self.song
         names = [(t.name or "") for t in song.tracks]
@@ -17118,16 +17119,29 @@ class MidisoftStudio:
                  text="Y = do the change shown   N = leave that chord alone   Change… = choose per note\n"
                       "Click a line to select it, then listen to that bar.  Nothing changes until you apply."
                  ).pack(padx=16)
+        # buttons and status first, packed at the bottom, so they never scroll out of sight
+        bf = tk.Frame(dlg, bg=BG)
+        bf.pack(side=tk.BOTTOM, pady=(0, 12))
+        status = tk.Label(dlg, bg=BG, fg="#3fb950", font=("TkDefaultFont", 9), text="")
+        status.pack(side=tk.BOTTOM, pady=(0, 4))
         outer = tk.Frame(dlg, bg=BG)
-        outer.pack(fill=tk.BOTH, expand=True, padx=16, pady=8)
-        cv = tk.Canvas(outer, bg="#161b22", highlightthickness=0, width=900, height=380)
-        sb = tk.Scrollbar(outer, command=cv.yview)
+        outer.pack(side=tk.TOP, fill=tk.BOTH, expand=True, padx=16, pady=8)
+        _ch = max(200, min(380, int(dlg.winfo_screenheight() * 0.45)))
+        cv = tk.Canvas(outer, bg="#161b22", highlightthickness=0, width=900, height=_ch)
+        sb = tk.Scrollbar(outer, command=cv.yview, width=18)
         cv.configure(yscrollcommand=sb.set)
+        sb.pack(side=tk.RIGHT, fill=tk.Y)
         cv.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        sb.pack(side=tk.LEFT, fill=tk.Y)
         inner = tk.Frame(cv, bg="#161b22")
         cv.create_window((0, 0), window=inner, anchor="nw")
         inner.bind("<Configure>", lambda e: cv.configure(scrollregion=cv.bbox("all")))
+
+        def _wheel(ev):
+            d = -1 if (getattr(ev, "num", 0) == 4 or getattr(ev, "delta", 0) > 0) else 1
+            cv.yview_scroll(d * 3, "units")
+        dlg.bind("<MouseWheel>", _wheel)
+        dlg.bind("<Button-4>", _wheel)
+        dlg.bind("<Button-5>", _wheel)
 
         def _nm(p):
             return NOTE_NAMES[p % 12] + str(p // 12 - 1)
@@ -17144,25 +17158,30 @@ class MidisoftStudio:
                 acts.append(f"{_nm(p)} " + {"move": f"moves to {other}", "delete": "left out",
                                             "keep": "stays"}[a])
             left = sum(1 for p in e["rem"] if e["actions"].get(p) in ("move", "delete"))
+            _a = len(e["ps"]) - left
             return (f"Bar {e['bar']}: {hn} {len(e['ps'])} notes [chord {e['chord_no']}] "
-                    f"→ {len(e['ps']) - left} notes   (" + ", ".join(acts) + ")")
+                    f"→ {_a} note{'s' if _a != 1 else ''}   (" + ", ".join(acts) + ")")
 
         def _refresh_row(i):
+            if i >= len(plan):
+                return
             e, r = plan[i], rows[i]
-            r["label"].config(text=_describe(e))
+            bgc = "#1f3b73" if i == sel[0] else "#161b22"
+            r["label"].config(text=_describe(e), bg=bgc)
             st = e["state"]
             r["status"].config(text={"pending": "•", "yes": "✓", "no": "✗"}[st],
-                               fg={"pending": "#8b949e", "yes": "#3fb950", "no": "#f85149"}[st])
-            r["frame"].config(bg="#1f3b73" if i == sel[0] else "#161b22")
-            r["label"].config(bg="#1f3b73" if i == sel[0] else "#161b22")
-            r["status"].config(bg="#1f3b73" if i == sel[0] else "#161b22")
+                               fg={"pending": "#8b949e", "yes": "#3fb950", "no": "#f85149"}[st], bg=bgc)
+            r["frame"].config(bg=bgc)
 
         def _update_title():
             n_yes = sum(1 for e in plan if e["state"] == "yes")
             n_no = sum(1 for e in plan if e["state"] == "no")
             n_p = len(plan) - n_yes - n_no
-            title.config(text=f"{len(plan)} chord(s) are too big for one hand   "
-                              f"(Y: {n_yes}   N: {n_no}   undecided: {n_p})")
+            if not plan:
+                title.config(text="Every chord can now be played by one hand")
+            else:
+                title.config(text=f"{len(plan)} chord(s) are too big for one hand   "
+                                  f"(Y: {n_yes}   N: {n_no}   undecided: {n_p})")
 
         def _select(i):
             old = sel[0]
@@ -17178,7 +17197,7 @@ class MidisoftStudio:
 
         def _change(i, p, act):
             plan[i]["actions"][p] = act
-            # v22ze-178: a choice made here is a decision: Y, unless every note stays
+            # a choice made here is a decision: Y, unless every note stays
             plan[i]["state"] = (
                 "no" if all(plan[i]["actions"].get(q) == "keep" for q in plan[i]["rem"]) else "yes"
             )
@@ -17186,34 +17205,43 @@ class MidisoftStudio:
             _refresh_row(i)
             _update_title()
 
-        for i, e in enumerate(plan):
-            fr = tk.Frame(inner, bg="#161b22")
-            fr.pack(fill=tk.X, pady=1)
-            st = tk.Label(fr, text="•", width=2, bg="#161b22", fg="#8b949e", font=("TkDefaultFont", 11, "bold"))
-            st.pack(side=tk.LEFT)
-            lb = tk.Label(fr, text="", anchor="w", justify=tk.LEFT, bg="#161b22", fg="white",
-                          font=("TkFixedFont", 10))
-            lb.pack(side=tk.LEFT, fill=tk.X, expand=True)
-            bs = dict(relief=tk.FLAT, padx=6, pady=1, fg="white")
-            tk.Button(fr, text="Y", command=lambda i=i: _set(i, "yes"), bg="#238636", **bs).pack(side=tk.LEFT, padx=2)
-            tk.Button(fr, text="N", command=lambda i=i: _set(i, "no"), bg="#da3633", **bs).pack(side=tk.LEFT, padx=2)
-            mb = tk.Menubutton(fr, text="Change…", relief=tk.FLAT, padx=6, pady=1, fg="white", bg="#30363d",
-                               activebackground="#484f58", activeforeground="white")
-            menu = tk.Menu(mb, tearoff=0)
-            other = "LH" if e["hand"] == "R" else "RH"
-            for p in e["rem"]:
-                sub_m = tk.Menu(menu, tearoff=0)
-                sub_m.add_command(label=f"Move to {other}", command=lambda i=i, p=p: _change(i, p, "move"))
-                sub_m.add_command(label="Leave out (delete)", command=lambda i=i, p=p: _change(i, p, "delete"))
-                sub_m.add_command(label="Keep in this hand", command=lambda i=i, p=p: _change(i, p, "keep"))
-                menu.add_cascade(label=_nm(p), menu=sub_m)
-            mb.config(menu=menu)
-            mb.pack(side=tk.LEFT, padx=(2, 6))
-            for w in (fr, lb, st):
-                w.bind("<Button-1>", lambda ev, i=i: _select(i))
-            rows.append(dict(frame=fr, label=lb, status=st))
-            _refresh_row(i)
-        _update_title()
+        def _build_rows():
+            for w in inner.winfo_children():
+                w.destroy()
+            rows.clear()
+            sel[0] = min(sel[0], max(0, len(plan) - 1))
+            for i, e in enumerate(plan):
+                fr = tk.Frame(inner, bg="#161b22")
+                fr.pack(fill=tk.X, pady=1)
+                st = tk.Label(fr, text="•", width=2, bg="#161b22", fg="#8b949e",
+                              font=("TkDefaultFont", 11, "bold"))
+                st.pack(side=tk.LEFT)
+                lb = tk.Label(fr, text="", anchor="w", justify=tk.LEFT, bg="#161b22", fg="white",
+                              font=("TkFixedFont", 10))
+                lb.pack(side=tk.LEFT, fill=tk.X, expand=True)
+                bs = dict(relief=tk.FLAT, padx=6, pady=1, fg="white")
+                tk.Button(fr, text="Y", command=lambda i=i: _set(i, "yes"), bg="#238636", **bs).pack(side=tk.LEFT, padx=2)
+                tk.Button(fr, text="N", command=lambda i=i: _set(i, "no"), bg="#da3633", **bs).pack(side=tk.LEFT, padx=2)
+                mb = tk.Menubutton(fr, text="Change…", relief=tk.FLAT, padx=6, pady=1, fg="white",
+                                   bg="#30363d", activebackground="#484f58", activeforeground="white")
+                menu = tk.Menu(mb, tearoff=0)
+                other = "LH" if e["hand"] == "R" else "RH"
+                for p in e["rem"]:
+                    sub_m = tk.Menu(menu, tearoff=0)
+                    sub_m.add_command(label=f"Move to {other}", command=lambda i=i, p=p: _change(i, p, "move"))
+                    sub_m.add_command(label="Leave out (delete)", command=lambda i=i, p=p: _change(i, p, "delete"))
+                    sub_m.add_command(label="Keep in this hand", command=lambda i=i, p=p: _change(i, p, "keep"))
+                    menu.add_cascade(label=_nm(p), menu=sub_m)
+                mb.config(menu=menu)
+                mb.pack(side=tk.LEFT, padx=(2, 6))
+                for w in (fr, lb, st):
+                    w.bind("<Button-1>", lambda ev, i=i: _select(i))
+                rows.append(dict(frame=fr, label=lb, status=st))
+                _refresh_row(i)
+            _update_title()
+            cv.yview_moveto(0)
+
+        _build_rows()
 
         def _stop_pv():
             try:
@@ -17221,8 +17249,7 @@ class MidisoftStudio:
             except Exception:
                 pass
 
-        def _hear(which):
-            bar = plan[sel[0]]["bar"]
+        def _play_bar(bar, thinned, include):
             a = mmap[max(0, bar - 2)][1]
             b = mmap[min(bar - 1, len(mmap) - 1)][2]
             try:
@@ -17230,23 +17257,44 @@ class MidisoftStudio:
             except Exception:
                 pass
             _stop_pv()
-            if which == "orig":
-                pv.song = song
-            else:
+            if thinned:
                 ts = _copy.deepcopy(song)
-                _thin_apply(ts, plan, lambda e: e["state"] != "no")
+                _thin_apply(ts, plan, include)
                 pv.song = ts
+            else:
+                pv.song = song
             pv.position_ticks = a
             pv._play_until_tick = b
             pv.play()
 
+        def _hear(which):
+            if not plan:
+                return
+            _play_bar(plan[sel[0]]["bar"], which != "orig", lambda e: e["state"] != "no")
+
         def _apply(include):
             _stop_pv()
-            if not any(include(e) for e in plan):  # v22ze-178
+            chosen = [e for e in plan if include(e)]
+            if not chosen:
                 messagebox.showinfo("Thin Chords",
                     "Nothing is marked Y yet, so there is nothing to apply.\n"
-                    "Press Y on a line (or choose a note action under Change\u2026), "
+                    "Press Y on a line (or choose a note action under Change…), "
                     "or use Accept all remaining.", parent=dlg)
+                return
+            n_mv = sum(1 for e in chosen for a in e["actions"].values() if a == "move")
+            n_de = sum(1 for e in chosen for a in e["actions"].values() if a == "delete")
+            ans = messagebox.askyesnocancel("Thin Chords",
+                f"Apply the change to {len(chosen)} chord(s)?\n"
+                f"{n_mv} note(s) move to the other hand, {n_de} left out.\n\n"
+                "Yes = apply now      No = hear it first      Cancel = go back",
+                parent=dlg)
+            if ans is None:
+                return
+            if ans is False:   # preview: play the selected chord's bar (or the first chosen one) as changed
+                e0 = plan[sel[0]] if (plan and include(plan[sel[0]])) else chosen[0]
+                _play_bar(e0["bar"], True, include)
+                status.config(text=f"Playing bar {e0['bar']} with your changes.  "
+                                   "Press Apply again to accept.", fg="#d29922")
                 return
             before = _copy.deepcopy(song.tracks)
             before_map = _copy.deepcopy(song.rationalized_measure_map)
@@ -17259,17 +17307,21 @@ class MidisoftStudio:
             song.modified = True
             self._update_title()
             self._refresh_views()
-            dlg.destroy()
-            messagebox.showinfo("Thin Chords",
-                f"Done. {n_add} note(s) moved to the other hand, {n_drop - n_add} left out.\n"
-                "Use Undo to bring everything back.", parent=self.root)
+            # keep the N decisions, rebuild the list from the edited song
+            keep_no = {(e["ti"], e["tick"]) for e in plan if e["state"] == "no"}
+            plan[:] = _thin_plan(song, rh_i, lh_i, max_notes, max_span)
+            for e in plan:
+                if (e["ti"], e["tick"]) in keep_no:
+                    e["state"] = "no"
+            _build_rows()
+            status.config(text=f"Applied: {n_add} note(s) moved to the other hand, "
+                               f"{n_drop - n_add} left out.  (Edit ▸ Undo takes it back.)",
+                          fg="#3fb950")
 
         def _cancel():
             _stop_pv()
             dlg.destroy()
 
-        bf = tk.Frame(dlg, bg=BG)
-        bf.pack(pady=(0, 14))
         bs = dict(relief=tk.FLAT, padx=10, pady=4, fg="white")
         tk.Button(bf, text="Hear original", command=lambda: _hear("orig"), bg="#30363d", **bs).pack(side=tk.LEFT, padx=4)
         tk.Button(bf, text="Hear changed", command=lambda: _hear("thin"), bg="#30363d", **bs).pack(side=tk.LEFT, padx=4)
@@ -17278,7 +17330,7 @@ class MidisoftStudio:
                   bg="#1f6feb", **bs).pack(side=tk.LEFT, padx=(16, 4))
         tk.Button(bf, text="Accept all remaining", command=lambda: _apply(lambda e: e["state"] != "no"),
                   bg="#238636", **bs).pack(side=tk.LEFT, padx=4)
-        tk.Button(bf, text="Cancel", command=_cancel, bg="#6e7681", **bs).pack(side=tk.LEFT, padx=4)
+        tk.Button(bf, text="Close", command=_cancel, bg="#6e7681", **bs).pack(side=tk.LEFT, padx=4)
         dlg.protocol("WM_DELETE_WINDOW", _cancel)
 
     def _combine_tracks(self):
