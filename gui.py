@@ -3605,11 +3605,11 @@ class Song:
             if len(pitches_lh) > 1:
                 span = max(pitches_lh) - min(pitches_lh)
                 if span > MAX_SPAN:
-                    cost += (span - MAX_SPAN) * 15
+                    cost += (span - MAX_SPAN) * 40  # v22ze-173
             if len(pitches_rh) > 1:
                 span = max(pitches_rh) - min(pitches_rh)
                 if span > MAX_SPAN:
-                    cost += (span - MAX_SPAN) * 15
+                    cost += (span - MAX_SPAN) * 40  # v22ze-173
             # v22ze-164: notes this hand is still holding down take up fingers and
             # stretch the span too.  Only the EXTRA cost over the new notes alone
             # is added, so nothing is counted twice.
@@ -3624,7 +3624,7 @@ class Song:
                         _sp = (max(_P) - min(_P)) if len(_P) > 1 else 0
                         _ex = max(0, _sa - MAX_SPAN) - max(0, _sp - MAX_SPAN)
                         if _ex > 0:
-                            cost += _ex * 15
+                            cost += _ex * 40  # v22ze-173
             # Centers
             lh_c = statistics.mean(pitches_lh) if pitches_lh else prev_lh
             rh_c = statistics.mean(pitches_rh) if pitches_rh else prev_rh
