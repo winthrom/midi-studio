@@ -3550,7 +3550,23 @@ class Song:
                         continue
                 i += 1
 
-        _detect_arpeggios(q_groups)
+        # v22ze-176: groups from different source tracks that sound at the same
+        # moment are ONE chord for arpeggio detection and for the hand decision
+        def _merge_same_moment(_gl):
+            _og, _om = [], []
+            for _qi, _qg in enumerate(_gl):
+                if (
+                    _og and _qg and _og[-1]
+                    and abs(_qg[0].tick - _og[-1][0].tick) <= 2 * p["arpeggio_window"]
+                ):
+                    _og[-1] = _og[-1] + list(_qg)
+                    _om[-1].append(_qi)
+                else:
+                    _og.append(list(_qg))
+                    _om.append([_qi])
+            return _og, _om
+
+        _detect_arpeggios(_merge_same_moment(q_groups)[0])
         if _arp_groups:
             n_groups = _next_group[0]
             print(f"[rationalize] Arpeggio groups detected: {n_groups}", file=sys.stderr)
@@ -3670,9 +3686,9 @@ class Song:
                     cost += 50
                 # Extra penalty: RH notes below E3 (52) — almost always LH territory
                 if pitches_rh and min(pitches_rh) < 52:
-                    cost += 60 * sum(1 for p in pitches_rh if p < 52)
+                    cost += sum(60 + 20 * (52 - p) for p in pitches_rh if p < 52)  # v22ze-176
             elif pitches_rh and not pitches_lh:  # v22ze-168
-                cost += 60 * sum(1 for p in pitches_rh if p < 52)
+                cost += sum(60 + 20 * (52 - p) for p in pitches_rh if p < 52)  # v22ze-176
             return cost, lh_c, rh_c
 
         def _enumerate_splits(pitches):
@@ -3701,6 +3717,9 @@ class Song:
         # v22ze-164: per group, the end tick of each pitch and the latest end
         _g_ends = []
         _g_max = []
+        _dp_groups, _dp_members = _merge_same_moment(q_groups)  # v22ze-176
+        _q_orig = q_groups
+        q_groups = _dp_groups
         for _g in q_groups:
             _d = {}
             for _n in _g:
@@ -3775,7 +3794,11 @@ class Song:
 
         # Best assignment
         best = beam[0]
-        assignments = best[3]  # one (lh_set, rh_set) per chord group
+        q_groups = _q_orig  # v22ze-176
+        assignments = [None] * len(q_groups)
+        for _mem, _asg in zip(_dp_members, best[3]):
+            for _qi in _mem:
+                assignments[_qi] = _asg
         # NOTE: when _preserve_hands is True, this DP result is computed but
         # discarded — see the final assignment loop below (step 9), which
         # checks n.channel directly rather than n.pitch-in-rh_set.  Using
