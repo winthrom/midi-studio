@@ -3552,11 +3552,15 @@ class Song:
 
         # v22ze-176: groups from different source tracks that sound at the same
         # moment are ONE chord for arpeggio detection and for the hand decision
+        _n_src = len(chord_src_ids)  # v22ze-180: only the first groups have a known source track
+
         def _merge_same_moment(_gl):
             _og, _om = [], []
             for _qi, _qg in enumerate(_gl):
                 if (
                     _og and _qg and _og[-1]
+                    and _qi < _n_src and _om[-1][-1] < _n_src
+                    and chord_src_ids[_qi] != chord_src_ids[_om[-1][-1]]
                     and abs(_qg[0].tick - _og[-1][0].tick) <= 2 * p["arpeggio_window"]
                 ):
                     _og[-1] = _og[-1] + list(_qg)
