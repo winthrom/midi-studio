@@ -2427,6 +2427,16 @@ class Song:
             if hasattr(res, attr):
                 setattr(out, attr, getattr(res, attr))
         out.modified = True
+        # v22ze-181: spare notes of over-big chords go to the other hand (no sound change)
+        try:
+            _ri = next((i for i, t in enumerate(out.tracks) if t is rh), None)
+            _li = next((i for i, t in enumerate(out.tracks) if t is lh), None)
+            if _ri is not None and _li is not None and rh.notes and lh.notes:
+                _moved = _auto_move_between_hands(
+                    out, _ri, _li, int(p.get("max_notes_per_hand", 5)), int(p.get("max_span", 14)))
+                print(f"[rationalize] moved {_moved} spare note(s) to the other hand", file=sys.stderr)
+        except Exception as _exc:
+            print(f"[rationalize] auto-move skipped: {_exc}", file=sys.stderr)
         print(
             f"[rationalize] keep-sound: {len(rh.notes)} RH + {len(lh.notes)} LH notes "
             f"from {len(sel)} piano track(s); {len(self.tracks) - len(sel)} other track(s) untouched",
@@ -13727,7 +13737,10 @@ def _thin_apply(song, plan, include):
         if not include(e):
             continue
         oi = e["other_i"]
-        oc = 0 if e["hand"] == "L" else 1   # channel tag of the destination hand
+        # v22ze-181: the moved note takes the channel its new hand's notes already use
+        # (so playback does not change); if that hand has no notes yet, it keeps its own
+        _dn = song.tracks[oi].notes
+        oc = _dn[0].channel if _dn else None
         for p, act in e["actions"].items():
             if act not in ("move", "delete"):
                 continue
@@ -13738,7 +13751,8 @@ def _thin_apply(song, plan, include):
                 drop.add((e["ti"], tk, p))
                 if act == "move" and _find(oi, tk, p) is None:
                     nc = _cp.copy(n)
-                    nc.channel = oc
+                    if oc is not None:
+                        nc.channel = oc
                     add.append((oi, nc))
     for ti in {k[0] for k in drop} | {a[0] for a in add}:
         song.tracks[ti].notes = [n for n in song.tracks[ti].notes if (ti, n.tick, n.pitch) not in drop]
@@ -13747,6 +13761,32 @@ def _thin_apply(song, plan, include):
     for ti in {a[0] for a in add}:
         song.tracks[ti].notes.sort(key=lambda n: n.tick)
     return len(drop), len(add)
+
+
+def _auto_move_between_hands(song, rh_i, lh_i, max_notes, max_span):
+    """v22ze-181: move spare notes of over-big chords to the other hand when that hand can
+    play them.  Never deletes.  Returns the number of notes moved."""
+    plan = _thin_plan(song, rh_i, lh_i, max_notes, max_span)
+    todo = []
+    for e in plan:
+        acts = {}
+        for p, a in e["actions"].items():
+            acts[p] = "move" if a == "move" else "keep"
+        if any(a == "move" for a in acts.values()):
+            e["actions"] = acts
+            todo.append(e)
+    # a chain of tied notes must stay in one hand
+    def _tied(e):
+        for n in song.tracks[e["ti"]].notes:
+            if n.pitch in e["keys"] and n.tick in e["keys"][n.pitch] \
+                    and getattr(n, "articulation", "") in ("tie_predecessor", "tie_continuation"):
+                return True
+        return False
+    todo = [e for e in todo if not _tied(e)]
+    if not todo:
+        return 0
+    _d, added = _thin_apply(song, todo, lambda e: True)
+    return added
 
 
 class RationalizationAction:
