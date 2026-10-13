@@ -38,6 +38,63 @@ def _toplevel_init_stay_on_top(self, master=None, *args, **kw):
 
 if _orig_toplevel_init is not None:
     tk.Toplevel.__init__ = _toplevel_init_stay_on_top
+
+# v22ze-184: work windows wrap long text and open where they leave the score visible
+_WORK_TITLES = {
+    "Score Setup", "Rationalize Score", "Separate Hands", "Staff Type", "Song Settings",
+    "Quantize", "Key Signature", "LilyPond Export Options", "MIDI Output Device",
+}
+
+
+def _tidy_work_window(win, max_w=700, place=True):
+    try:
+        if not win.winfo_exists():
+            return
+        win.update_idletasks()
+        sw, sh = win.winfo_screenwidth(), win.winfo_screenheight()
+        wrap = max(240, min(max_w, int(sw * 0.26)))
+
+        def _walk(w):
+            for ch in w.winfo_children():
+                if isinstance(ch, (tk.Label, tk.Checkbutton, tk.Radiobutton)):
+                    try:
+                        if int(float(str(ch.cget("wraplength")) or 0)) == 0:
+                            ch.config(wraplength=wrap, justify="left")
+                    except Exception:
+                        pass
+                _walk(ch)
+        _walk(win)
+        # labels added later (a panel that fills in as you click) are wrapped on the next pass
+        win.after(1500, lambda: _tidy_work_window(win, max_w, False))
+        if not place:
+            return
+        win.update_idletasks()
+        w = max(win.winfo_reqwidth(), win.winfo_width())
+        h = max(win.winfo_reqheight(), win.winfo_height())
+        if h <= sh * 0.5:      # fits: low centre, the score above stays visible
+            x, y = max(0, (sw - w) // 2), max(0, sh - h - 70)
+        else:                  # tall: right edge
+            x, y = max(0, sw - w - 10), 30
+        win.geometry(f"+{x}+{y}")
+    except Exception:
+        pass
+
+
+_orig_wm_title = tk.Toplevel.title
+
+
+def _title_hook(self, string=None):
+    r = _orig_wm_title(self, string)
+    try:
+        if string in _WORK_TITLES and not getattr(self, "_tidy_scheduled", False):
+            self._tidy_scheduled = True
+            self.after(150, lambda w=self: _tidy_work_window(w))
+    except Exception:
+        pass
+    return r
+
+
+tk.Toplevel.title = _title_hook
 from xml.dom import minidom
 
 import mido
@@ -10058,6 +10115,34 @@ class ScoreView(tk.Frame):
         self._draw_roll_signs(c)  # v22ze-182
         self._draw_rests(c, tr, tt, bt, nm, song, mmap, ti=ti)
 
+    def _draw_accidental(self, c, x, y, kind):
+        """v22ze-184: sharp (1) / flat (-1) / natural (0) drawn from lines, centred on y
+        (the centre of the notehead it belongs to; for a flat, the centre of its bowl)."""
+        u = self.SLG
+        lw = max(1.4, u * 0.13)
+        bw = max(2.4, u * 0.30)
+        col = "#111"
+        if kind == 1:
+            xl, xr = x - u * 0.30, x + u * 0.30
+            c.create_line(xl, y - u * 0.95, xl, y + u * 1.15, fill=col, width=lw, tags="acc")
+            c.create_line(xr, y - u * 1.15, xr, y + u * 0.95, fill=col, width=lw, tags="acc")
+            for dy in (-0.42, 0.42):
+                c.create_line(x - u * 0.68, y + u * (dy + 0.20), x + u * 0.68, y + u * (dy - 0.20),
+                              fill=col, width=bw, tags="acc")
+        elif kind == 0:
+            xl, xr = x - u * 0.30, x + u * 0.30
+            c.create_line(xl, y - u * 1.05, xl, y + u * 0.60, fill=col, width=lw, tags="acc")
+            c.create_line(xr, y - u * 0.60, xr, y + u * 1.05, fill=col, width=lw, tags="acc")
+            for dy in (-0.30, 0.30):
+                c.create_line(xl, y + u * (dy + 0.12), xr, y + u * (dy - 0.12),
+                              fill=col, width=bw * 0.8, tags="acc")
+        elif kind == -1:
+            xs = x - u * 0.30
+            c.create_line(xs, y - u * 1.85, xs, y + u * 0.85, fill=col, width=lw, tags="acc")
+            c.create_line(xs, y + u * 0.85, xs + u * 0.55, y + u * 0.35, xs + u * 0.62, y - u * 0.10,
+                          xs + u * 0.28, y - u * 0.45, xs, y - u * 0.20,
+                          fill=col, width=lw * 1.4, smooth=True, tags="acc")
+
     # v22ze-182: roll signs and Thin Chords highlighting
     def _draw_roll_signs(self, c):
         """Wavy roll sign (with an arrow for the direction) left of every rolled chord."""
@@ -10078,7 +10163,14 @@ class ScoreView(tk.Frame):
             boxes = [b for b in (c.bbox(i) for i, _ in lst) if b]
             if not boxes:
                 continue
-            x = min(b[0] for b in boxes) - self.SLG * 2.4
+            xmin = min(b[0] for b in boxes)  # v22ze-184: clear of accidentals too
+            _ya, _yb = min(b[1] for b in boxes), max(b[3] for b in boxes)
+            for _it in c.find_overlapping(xmin - self.SLG * 4.5, _ya, xmin + 2, _yb):
+                if "acc" in c.gettags(_it):
+                    _bb = c.bbox(_it)
+                    if _bb:
+                        xmin = min(xmin, _bb[0])
+            x = xmin - self.SLG * 1.3
             y0 = min(b[1] for b in boxes) - 2
             y1 = max(b[3] for b in boxes) + 2
             amp = self.SLG * 0.3
@@ -11276,34 +11368,9 @@ class ScoreView(tk.Frame):
             # more lift + bold weight + larger size per direct feedback
             # against a real screenshot (noteheads were also doubled in
             # this pass, so accidentals needed to scale up to match).
-            _acc_y = y - self.SLG * 0.30
-            if show_glyph == 1:
-                c.create_text(
-                    nx - nr - 10,
-                    _acc_y,
-                    text="♯",
-                    font=("serif", int(self.SLG * 1.8), "bold"),
-                    fill="#111",
-                    anchor="center",
-                )
-            elif show_glyph == -1:
-                c.create_text(
-                    nx - nr - 10,
-                    _acc_y,
-                    text="♭",
-                    font=("serif", int(self.SLG * 1.8), "bold"),
-                    fill="#111",
-                    anchor="center",
-                )
-            elif show_glyph == 0:
-                c.create_text(
-                    nx - nr - 10,
-                    _acc_y,
-                    text="♮",
-                    font=("serif", int(self.SLG * 1.8), "bold"),
-                    fill="#111",
-                    anchor="center",
-                )
+            # v22ze-184: drawn from lines, centred exactly on the notehead centre
+            if show_glyph in (1, -1, 0):
+                self._draw_accidental(c, nx - nr - 10, y, show_glyph)
             # Notehead as proper oval (wider than tall) that doesn't touch staff lines
             # h_rad = horizontal radius (width/2), v_rad = vertical radius (height/2)
             # Scale so noteheads fit snugly between staff lines (gap of ~0.1*SLG on each side)
@@ -14886,7 +14953,10 @@ class MidisoftStudio:
         tk.Label(dlg, textvariable=suggestion_var, bg=BG, fg=BLUE).pack(padx=16, anchor="w")
 
         # Deduplicated, major-then-minor key list for the dropdown
-        all_keys = list(dict.fromkeys(_KEY_STR_MAJOR + _KEY_STR_MINOR))
+        # v22ze-184: every standard key signature (15 major, 15 minor), by sharps then flats
+        all_keys = ["C", "G", "D", "A", "E", "B", "F#", "C#", "F", "Bb", "Eb", "Ab", "Db", "Gb", "Cb",
+                    "Am", "Em", "Bm", "F#m", "C#m", "G#m", "D#m", "A#m", "Dm", "Gm", "Cm", "Fm",
+                    "Bbm", "Ebm", "Abm"]
 
         pick_var = tk.StringVar(value=current if current in all_keys else sugg_key)
         row = tk.Frame(dlg, bg=BG)
@@ -14895,6 +14965,9 @@ class MidisoftStudio:
         combo = ttk.Combobox(row, textvariable=pick_var, values=all_keys,
                               width=8, state="readonly")
         combo.pack(side=tk.LEFT, padx=(8, 0))
+        tk.Label(dlg, text="b = flat, # = sharp, m = minor.  Gb = G flat major, G#m = G sharp minor.",
+                 bg=BG, fg=MUTED, font=("TkDefaultFont", 8), wraplength=210, justify="left").pack(
+            padx=16, anchor="w")  # v22ze-184
 
         def _use_suggestion():
             pick_var.set(sugg_key)
@@ -15111,8 +15184,8 @@ class MidisoftStudio:
         status_var     = tk.StringVar(value="")
         m_bpm_var      = tk.IntVar(value=round(self.song.bpm))
 
-        _lbl(mfrm, "", fg=FG,
-             textvariable=beat_info_var).pack(fill=tk.X, pady=1)
+        _lbl(mfrm, "", fg=FG, justify=tk.LEFT, wraplength=430,
+             textvariable=beat_info_var).pack(fill=tk.X, pady=1)  # v22ze-184
         _lbl(mfrm, "", fg=MUTED,
              font=("TkDefaultFont", 8),
              textvariable=local_bpm_var).pack(fill=tk.X, pady=1)
@@ -15174,6 +15247,7 @@ class MidisoftStudio:
             # already-requested "identify which staff" feature -- this
             # turned out to be a correctness fix, not just a nice-to-have.
             per_track_lines = []
+            _empty_names = []  # v22ze-184
             worst_delta = 0.0
             any_real_leftover = False  # true only if some track has a genuine
                                         # sub-grid data error, vs. just a
@@ -15187,7 +15261,7 @@ class MidisoftStudio:
                         has_notes = True
                         latest_end = max(latest_end, n.tick + n.duration)
                 if not has_notes:
-                    per_track_lines.append(f"{(tr.name or '(untitled)').rstrip(':')}: empty")
+                    _empty_names.append((tr.name or '(untitled)').rstrip(':'))  # v22ze-184
                     continue
                 actual_ticks   = max(1, latest_end - ms)
                 expected_ticks = tpm
@@ -15221,7 +15295,10 @@ class MidisoftStudio:
                 )
 
             meas_title_var.set(f"  Measure {idx + 1}")
-            beat_info_var.set("Beat count —  " + "   |   ".join(per_track_lines))
+            if _empty_names:  # v22ze-184: one short line for all empty staves
+                _en = ", ".join(_empty_names[:2]) + (f" and {len(_empty_names) - 2} more" if len(_empty_names) > 2 else "")
+                per_track_lines.append(f"{len(_empty_names)} empty staff(s): {_en}")
+            beat_info_var.set("Beat count\n" + "\n".join(per_track_lines))
 
             # Derived local BPM still shown as a single rough estimate,
             # based on whichever track had the largest timing delta above
