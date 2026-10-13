@@ -13743,6 +13743,9 @@ def _thin_two_hand_tracks(song, rh_i, lh_i, max_notes, max_span, win=20):
 
 # v22ze-177: Thin Chords plan - one entry per chord a hand cannot play, with a
 # per-note choice of MOVE (to the other hand, keeps sounding) or DELETE.
+_ROLL_MAX_SPAN = 19  # v22ze-183: a twelfth (octave + fifth) - wider chords cannot be rolled by anyone
+
+
 def _thin_plan(song, rh_i, lh_i, max_notes, max_span, win=20):
     """Return a list of dict entries, one per chord a hand cannot play (kind 'chord') and
     one per rolled chord (kind 'roll': 4+ notes struck 20-90 ticks apart that no hand
@@ -13778,6 +13781,10 @@ def _thin_plan(song, rh_i, lh_i, max_notes, max_span, win=20):
             if not rem:
                 continue
             flagged[ti].append(g[0].tick)
+            _span = ps[-1] - ps[0]
+            _rollable = len(ps) <= max_notes and max_span < _span <= _ROLL_MAX_SPAN  # v22ze-183
+            if _rollable and all(getattr(n, "roll_id", None) for n in g):
+                continue    # already marked with a roll sign
             keys = {}
             for n in g:
                 keys.setdefault(n.pitch, []).append(n.tick)
@@ -13799,9 +13806,15 @@ def _thin_plan(song, rh_i, lh_i, max_notes, max_span, win=20):
                     cur = cand
                 else:
                     actions[p] = "delete"
-            plan.append(dict(kind="chord", ti=ti, other_i=oi, hand=hand, bar=bar,
-                             chord_no=per_bar[bar], tick=g[0].tick, ps=ps, keys=keys,
-                             rem=sorted(rem), actions=actions, other_ps=other, state="pending"))
+            ent = dict(kind="chord", ti=ti, other_i=oi, hand=hand, bar=bar,
+                       chord_no=per_bar[bar], tick=g[0].tick, ps=ps, keys=keys,
+                       rem=sorted(rem), actions=actions, other_ps=other, state="pending")
+            if _rollable:
+                # v22ze-183: 13-19 semitones, 5 notes or fewer: the proposal is a roll sign
+                # (keeps every note and tells the player what to do); thinning stays as the alternative
+                ent["alt"] = dict(rem=ent["rem"], actions=dict(ent["actions"]))
+                ent.update(kind="roll", simul=True, rem=[], actions={}, roll_id=f"{hand}{g[0].tick}")
+            plan.append(ent)
     # v22ze-182: rolled chords - notes struck one after another within ~90 ticks that
     # no hand could hold together; the cure is a roll sign, not changing notes
     for ti, oi, hand in ((rh_i, lh_i, "R"), (lh_i, rh_i, "L")):
@@ -13852,11 +13865,9 @@ def _thin_apply(song, plan, include):
         if not include(e):
             continue
         if e.get("kind") == "roll":
-            for p, tks in e["keys"].items():
-                for tk in tks:
-                    n = _find(e["ti"], tk, p)
-                    if n is not None:
-                        n.roll_id = e["roll_id"]
+            for n in song.tracks[e["ti"]].notes:   # every note at those ticks (duplicates too)
+                if n.tick in e["keys"].get(n.pitch, ()):
+                    n.roll_id = e["roll_id"]
             continue
         oi = e["other_i"]
         # v22ze-181: the moved note takes the channel its new hand's notes already use
@@ -17249,7 +17260,7 @@ class MidisoftStudio:
                                  parent=self.root)
 
     def _thin_chords(self):
-        """v22ze-182: optional - fix chords one hand cannot play, chord by chord:
+        """v22ze-183: optional - fix chords one hand cannot play, chord by chord:
         move a note to the other hand (keeps sounding) or delete it; hear before accepting.
         The window stays open after Apply; fixed chords drop off the list."""
         import copy as _copy
@@ -17329,6 +17340,10 @@ class MidisoftStudio:
 
         def _describe(e):
             hn = "RH" if e["hand"] == "R" else "LH"
+            if e.get("kind") == "roll" and e.get("simul"):
+                _sp = e["ps"][-1] - e["ps"][0]
+                return (f"Bar {e['bar']}: {hn} {len(e['ps'])} notes [chord {e['chord_no']}] spans {_sp} semitones "
+                        f"\u2192 play as roll (roll sign, notes unchanged)")
             if e.get("kind") == "roll":
                 return (f"Bar {e['bar']}: {hn} roll of {len(e['ps'])} notes [roll {e['chord_no']}] "
                         f"{_nm(e['ps'][0])}\u2013{_nm(e['ps'][-1])}  \u2192 roll sign, notes unchanged")
@@ -17388,6 +17403,24 @@ class MidisoftStudio:
             _refresh_row(i)
             _update_title()
 
+        def _toggle(i):
+            # v22ze-183: switch a wide chord between 'play as roll' and 'thin it'
+            e = plan[i]
+            if e["kind"] == "roll":
+                e["kind"] = "chord"
+                e["rem"] = list(e["alt"]["rem"])
+                e["actions"] = dict(e["alt"]["actions"])
+            else:
+                e["alt"] = dict(rem=list(e["rem"]), actions=dict(e["actions"]))
+                e["kind"] = "roll"
+                e["rem"], e["actions"] = [], {}
+            e["state"] = "pending"
+            _y = cv.yview()[0]
+            _build_rows()
+            cv.yview_moveto(_y)
+            _select(i)
+            _update_title()
+
         def _build_rows():
             for w in inner.winfo_children():
                 w.destroy()
@@ -17405,7 +17438,7 @@ class MidisoftStudio:
                 bs = dict(relief=tk.FLAT, padx=6, pady=1, fg="white")
                 tk.Button(fr, text="Y", command=lambda i=i: _set(i, "yes"), bg="#238636", **bs).pack(side=tk.LEFT, padx=2)
                 tk.Button(fr, text="N", command=lambda i=i: _set(i, "no"), bg="#da3633", **bs).pack(side=tk.LEFT, padx=2)
-                if e.get("kind") == "roll":
+                if e.get("kind") == "roll" and not e.get("simul"):
                     for w in (fr, lb, st):
                         w.bind("<Button-1>", lambda ev, i=i: _select(i))
                     rows.append(dict(frame=fr, label=lb, status=st))
@@ -17415,6 +17448,13 @@ class MidisoftStudio:
                                    bg="#30363d", activebackground="#484f58", activeforeground="white")
                 menu = tk.Menu(mb, tearoff=0)
                 other = "LH" if e["hand"] == "R" else "RH"
+                if e.get("simul"):   # v22ze-183
+                    menu.add_command(
+                        label=("Thin it instead (move / leave out)" if e["kind"] == "roll"
+                               else "Use a roll sign instead"),
+                        command=lambda i=i: _toggle(i))
+                    if e["kind"] == "chord":
+                        menu.add_separator()
                 for p in e["rem"]:
                     sub_m = tk.Menu(menu, tearoff=0)
                     sub_m.add_command(label=f"Move to {other}", command=lambda i=i, p=p: _change(i, p, "move"))
