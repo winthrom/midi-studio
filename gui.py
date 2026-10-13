@@ -1245,6 +1245,7 @@ class MidiNote:
         "spelling",
         "_orig",
         "_tie_pred_id",
+        "roll_id",  # v22ze-182: rolled-chord marker
     )
 
     def __init__(self, tick, pitch, velocity, duration, channel=0, articulation="", spelling=""):
@@ -9392,6 +9393,7 @@ class ScoreView(tk.Frame):
         # _draw_chord as it draws each notehead; consumed by
         # _ui_tick_update during playback.
         self._flash_index = []
+        self._roll_done = set()  # v22ze-182
         self._flash_ticks_only = None
         self._currently_lit = {}
         # Phase 1 (Select tool): rebuilt every redraw for the same
@@ -10053,7 +10055,86 @@ class ScoreView(tk.Frame):
         # ── Notes and rests ───────────────────────────────────────────────
         nr = max(3, int(self.SLG * 0.70))  # v22ze: was doubled to 0.88, corrected -20% per feedback
         self._draw_chords(c, tr, tt, bt, nr, song, nm, mmap, ti=ti)
+        self._draw_roll_signs(c)  # v22ze-182
         self._draw_rests(c, tr, tt, bt, nm, song, mmap, ti=ti)
+
+    # v22ze-182: roll signs and Thin Chords highlighting
+    def _draw_roll_signs(self, c):
+        """Wavy roll sign (with an arrow for the direction) left of every rolled chord."""
+        groups = {}
+        for item, n in list(self._note_hit_items.items()):
+            if isinstance(n, tuple):
+                continue
+            rid = getattr(n, "roll_id", None)
+            if rid:
+                groups.setdefault(rid, []).append((item, n))
+        done = getattr(self, "_roll_done", None)
+        if done is None:
+            done = self._roll_done = set()
+        for rid, lst in groups.items():
+            if rid in done:
+                continue
+            done.add(rid)
+            boxes = [b for b in (c.bbox(i) for i, _ in lst) if b]
+            if not boxes:
+                continue
+            x = min(b[0] for b in boxes) - self.SLG * 2.4
+            y0 = min(b[1] for b in boxes) - 2
+            y1 = max(b[3] for b in boxes) + 2
+            amp = self.SLG * 0.3
+            nseg = max(4, int((y1 - y0) / (self.SLG * 0.45)))
+            pts = []
+            for k in range(nseg + 1):
+                yy = y1 - (y1 - y0) * k / nseg
+                pts += [x + (amp if k % 2 else -amp), yy]
+            c.create_line(*pts, smooth=True, width=2, fill="#222", tags="roll")
+            ordered = sorted(lst, key=lambda t: (t[1].tick, t[1].pitch))
+            up = ordered[0][1].pitch <= ordered[-1][1].pitch
+            if up:
+                c.create_polygon(x - amp * 1.6, y0 + amp * 2.4, x + amp * 1.6, y0 + amp * 2.4, x, y0 - amp * 0.4,
+                                 fill="#222", outline="#222", tags="roll")
+            else:
+                c.create_polygon(x - amp * 1.6, y1 - amp * 2.4, x + amp * 1.6, y1 - amp * 2.4, x, y1 + amp * 0.4,
+                                 fill="#222", outline="#222", tags="roll")
+
+    def thin_highlight(self, entry):
+        """Green box round the chord (or roll) a Thin Chords line talks about, red boxes
+        round the notes that would move or go.  entry=None clears it."""
+        c = self.canvas
+        c.delete("thinhl")
+        if not entry:
+            return
+        items, red = [], []
+        for item, n in list(self._note_hit_items.items()):
+            if isinstance(n, tuple):
+                continue
+            tks = entry["keys"].get(n.pitch)
+            if tks and n.tick in tks:
+                items.append(item)
+                if n.pitch in entry.get("rem", ()):
+                    red.append(item)
+        boxes = [b for b in (c.bbox(i) for i in items) if b]
+        if not boxes:
+            return
+        x0 = min(b[0] for b in boxes) - 8
+        x1 = max(b[2] for b in boxes) + 8
+        y0 = min(b[1] for b in boxes) - 8
+        y1 = max(b[3] for b in boxes) + 8
+        c.create_rectangle(x0, y0, x1, y1, outline="#2ea043", width=3, tags="thinhl")
+        for i in red:
+            b = c.bbox(i)
+            if b:
+                c.create_rectangle(b[0] - 3, b[1] - 3, b[2] + 3, b[3] + 3, outline="#e5242b", width=3, tags="thinhl")
+        c.tag_raise("thinhl")
+        try:
+            W = c.winfo_width()
+            sr = [float(v) for v in str(c.cget("scrollregion")).split()]
+            lo = c.canvasx(0)
+            if W > 100 and len(sr) == 4 and not (lo + 60 <= x0 and x1 <= lo + W - 60):
+                target = max(sr[0], min(x0 - W / 3.0, sr[2] - W))
+                c.xview_moveto((target - sr[0]) / (sr[2] - sr[0]))
+        except Exception:
+            pass
 
     # ─── Chord-aware note drawing ────────────────────────────────────────────
 
@@ -13663,11 +13744,11 @@ def _thin_two_hand_tracks(song, rh_i, lh_i, max_notes, max_span, win=20):
 # v22ze-177: Thin Chords plan - one entry per chord a hand cannot play, with a
 # per-note choice of MOVE (to the other hand, keeps sounding) or DELETE.
 def _thin_plan(song, rh_i, lh_i, max_notes, max_span, win=20):
-    """Return a list of dict entries, one per unplayable chord:
-    ti, other_i, hand ('R'|'L'), bar, chord_no, tick, ps (all pitches), keys
-    {pitch: [ticks]}, rem (sorted pitches proposed to leave this hand),
-    actions {pitch: 'move'|'delete'}, other_ps (other hand's pitches at that
-    moment), state ('pending'|'yes'|'no')."""
+    """Return a list of dict entries, one per chord a hand cannot play (kind 'chord') and
+    one per rolled chord (kind 'roll': 4+ notes struck 20-90 ticks apart that no hand
+    could hold at once).  Keys: kind, ti, other_i, hand ('R'|'L'), bar, chord_no, tick,
+    ps (all pitches), keys {pitch: [ticks]}, rem (sorted pitches proposed to leave this
+    hand), actions {pitch: 'move'|'delete'}, other_ps, state ('pending'|'yes'|'no')."""
     import bisect as _bs
     mmap = song.get_measure_map()
     starts = [m[1] for m in mmap]
@@ -13686,6 +13767,7 @@ def _thin_plan(song, rh_i, lh_i, max_notes, max_span, win=20):
     grp = {rh_i: _groups(rh_i), lh_i: _groups(lh_i)}
     gtick = {k: [g[0].tick for g in v] for k, v in grp.items()}
     plan = []
+    flagged = {rh_i: [], lh_i: []}
     for ti, oi, hand in ((rh_i, lh_i, "R"), (lh_i, rh_i, "L")):
         per_bar = {}
         for g in grp[ti]:
@@ -13695,6 +13777,7 @@ def _thin_plan(song, rh_i, lh_i, max_notes, max_span, win=20):
             rem = _thin_hand_chord(ps, hand, max_notes, max_span)
             if not rem:
                 continue
+            flagged[ti].append(g[0].tick)
             keys = {}
             for n in g:
                 keys.setdefault(n.pitch, []).append(n.tick)
@@ -13716,16 +13799,48 @@ def _thin_plan(song, rh_i, lh_i, max_notes, max_span, win=20):
                     cur = cand
                 else:
                     actions[p] = "delete"
-            plan.append(dict(ti=ti, other_i=oi, hand=hand, bar=bar, chord_no=per_bar[bar],
-                             tick=g[0].tick, ps=ps, keys=keys, rem=sorted(rem),
-                             actions=actions, other_ps=other, state="pending"))
+            plan.append(dict(kind="chord", ti=ti, other_i=oi, hand=hand, bar=bar,
+                             chord_no=per_bar[bar], tick=g[0].tick, ps=ps, keys=keys,
+                             rem=sorted(rem), actions=actions, other_ps=other, state="pending"))
+    # v22ze-182: rolled chords - notes struck one after another within ~90 ticks that
+    # no hand could hold together; the cure is a roll sign, not changing notes
+    for ti, oi, hand in ((rh_i, lh_i, "R"), (lh_i, rh_i, "L")):
+        ns = sorted(song.tracks[ti].notes, key=lambda n: n.tick)
+        per_bar = {}
+        i = 0
+        while i < len(ns):
+            j = i
+            while (j + 1 < len(ns) and ns[j + 1].tick - ns[j].tick <= 30
+                   and ns[j + 1].tick - ns[i].tick <= 90):
+                j += 1
+            ch = ns[i:j + 1]
+            i = j + 1
+            ps = sorted({n.pitch for n in ch})
+            if (len(ps) < 4 or ch[-1].tick - ch[0].tick <= win
+                    or not (len(ps) > max_notes or ps[-1] - ps[0] > max_span)):
+                continue
+            if any(ch[0].tick <= ft <= ch[-1].tick for ft in flagged[ti]):
+                continue    # a chord inside it is already listed
+            if all(getattr(n, "roll_id", None) for n in ch):
+                continue    # already marked
+            bar = max(0, _bs.bisect_right(starts, ch[0].tick) - 1) + 1
+            per_bar[bar] = per_bar.get(bar, 0) + 1
+            keys = {}
+            for n in ch:
+                keys.setdefault(n.pitch, []).append(n.tick)
+            plan.append(dict(kind="roll", ti=ti, other_i=oi, hand=hand, bar=bar,
+                             chord_no=per_bar[bar], tick=ch[0].tick, ps=ps, keys=keys,
+                             rem=[], actions={}, other_ps=set(), state="pending",
+                             first=ch[0].pitch, last=ch[-1].pitch,
+                             roll_id=f"{hand}{ch[0].tick}"))
     plan.sort(key=lambda e: (e["bar"], e["tick"], e["hand"]))
     return plan
 
 
 def _thin_apply(song, plan, include):
     """Edit song's tracks in place: apply every plan entry for which include(entry)
-    is true.  'move' re-homes the note in the other hand's track; 'delete' removes it."""
+    is true.  'move' re-homes the note in the other hand's track; 'delete' removes it;
+    a roll entry marks its notes as one rolled chord (no note changes)."""
     import copy as _cp
     idx = {}
     def _find(ti, tick, pitch):
@@ -13736,9 +13851,15 @@ def _thin_apply(song, plan, include):
     for e in plan:
         if not include(e):
             continue
+        if e.get("kind") == "roll":
+            for p, tks in e["keys"].items():
+                for tk in tks:
+                    n = _find(e["ti"], tk, p)
+                    if n is not None:
+                        n.roll_id = e["roll_id"]
+            continue
         oi = e["other_i"]
         # v22ze-181: the moved note takes the channel its new hand's notes already use
-        # (so playback does not change); if that hand has no notes yet, it keeps its own
         _dn = song.tracks[oi].notes
         oc = _dn[0].channel if _dn else None
         for p, act in e["actions"].items():
@@ -17128,7 +17249,7 @@ class MidisoftStudio:
                                  parent=self.root)
 
     def _thin_chords(self):
-        """v22ze-179: optional - fix chords one hand cannot play, chord by chord:
+        """v22ze-182: optional - fix chords one hand cannot play, chord by chord:
         move a note to the other hand (keeps sounding) or delete it; hear before accepting.
         The window stays open after Apply; fixed chords drop off the list."""
         import copy as _copy
@@ -17159,6 +17280,10 @@ class MidisoftStudio:
         dlg.configure(bg=BG)
         title = tk.Label(dlg, bg=BG, fg="#58a6ff", font=("TkDefaultFont", 11, "bold"))
         title.pack(padx=16, pady=(14, 2))
+        tk.Label(dlg, bg=BG, fg="#d29922", justify=tk.LEFT, font=("TkDefaultFont", 9, "italic"),
+                 text="This file was recorded correctly.  These lines are places where the program's score could\n"
+                      "not show what was recorded.  Changes here affect the score only; use Hear original to\n"
+                      "compare.  Undo restores everything.").pack(padx=16, pady=(0, 4))
         tk.Label(dlg, bg=BG, fg="#8b949e", justify=tk.LEFT, font=("TkDefaultFont", 9),
                  text="Y = do the change shown   N = leave that chord alone   Change… = choose per note\n"
                       "Click a line to select it, then listen to that bar.  Nothing changes until you apply."
@@ -17190,11 +17315,23 @@ class MidisoftStudio:
         def _nm(p):
             return NOTE_NAMES[p % 12] + str(p // 12 - 1)
 
+        sv = getattr(self, "_score_view", None)
+
+        def _hl(i=None):
+            try:
+                if sv is not None:
+                    sv.thin_highlight(plan[i] if (i is not None and 0 <= i < len(plan)) else None)
+            except Exception:
+                pass
+
         sel = [0]
         rows = []   # per entry: dict(frame, label, status)
 
         def _describe(e):
             hn = "RH" if e["hand"] == "R" else "LH"
+            if e.get("kind") == "roll":
+                return (f"Bar {e['bar']}: {hn} roll of {len(e['ps'])} notes [roll {e['chord_no']}] "
+                        f"{_nm(e['ps'][0])}\u2013{_nm(e['ps'][-1])}  \u2192 roll sign, notes unchanged")
             other = "LH" if e["hand"] == "R" else "RH"
             acts = []
             for p in e["rem"]:
@@ -17221,10 +17358,11 @@ class MidisoftStudio:
             n_yes = sum(1 for e in plan if e["state"] == "yes")
             n_no = sum(1 for e in plan if e["state"] == "no")
             n_p = len(plan) - n_yes - n_no
+            n_roll = sum(1 for e in plan if e.get("kind") == "roll")
             if not plan:
                 title.config(text="Every chord can now be played by one hand")
             else:
-                title.config(text=f"{len(plan)} chord(s) are too big for one hand   "
+                title.config(text=f"{len(plan) - n_roll} chord(s) too big for one hand, {n_roll} rolled chord(s)   "
                                   f"(Y: {n_yes}   N: {n_no}   undecided: {n_p})")
 
         def _select(i):
@@ -17232,6 +17370,7 @@ class MidisoftStudio:
             sel[0] = i
             _refresh_row(old)
             _refresh_row(i)
+            _hl(i)
 
         def _set(i, state):
             plan[i]["state"] = state
@@ -17266,6 +17405,12 @@ class MidisoftStudio:
                 bs = dict(relief=tk.FLAT, padx=6, pady=1, fg="white")
                 tk.Button(fr, text="Y", command=lambda i=i: _set(i, "yes"), bg="#238636", **bs).pack(side=tk.LEFT, padx=2)
                 tk.Button(fr, text="N", command=lambda i=i: _set(i, "no"), bg="#da3633", **bs).pack(side=tk.LEFT, padx=2)
+                if e.get("kind") == "roll":
+                    for w in (fr, lb, st):
+                        w.bind("<Button-1>", lambda ev, i=i: _select(i))
+                    rows.append(dict(frame=fr, label=lb, status=st))
+                    _refresh_row(i)
+                    continue
                 mb = tk.Menubutton(fr, text="Change…", relief=tk.FLAT, padx=6, pady=1, fg="white",
                                    bg="#30363d", activebackground="#484f58", activeforeground="white")
                 menu = tk.Menu(mb, tearoff=0)
@@ -17284,6 +17429,7 @@ class MidisoftStudio:
                 _refresh_row(i)
             _update_title()
             cv.yview_moveto(0)
+            _hl(sel[0] if plan else None)
 
         _build_rows()
 
@@ -17327,9 +17473,10 @@ class MidisoftStudio:
                 return
             n_mv = sum(1 for e in chosen for a in e["actions"].values() if a == "move")
             n_de = sum(1 for e in chosen for a in e["actions"].values() if a == "delete")
+            n_rl = sum(1 for e in chosen if e.get("kind") == "roll")
             ans = messagebox.askyesnocancel("Thin Chords",
                 f"Apply the change to {len(chosen)} chord(s)?\n"
-                f"{n_mv} note(s) move to the other hand, {n_de} left out.\n\n"
+                f"{n_mv} note(s) move to the other hand, {n_de} left out, {n_rl} roll sign(s).\n\n"
                 "Yes = apply now      No = hear it first      Cancel = go back",
                 parent=dlg)
             if ans is None:
@@ -17359,11 +17506,12 @@ class MidisoftStudio:
                     e["state"] = "no"
             _build_rows()
             status.config(text=f"Applied: {n_add} note(s) moved to the other hand, "
-                               f"{n_drop - n_add} left out.  (Edit ▸ Undo takes it back.)",
+                               f"{n_drop - n_add} left out, {n_rl} roll sign(s).  (Edit ▸ Undo takes it back.)",
                           fg="#3fb950")
 
         def _cancel():
             _stop_pv()
+            _hl(None)
             dlg.destroy()
 
         bs = dict(relief=tk.FLAT, padx=10, pady=4, fg="white")
@@ -17376,6 +17524,13 @@ class MidisoftStudio:
                   bg="#238636", **bs).pack(side=tk.LEFT, padx=4)
         tk.Button(bf, text="Close", command=_cancel, bg="#6e7681", **bs).pack(side=tk.LEFT, padx=4)
         dlg.protocol("WM_DELETE_WINDOW", _cancel)
+        try:
+            dlg.update_idletasks()
+            _w, _h = dlg.winfo_reqwidth(), dlg.winfo_reqheight()
+            _sw, _sh = dlg.winfo_screenwidth(), dlg.winfo_screenheight()
+            dlg.geometry(f"+{max(0, (_sw - _w) // 2)}+{max(0, _sh - _h - 70)}")
+        except Exception:
+            pass
 
     def _combine_tracks(self):
         if len(self.song.tracks)<2:
