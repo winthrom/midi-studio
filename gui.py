@@ -57,6 +57,12 @@ def _tidy_work_window(win, max_w=700, place=True):
 
         def _walk(w):
             for ch in w.winfo_children():
+                if isinstance(ch, tk.Button):      # v22ze-187: stack the words, narrower buttons
+                    try:
+                        if int(float(str(ch.cget("wraplength")) or 0)) == 0:
+                            ch.config(wraplength=max(70, int(sw * 0.055)), justify="center")
+                    except Exception:
+                        pass
                 if isinstance(ch, (tk.Label, tk.Checkbutton, tk.Radiobutton)):
                     try:
                         if int(float(str(ch.cget("wraplength")) or 0)) == 0:
@@ -9060,6 +9066,10 @@ class ScoreView(tk.Frame):
             relief=tk.FLAT,
             padx=6,
         ).pack(side=tk.LEFT, padx=4)
+        tk.Button(t6, text="Move to Upper Staff", command=lambda: self._move_selected_staff("upper"),
+                  relief=tk.FLAT, padx=6).pack(side=tk.LEFT, padx=4)   # v22ze-187
+        tk.Button(t6, text="Move to Lower Staff", command=lambda: self._move_selected_staff("lower"),
+                  relief=tk.FLAT, padx=6).pack(side=tk.LEFT, padx=4)
         self._selection_count_lbl = tk.Label(
             t6, text="0 selected", bg=tabbg, fg="#333", font=("TkDefaultFont", 8)
         )
@@ -13117,6 +13127,51 @@ class ScoreView(tk.Frame):
             n = len(self._selection)
             lbl.configure(text=f"{n} selected")
 
+    def _move_selected_staff(self, where):
+        """v22ze-187: move the selected notes to the upper (right-hand) or lower
+        (left-hand) staff.  Pitch, timing and sound are unchanged; Undo restores."""
+        import copy as _copy
+        if not self._selection:
+            messagebox.showinfo("Move to staff", "Select notes first (Select tab: click a note, "
+                                "or drag a box around several).", parent=self.app.root)
+            return
+        song = self.app.song
+        names = [(t.name or "") for t in song.tracks]
+        rh = next((i for i, n in enumerate(names) if n.endswith(" (RH)")), None)
+        lh = next((i for i, n in enumerate(names) if n.endswith(" (LH)")), None)
+        if rh is None or lh is None:
+            messagebox.showinfo("Move to staff", "Run Edit > Separate Hands first, so there is an "
+                                "upper and a lower staff to move between.", parent=self.app.root)
+            return
+        src, dst = (lh, rh) if where == "upper" else (rh, lh)
+        sel = [n for n in song.tracks[src].notes if n in self._selection]
+        if not sel:
+            messagebox.showinfo("Move to staff", "None of the selected notes is on the "
+                                f"{'lower' if where == 'upper' else 'upper'} staff.", parent=self.app.root)
+            return
+        before = _copy.deepcopy(song.tracks)
+        before_map = _copy.deepcopy(song.rationalized_measure_map)
+        ids = {id(n) for n in sel}
+        song.tracks[src].notes = [n for n in song.tracks[src].notes if id(n) not in ids]
+        dn = song.tracks[dst].notes
+        ch = dn[0].channel if dn else None
+        for n in sel:
+            nc = _copy.copy(n)
+            if ch is not None:
+                nc.channel = ch
+            dn.append(nc)
+        dn.sort(key=lambda n: n.tick)
+        after = _copy.deepcopy(song.tracks)
+        after_map = _copy.deepcopy(song.rationalized_measure_map)
+        self.app._push_undo(RationalizationAction(
+            description=f"Move {len(sel)} note(s) to {where} staff", before_tracks=before,
+            after_tracks=after, before_map=before_map, after_map=after_map))
+        song.modified = True
+        self._selection.clear()
+        self._refresh_selection_label()
+        self.app._update_title()
+        self.app._refresh_views()
+
     def _delete_selected(self):
         if not self._selection:
             return
@@ -13439,6 +13494,12 @@ class ScoreView(tk.Frame):
                     command=lambda i=best, t=tr, tix=ti: self._del_note(t, i, tix),
                 )
 
+        if self._selection:      # v22ze-187
+            menu.add_command(label=f"Move {len(self._selection)} selected note(s) to upper staff",
+                             command=lambda: self._move_selected_staff("upper"))
+            menu.add_command(label=f"Move {len(self._selection)} selected note(s) to lower staff",
+                             command=lambda: self._move_selected_staff("lower"))
+            menu.add_separator()
         # Insert / Delete / Cut measure (all tracks)
         menu.add_command(
             label=f"Insert measure before {meas+1}",
@@ -17157,7 +17218,7 @@ class MidisoftStudio:
     def _quantize_armed_track(self):
         QuantizeDlg(self.root, self)
 
-    def _ask_separate_hands_options(self):
+    def _ask_separate_hands_options(self, thin=False):   # v22ze-187
         """v22ze-140: ask the hand size for Separate Hands.
 
         Returns (max_span_semitones, max_notes_per_hand) or None if cancelled.
@@ -17166,7 +17227,7 @@ class MidisoftStudio:
         FG = "#f0f6fc"
         MUTED = "#8b949e"
         dlg = tk.Toplevel(self.root)
-        dlg.title("Separate Hands")
+        dlg.title("Thin Chords - hand size" if thin else "Separate Hands")
         dlg.configure(bg=BG)
         dlg.resizable(False, False)
         try:
@@ -17179,8 +17240,11 @@ class MidisoftStudio:
         tk.Label(
             dlg,
             text=(
-                "Sort the piano notes into a right-hand staff and a\n"
-                "left-hand staff. The sound is not changed."
+                ("Tell Thin Chords how big a hand to plan for.\n"
+                 "It then lists the chords that hand cannot play.")
+                if thin else
+                ("Sort the piano notes into a right-hand staff and a\n"
+                 "left-hand staff. The sound is not changed.")
             ),
             bg=BG,
             fg=FG,
@@ -17224,7 +17288,7 @@ class MidisoftStudio:
         bfrm.grid(row=5, column=0, columnspan=2, pady=(14, 14))
         bs = dict(relief=tk.FLAT, padx=14, pady=5, bg="#21262d", fg=FG,
                   activebackground="#30363d", activeforeground=FG)
-        tk.Button(bfrm, text="Separate", command=_ok, **bs).pack(side=tk.LEFT, padx=6)
+        tk.Button(bfrm, text="Continue" if thin else "Separate", command=_ok, **bs).pack(side=tk.LEFT, padx=6)
         tk.Button(bfrm, text="Cancel", command=dlg.destroy, **bs).pack(side=tk.LEFT, padx=6)
         try:
             dlg.grab_set()
@@ -17349,7 +17413,7 @@ class MidisoftStudio:
                 "Run Edit ▸ Separate Hands first, so the music is split into a "
                 "right-hand part and a left-hand part.", parent=self.root)
             return
-        opts = self._ask_separate_hands_options()
+        opts = self._ask_separate_hands_options(thin=True)
         if opts is None:
             return
         max_span, max_notes = opts
