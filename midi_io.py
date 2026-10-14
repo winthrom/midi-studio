@@ -298,6 +298,13 @@ def _init_fluidsynth():
         for _drv in _drivers_to_try:
             _label = _drv or "default"
             _cand = fluidsynth.Synth(channels=16, gain=_gain)
+            if _drv == "alsa":      # v22ze-185: big buffers; tiny ones tick on many systems
+                try:
+                    _per = int(os.environ.get("MIDI_STUDIO_ALSA_PERIOD", "1024"))
+                    _cand.setting("audio.period-size", _per)
+                    _cand.setting("audio.periods", 8)
+                except Exception:
+                    pass
             try:
                 _cand.start(driver=_drv) if _drv else _cand.start()
             except Exception as _drv_exc:

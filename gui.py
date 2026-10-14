@@ -43,6 +43,7 @@ if _orig_toplevel_init is not None:
 _WORK_TITLES = {
     "Score Setup", "Rationalize Score", "Separate Hands", "Staff Type", "Song Settings",
     "Quantize", "Key Signature", "LilyPond Export Options", "MIDI Output Device",
+    "Thin Chords",
 }
 
 
@@ -69,13 +70,11 @@ def _tidy_work_window(win, max_w=700, place=True):
         if not place:
             return
         win.update_idletasks()
-        w = max(win.winfo_reqwidth(), win.winfo_width())
-        h = max(win.winfo_reqheight(), win.winfo_height())
-        if h <= sh * 0.5:      # fits: low centre, the score above stays visible
-            x, y = max(0, (sw - w) // 2), max(0, sh - h - 70)
-        else:                  # tall: right edge
-            x, y = max(0, sw - w - 10), 30
-        win.geometry(f"+{x}+{y}")
+        # v22ze-185: cap the size (lists inside scroll) and park low-centre
+        w = min(max(win.winfo_reqwidth(), win.winfo_width()), int(sw * 0.40))
+        h = min(max(win.winfo_reqheight(), win.winfo_height()), int(sh * 0.60))
+        x, y = max(0, (sw - w) // 2), max(0, sh - h - 70)
+        win.geometry(f"{w}x{h}+{x}+{y}")
     except Exception:
         pass
 
