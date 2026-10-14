@@ -303,6 +303,10 @@ def _init_fluidsynth():
                     _per = int(os.environ.get("MIDI_STUDIO_ALSA_PERIOD", "1024"))
                     _cand.setting("audio.period-size", _per)
                     _cand.setting("audio.periods", 8)
+                    _dev = os.environ.get("MIDI_STUDIO_ALSA_DEVICE")   # v22ze-186
+                    if _dev:
+                        _cand.setting("audio.alsa.device", _dev)
+                    print(f"[FluidSynth] ALSA device={_dev or 'default'} period={_per} x8", file=sys.stderr)
                 except Exception:
                     pass
             try:
