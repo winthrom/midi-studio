@@ -17442,8 +17442,19 @@ class MidisoftStudio:
         # buttons and status first, packed at the bottom, so they never scroll out of sight
         bf = tk.Frame(dlg, bg=BG)
         bf.pack(side=tk.BOTTOM, pady=(0, 12))
+        bf2 = tk.Frame(dlg, bg=BG)   # v22ze-188: accept buttons on their own row
+        bf2.pack(side=tk.BOTTOM, pady=(0, 4), before=bf)
         status = tk.Label(dlg, bg=BG, fg="#3fb950", font=("TkDefaultFont", 9), text="")
         status.pack(side=tk.BOTTOM, pady=(0, 4))
+        # v22ze-188: show roll signs and leave-out/move chords separately
+        filt = tk.StringVar(value="all")
+        fbar = tk.Frame(dlg, bg=BG)
+        fbar.pack(side=tk.TOP, anchor="w", padx=16)
+        tk.Label(fbar, text="Show:", bg=BG, fg="#8b949e").pack(side=tk.LEFT)
+        for _t, _v in (("All", "all"), ("Roll signs", "roll"), ("Leave out / move", "chord")):
+            tk.Radiobutton(fbar, text=_t, variable=filt, value=_v, bg=BG, fg="white", selectcolor="#21262d",
+                           activebackground=BG, activeforeground="white",
+                           command=lambda: _build_rows()).pack(side=tk.LEFT, padx=6)
         outer = tk.Frame(dlg, bg=BG)
         outer.pack(side=tk.TOP, fill=tk.BOTH, expand=True, padx=16, pady=8)
         _ch = max(200, min(380, int(dlg.winfo_screenheight() * 0.45)))
@@ -17566,9 +17577,11 @@ class MidisoftStudio:
                 w.destroy()
             rows.clear()
             sel[0] = min(sel[0], max(0, len(plan) - 1))
+            _show = filt.get()
             for i, e in enumerate(plan):
                 fr = tk.Frame(inner, bg="#161b22")
-                fr.pack(fill=tk.X, pady=1)
+                if _show == "all" or e.get("kind") == _show:
+                    fr.pack(fill=tk.X, pady=1)
                 st = tk.Label(fr, text="•", width=2, bg="#161b22", fg="#8b949e",
                               font=("TkDefaultFont", 11, "bold"))
                 st.pack(side=tk.LEFT)
@@ -17607,6 +17620,9 @@ class MidisoftStudio:
                     w.bind("<Button-1>", lambda ev, i=i: _select(i))
                 rows.append(dict(frame=fr, label=lb, status=st))
                 _refresh_row(i)
+            _vis = [j for j, e in enumerate(plan) if _show == "all" or e.get("kind") == _show]
+            if _vis and sel[0] not in _vis:
+                sel[0] = _vis[0]
             _update_title()
             cv.yview_moveto(0)
             _hl(sel[0] if plan else None)
@@ -17698,11 +17714,17 @@ class MidisoftStudio:
         tk.Button(bf, text="Hear original", command=lambda: _hear("orig"), bg="#30363d", **bs).pack(side=tk.LEFT, padx=4)
         tk.Button(bf, text="Hear changed", command=lambda: _hear("thin"), bg="#30363d", **bs).pack(side=tk.LEFT, padx=4)
         tk.Button(bf, text="Stop", command=_stop_pv, bg="#30363d", **bs).pack(side=tk.LEFT, padx=4)
-        tk.Button(bf, text="Apply my Y choices", command=lambda: _apply(lambda e: e["state"] == "yes"),
+        tk.Button(bf2, text="Apply my Y choices", command=lambda: _apply(lambda e: e["state"] == "yes"),
                   bg="#1f6feb", **bs).pack(side=tk.LEFT, padx=(16, 4))
-        tk.Button(bf, text="Accept all remaining", command=lambda: _apply(lambda e: e["state"] != "no"),
+        tk.Button(bf2, text="Accept all roll signs",
+                  command=lambda: _apply(lambda e: e["state"] != "no" and e.get("kind") == "roll"),
                   bg="#238636", **bs).pack(side=tk.LEFT, padx=4)
-        tk.Button(bf, text="Close", command=_cancel, bg="#6e7681", **bs).pack(side=tk.LEFT, padx=4)
+        tk.Button(bf2, text="Accept all leave-out / move",
+                  command=lambda: _apply(lambda e: e["state"] != "no" and e.get("kind") != "roll"),
+                  bg="#238636", **bs).pack(side=tk.LEFT, padx=4)
+        tk.Button(bf2, text="Accept all remaining", command=lambda: _apply(lambda e: e["state"] != "no"),
+                  bg="#238636", **bs).pack(side=tk.LEFT, padx=4)
+        tk.Button(bf2, text="Close", command=_cancel, bg="#6e7681", **bs).pack(side=tk.LEFT, padx=4)
         dlg.protocol("WM_DELETE_WINDOW", _cancel)
         try:
             dlg.update_idletasks()
