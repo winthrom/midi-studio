@@ -327,6 +327,15 @@ class TkPopupMenu(tk.Toplevel):
         x = max(0, min(x, sw - w - 4))
         y = max(0, min(y, sh - h - 4))
         self.geometry(f"+{x}+{y}")
+        # v22ze-189: tie the menu to its window and keep it above it (KDE put it behind)
+        try:
+            self.transient(self.master.winfo_toplevel())
+        except Exception:
+            pass
+        try:
+            self.attributes("-topmost", True)
+        except Exception:
+            pass
         self.deiconify()
         self.lift()
         # v22ze-76 fix: even after v22ze-75's fix (wait for the real X11
@@ -347,6 +356,9 @@ class TkPopupMenu(tk.Toplevel):
         # until this window has actually been drawn, not just mapped.
         self.update()
         self._posted = True
+        self.after(100, lambda: self.lift() if self._posted else None)   # v22ze-189
+        if os.environ.get("MIDI_STUDIO_MENU_DEBUG"):
+            print(f"[menu] shown at {x},{y} size {w}x{h} submenu={_is_submenu}", file=sys.stderr)
         # v22ze-75 fix: the previous fix (v22ze-74) deferred all input-
         # sensitive setup to after_idle(), which fixed the "flashes open
         # and immediately closes" bug MOST of the time — but after_idle()
@@ -404,8 +416,14 @@ class TkPopupMenu(tk.Toplevel):
                 tk.Toplevel.grab_release(self)
             except Exception:
                 pass
+            try:
+                self.attributes("-topmost", False)   # v22ze-189
+            except Exception:
+                pass
             self.withdraw()
             self._posted = False
+            if os.environ.get("MIDI_STUDIO_MENU_DEBUG"):
+                print("[menu] closed", file=sys.stderr)
 
     # ── tk.Menu API-compatibility shims for existing call sites ────────
     def tk_popup(self, x, y):
