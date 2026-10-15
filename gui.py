@@ -9744,6 +9744,49 @@ class ScoreView(tk.Frame):
             pass
 
     def _scroll_to(self, cx, total_w):
+        """v22ze-190: diagnostic wrapper - logs, then does exactly what it always did."""
+        _n = getattr(self, "_flog_n", 0)
+        self._flog_n = _n + 1
+        _log = _n < 20 or _n % 150 == 0
+        if not _log:
+            return self._scroll_to_impl(cx, total_w)
+        import os as _o, sys as _s, platform as _pf
+        lines = []
+        try:
+            c = self.canvas
+            raw = c.cget("scrollregion")
+            lines.append(f"#{_n} mode={getattr(self, '_follow_mode', '?')} cx={cx:.1f} W={c.winfo_width()} "
+                         f"H={c.winfo_height()} sr_type={type(raw).__name__} sr={raw!r}")
+            try:
+                parts = [float(v) for v in str(raw).split()]
+                lines.append(f"   parsed sr={parts}")
+            except Exception as e:
+                lines.append(f"   PARSE ERROR {type(e).__name__}: {e}")
+            lines.append(f"   before: xview={c.xview()} canvasx0={c.canvasx(0)}")
+        except Exception as e:
+            lines.append(f"#{_n} PRE ERROR {type(e).__name__}: {e}")
+        try:
+            r = self._scroll_to_impl(cx, total_w)
+        except Exception as e:
+            lines.append(f"   IMPL RAISED {type(e).__name__}: {e}")
+            r = None
+        try:
+            c = self.canvas
+            lines.append(f"   after:  xview={c.xview()} canvasx0={c.canvasx(0)}  "
+                         f"visible={c.canvasx(0) <= cx <= c.canvasx(0) + c.winfo_width()}")
+            if _n == 0:
+                lines.insert(0, f"python {_s.version.split()[0]} tk {c.tk.call('info', 'patchlevel')} "
+                                f"{_pf.platform()} scaling={c.tk.call('tk', 'scaling')}")
+        except Exception as e:
+            lines.append(f"   POST ERROR {type(e).__name__}: {e}")
+        try:
+            with open(_o.path.join(_o.path.expanduser("~"), "midi-studio-follow-log.txt"), "a", encoding="utf-8") as f:
+                f.write("\n".join(lines) + "\n")
+        except Exception:
+            pass
+        return r
+
+    def _scroll_to_impl(self, cx, total_w):
         """Center-lock scrolling (v22p/q).
 
         total_w is recomputed from the current song on every call (v22q fix)
