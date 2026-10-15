@@ -43,11 +43,24 @@ if _orig_toplevel_init is not None:
 _WORK_TITLES = {
     "Score Setup", "Rationalize Score", "Separate Hands", "Staff Type", "Song Settings",
     "Quantize", "Key Signature", "LilyPond Export Options", "MIDI Output Device",
-    "Thin Chords",
+    "Thin Chords", "Combine Tracks", "Thin Chords - hand size",
 }
 
 
 def _tidy_work_window(win, max_w=700, place=True):
+    try:
+        _tidy_work_window_body(win, max_w, place)
+    finally:
+        try:
+            if getattr(win, "_tidy_hidden", False) and win.winfo_exists():
+                win._tidy_hidden = False
+                win.deiconify()      # v22ze-191: appears once, already in place
+                win.lift()
+        except Exception:
+            pass
+
+
+def _tidy_work_window_body(win, max_w=700, place=True):
     try:
         if not win.winfo_exists():
             return
@@ -85,6 +98,32 @@ def _tidy_work_window(win, max_w=700, place=True):
         pass
 
 
+_orig_grab_set = tk.Misc.grab_set
+
+
+def _grab_set_safe(self, *a, **k):
+    """v22ze-191: a window that is still hidden (waiting to be placed) cannot take
+    the grab yet; try again once it is shown."""
+    try:
+        return _orig_grab_set(self, *a, **k)
+    except tk.TclError:
+        if not getattr(self, "_tidy_hidden", False):
+            raise
+        cnt = [0]
+
+        def _retry():
+            try:
+                _orig_grab_set(self)
+            except tk.TclError:
+                cnt[0] += 1
+                if cnt[0] < 30:
+                    self.after(100, _retry)
+        self.after(100, _retry)
+        return None
+
+
+tk.Misc.grab_set = _grab_set_safe
+
 _orig_wm_title = tk.Toplevel.title
 
 
@@ -93,7 +132,12 @@ def _title_hook(self, string=None):
     try:
         if string in _WORK_TITLES and not getattr(self, "_tidy_scheduled", False):
             self._tidy_scheduled = True
-            self.after(150, lambda w=self: _tidy_work_window(w))
+            self._tidy_hidden = True       # v22ze-191: stay hidden until sized and placed
+            try:
+                self.withdraw()
+            except Exception:
+                self._tidy_hidden = False
+            self.after(60, lambda w=self: _tidy_work_window(w))
     except Exception:
         pass
     return r
@@ -1326,6 +1370,7 @@ class MidiNote:
         "_orig",
         "_tie_pred_id",
         "roll_id",  # v22ze-182: rolled-chord marker
+        "orig_dur",  # v22ze-191: sounding length before a display-only tidy
     )
 
     def __init__(self, tick, pitch, velocity, duration, channel=0, articulation="", spelling=""):
@@ -1615,6 +1660,8 @@ class Song:
                     collision = (
                         any(o.tick == next_entry[1] for o in tr.notes) if next_entry else True
                     )
+                    if getattr(n, "orig_dur", None) is None:   # v22ze-191: sound stays as recorded
+                        n.orig_dur = n.duration
                     n.duration = me - n.tick
                     if not collision:
                         cont = MidiNote(
@@ -1653,6 +1700,8 @@ class Song:
                     if leftover:
                         if last_ending_notes:
                             for en in last_ending_notes:
+                                if getattr(en, "orig_dur", None) is None:   # v22ze-191
+                                    en.orig_dur = en.duration
                                 en.duration += leftover
                         else:
                             reasons.append(
@@ -1677,6 +1726,8 @@ class Song:
                 if leftover:
                     if last_ending_notes:
                         for en in last_ending_notes:
+                            if getattr(en, "orig_dur", None) is None:   # v22ze-191
+                                en.orig_dur = en.duration
                             en.duration += leftover
                     else:
                         reasons.append(
@@ -2084,29 +2135,8 @@ class Song:
                 _p = _t
         mid.tracks.append(tt)
         for tr in self.tracks:
-            # ── Merge tie-continuation notes ──────────────────────────────────
-            # Sort by tick, then for every note whose articulation is
-            # 'tie_continuation', extend the most-recent note with the same
-            # pitch so the two notes become one seamless sustain.
-            sorted_notes = sorted(tr.notes, key=lambda n: n.tick)
-            merged: list = []
-            # last_of_pitch[pitch] → index into merged[] of the open note
-            last_of_pitch: dict = {}
-            for n in sorted_notes:
-                if getattr(n, "articulation", "") == "tie_continuation":
-                    idx = last_of_pitch.get(n.pitch)
-                    if idx is not None:
-                        # Extend the predecessor to cover this continuation
-                        pred = merged[idx]
-                        pred.duration = (n.tick + n.duration) - pred.tick
-                        # Keep last_of_pitch pointing at the same slot —
-                        # further continuations chain onto the now-longer note
-                        continue
-                    # No predecessor found (shouldn't happen in well-formed data
-                    # but be safe): treat as a normal note
-                nc = _tmcopy.copy(n)
-                last_of_pitch[nc.pitch] = len(merged)
-                merged.append(nc)
+            # v22ze-191: join ties and keep recorded sounding lengths
+            merged = _sound_list(tr.notes)
 
             mt = mido.MidiTrack()
             mt.name = tr.name
@@ -6546,6 +6576,50 @@ def quantize_notes(track, tpb, div=4, strength=1.0, threshold=0):
     )
 
 
+def _is_grand_staff(song):
+    """v22ze-191: True when the file already has a right-hand and a left-hand staff
+    (two note tracks, one clearly higher), i.e. it was played and recorded that way."""
+    try:
+        import statistics as _st
+        cand = [t for t in song.tracks if len(t.notes) >= 30 and getattr(t, "channel", 0) != 9]
+        if len(cand) != 2:
+            return False
+        m = [_st.median(n.pitch for n in t.notes) for t in cand]
+        return abs(m[0] - m[1]) >= 7
+    except Exception:
+        return False
+
+
+class _SN:
+    """v22ze-191: a note as it SOUNDS (see _sound_list)."""
+    __slots__ = ("tick", "pitch", "velocity", "duration", "channel")
+
+    def __init__(self, tick, pitch, velocity, duration, channel):
+        self.tick, self.pitch, self.velocity, self.duration, self.channel = tick, pitch, velocity, duration, channel
+
+
+def _sound_list(notes):
+    """v22ze-191: the notes as they should SOUND.  Tied pieces are joined into one
+    note (a note split at a barline was being cut off at the barline when played
+    live), and a note whose length was only adjusted for the score keeps its
+    recorded sounding length (orig_dur)."""
+    out = []
+    last = {}
+    for n in sorted(notes, key=lambda n: n.tick):
+        if getattr(n, "articulation", "") == "tie_continuation":
+            i = last.get(n.pitch)
+            if i is not None:
+                p, fixed = out[i]
+                if not fixed:
+                    p.duration = n.tick + n.duration - p.tick
+                continue
+        od = getattr(n, "orig_dur", None)
+        last[n.pitch] = len(out)
+        out.append((_SN(n.tick, n.pitch, n.velocity, od if od is not None else n.duration, n.channel),
+                    od is not None))
+    return [p for p, _f in out]
+
+
 class Transport:
     def __init__(self, song: Song):
         self.song = song
@@ -6768,10 +6842,10 @@ class Transport:
             ch = tr.channel
             timeline.append((0.0, lambda c=ch, pg=tr.program: _send_raw(0xC0 | c, pg)))
             timeline.append((0.0, lambda c=ch, v=tr.volume: _send_raw(0xB0 | c, 7, v)))
-            for note in tr.notes:
+            for note in _sound_list(tr.notes):    # v22ze-191
                 if note.tick < start_t:
                     continue
-                is_tie = getattr(note, "articulation", "") == "tie_continuation"
+                is_tie = False
                 ton = t2s(note.tick)
                 toff = t2s(note.tick + note.duration)
                 # Tie continuations: suppress the re-attack so the note sounds
@@ -16664,6 +16738,8 @@ class MidisoftStudio:
     def _load_file(self,path):
         try:
             self.song=Song.from_mid(path); self.transport.song=self.song
+            self._origin_grand = _is_grand_staff(self.song)   # v22ze-191
+            self._grand_ok = False
             # v22ze-61 fix: reassigning transport.song did NOT reset
             # position_ticks/position_sec — a freshly loaded file inherited
             # whatever playback position was left over from the PREVIOUS
@@ -17279,6 +17355,23 @@ class MidisoftStudio:
     def _quantize_armed_track(self):
         QuantizeDlg(self.root, self)
 
+    def _grand_staff_guard(self, what):
+        """v22ze-191: a file already recorded on two staves is left alone unless the
+        user insists.  Returns True to go ahead."""
+        if not getattr(self, "_origin_grand", False) or getattr(self, "_grand_ok", False):
+            return True
+        leave = messagebox.askyesno(
+            what,
+            "This file was already recorded on two staves (right hand and left hand).\n\n"
+            + what + " is meant for files that began as one staff, and it can change a score "
+            "that is already right.\n\nLeave it as it is?\n\n"
+            "Yes = leave it      No = go ahead anyway",
+            parent=self.root)
+        if leave:
+            return False
+        self._grand_ok = True
+        return True
+
     def _ask_separate_hands_options(self, thin=False):   # v22ze-187
         """v22ze-140: ask the hand size for Separate Hands.
 
@@ -17382,6 +17475,8 @@ class MidisoftStudio:
             messagebox.showinfo("Separate Hands", "No tracks to separate.",
                                 parent=self.root)
             return
+        if not self._grand_staff_guard("Separate Hands"):   # v22ze-191
+            return
         _hand_opts = self._ask_separate_hands_options()  # v22ze-140
         if _hand_opts is None:
             return
@@ -17465,6 +17560,8 @@ class MidisoftStudio:
         move a note to the other hand (keeps sounding) or delete it; hear before accepting.
         The window stays open after Apply; fixed chords drop off the list."""
         import copy as _copy
+        if not self._grand_staff_guard("Thin Chords"):   # v22ze-191
+            return
         song = self.song
         names = [(t.name or "") for t in song.tracks]
         rh_i = next((i for i, n in enumerate(names) if n.endswith(" (RH)")), None)
