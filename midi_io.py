@@ -352,7 +352,10 @@ def _init_fluidsynth():
 
         # Map all 16 channels to the loaded SoundFont, bank 0, program 0
         for ch in range(16):
-            fs.program_select(ch, sfid, 0, 0)
+            if ch == 9:   # v22ze-193: percussion channel uses the drum bank
+                fs.program_select(ch, sfid, 128, 0)
+            else:
+                fs.program_select(ch, sfid, 0, 0)
 
         _fs_synth = fs
         _fs_sfid = sfid
@@ -374,7 +377,10 @@ def _fs_program_select(channel, program, bank=0):
     """Send a program-change to FluidSynth (safe no-op if not active)."""
     if _fs_active and _fs_synth and _fs_sfid is not None:
         try:
-            _fs_synth.program_select(channel, _fs_sfid, bank, program)
+            if channel == 9:   # v22ze-193
+                _fs_synth.program_select(channel, _fs_sfid, 128, program)
+            else:
+                _fs_synth.program_select(channel, _fs_sfid, bank, program)
         except Exception:
             pass
 

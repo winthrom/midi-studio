@@ -7936,8 +7936,27 @@ class MixerView(tk.Frame):
         fnt = max(7, int(9 * z))
         fnt_b = max(7, int(9 * z))
         scale_len = int(75 * z)
-        fr = tk.Frame(self, bg="#1a1a2e")
-        fr.pack(fill=tk.BOTH, expand=True, padx=4, pady=4)
+        # v22ze-193: scrollable in both directions so no strip is unreachable.
+        _cv = tk.Canvas(self, bg="#1a1a2e", highlightthickness=0)
+        _hb = tk.Scrollbar(self, orient="horizontal", command=_cv.xview)
+        _vb = tk.Scrollbar(self, orient="vertical", command=_cv.yview)
+        _cv.configure(xscrollcommand=_hb.set, yscrollcommand=_vb.set)
+        _hb.pack(side=tk.BOTTOM, fill=tk.X)
+        _vb.pack(side=tk.RIGHT, fill=tk.Y)
+        _cv.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        fr = tk.Frame(_cv, bg="#1a1a2e")
+        _fid = _cv.create_window((0, 0), window=fr, anchor="nw")
+
+        def _mx_fit(_e=None, _cv=_cv, _fr=fr, _fid=_fid):
+            try:
+                _cv.itemconfig(_fid, width=max(_cv.winfo_width(), _fr.winfo_reqwidth()),
+                               height=max(_cv.winfo_height(), _fr.winfo_reqheight()))
+                _cv.configure(scrollregion=_cv.bbox("all"))
+            except Exception:
+                pass
+
+        fr.bind("<Configure>", _mx_fit)
+        _cv.bind("<Configure>", _mx_fit)
         # v22v: use visible_tracks() so empty file-meta tracks don't clutter
         # the mixer — same filtering/renumbering as the track list panel.
         # mk_nm/mk_v/mk_m/mk_s callbacks below all close over the ORIGINAL

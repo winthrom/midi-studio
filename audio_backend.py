@@ -208,6 +208,12 @@ class FluidSynthBackend(AudioBackend):
         self._synth.cc(ch, control, value)
 
     def program(self, ch, prog, bank=0):
+        # v22ze-193: MIDI channel 10 (index 9) is percussion -> bank 128.
+        if ch == 9:
+            r = self._synth.program_select(9, self._sfid, 128, prog)
+            if r is not None and r < 0 and prog != 0:
+                self._synth.program_select(9, self._sfid, 128, 0)
+            return
         self._synth.program_select(ch, self._sfid, bank, prog)
 
     def set_master_volume(self, level: float) -> bool:
