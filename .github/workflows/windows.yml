@@ -44,9 +44,31 @@ jobs:
             if (-not $text.Contains($need)) { throw "selftest is missing: $need" }
           }
 
-      - name: Zip
+      - name: Zip (v22ze-192 clean layout with START HERE note)
         shell: pwsh
-        run: Compress-Archive -Path dist/windows/MIDI-Studio -DestinationPath MIDI-Studio-windows-x64.zip
+        run: |
+          $stage = "stage/MIDI-Studio"
+          New-Item -ItemType Directory -Force -Path stage | Out-Null
+          Copy-Item -Recurse dist/windows/MIDI-Studio $stage
+          Remove-Item "$stage/MIDI-Studio-selftest.exe"
+          $lines = @(
+            "MIDI Studio - START HERE",
+            "",
+            "Windows opened this zip file like a folder, but nothing is installed yet.",
+            "",
+            "1. Close this window. Right-click the zip file and choose 'Extract All...', then click Extract.",
+            "2. Open the new folder that appears.",
+            "3. Double-click MIDI-Studio.exe.",
+            "",
+            "Leave the _internal folder where it is; the program needs it.",
+            "",
+            "Windows may say 'Windows protected your PC' because this free program is not code-signed.",
+            "Click the small 'More info' link, then 'Run anyway'.",
+            "",
+            "Please do not run MIDI-Studio.exe from inside the zip window."
+          )
+          Set-Content -Path "$stage/START HERE.txt" -Value $lines -Encoding ascii
+          Compress-Archive -Path "$stage/*" -DestinationPath MIDI-Studio-windows-x64.zip
 
       - uses: actions/upload-artifact@v4
         with:
