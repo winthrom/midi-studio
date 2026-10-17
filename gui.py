@@ -6429,7 +6429,7 @@ class Song:
                         "    \\new PianoStaff <<\n"
                         "      \\new Staff \\with {\n"
                         '        instrumentName = #(ms-nm "' + (_pn := _ly_reg_piano(base_name))[0] + '")\n'
-                        '        shortInstrumentName = #(ms-nm "' + _pn[1] + '")\n'
+                        '        shortInstrumentName = #(ms-sn "' + _pn[1] + '")\n'
                         "      } { \\" + v_treble + " }\n"
                         "      \\new Staff { \\" + v_bass + " }\n"
                         "    >>"
@@ -6475,7 +6475,7 @@ class Song:
                         "    \\new PianoStaff <<\n"
                         "      \\new Staff \\with {\n"
                         '        instrumentName = #(ms-nm "' + (_pn := _ly_reg_piano(base_name))[0] + '")\n'
-                        '        shortInstrumentName = #(ms-nm "' + _pn[1] + '")\n'
+                        '        shortInstrumentName = #(ms-sn "' + _pn[1] + '")\n'
                         "      } { \\" + v_treble + " }\n"
                         "      \\new Staff { \\" + v_bass + " }\n"
                         "    >>"
@@ -6493,7 +6493,7 @@ class Song:
                     entry = (
                         "    \\new Staff \\with {\n"
                         '      instrumentName = #(ms-nm "' + (_sn := _ly_reg_staff(tr))[0] + '")\n'
-                        '      shortInstrumentName = #(ms-nm "' + _sn[1] + '")\n'
+                        '      shortInstrumentName = #(ms-sn "' + _sn[1] + '")\n'
                         "    } { \\" + vbase + " }"
                     )
                     score_entries.append(entry)
@@ -6501,6 +6501,7 @@ class Song:
 
             # ── Score block ───────────────────────────────────────────────
             W(f, '#(define (ms-nm s) (markup #:with-dimensions (cons 0 0) (cons 0 0) #:fontsize -2 s))')
+            W(f, '#(define (ms-sn s) (markup #:with-dimensions (cons 0 0) (cons 0 0) #:fontsize -2 #:concat (#:hspace 3 s)))')   # v22ze-197
             W(f, r"\score {")
             W(f, r"  \new StaffGroup <<")
             for entry in _ly_resolve_names(score_entries):   # v22ze-196
@@ -7957,7 +7958,7 @@ class MidiListView(tk.Toplevel):
         Sortable by column.  Read-only.
     """
 
-    COLS = ("Bar", "Tick", "Pitch", "Note", "Velocity", "Duration", "Channel")
+    COLS = ("Measure", "Tick", "Pitch", "Note", "Velocity", "Duration", "Channel")
     EV_COLS = ("Tick", "Type", "Channel", "Detail")
 
     def __init__(self, parent, app, track_idx):
@@ -7987,7 +7988,7 @@ class MidiListView(tk.Toplevel):
         tk.Button(tb, text="Refresh", command=self._reload).pack(side=tk.LEFT, padx=2)
         self._show_bar = tk.BooleanVar(value=True)
         tk.Checkbutton(
-            tb, text="Show bar", variable=self._show_bar, command=self._apply_bar_column
+            tb, text="Show measure", variable=self._show_bar, command=self._apply_bar_column
         ).pack(side=tk.LEFT, padx=6)
 
         # Populate the combobox values
@@ -8005,7 +8006,7 @@ class MidiListView(tk.Toplevel):
         self.tree = ttk.Treeview(
             notes_frame, columns=self.COLS, show="headings", selectmode="extended"
         )
-        col_widths = [50, 70, 50, 60, 70, 70, 60]
+        col_widths = [72, 70, 50, 60, 70, 70, 60]
         for col, w in zip(self.COLS, col_widths):
             self.tree.heading(col, text=col, command=lambda c=col: self._sort(c))
             self.tree.column(col, width=w, anchor="center")
@@ -8068,7 +8069,7 @@ class MidiListView(tk.Toplevel):
     def _apply_bar_column(self):
         """v22ze-159: show or hide the Bar column."""
         try:
-            cols = list(self.COLS) if self._show_bar.get() else [c for c in self.COLS if c != "Bar"]
+            cols = list(self.COLS) if self._show_bar.get() else [c for c in self.COLS if c != "Measure"]
             self.tree.configure(displaycolumns=cols)
         except Exception:
             pass
@@ -8108,7 +8109,7 @@ class MidiListView(tk.Toplevel):
     def _sort(self, col):
         tr = self.app.song.tracks[self.track_idx]
         m = {
-            "Bar": "tick",
+            "Measure": "tick",
             "Tick": "tick",
             "Pitch": "pitch",
             "Velocity": "velocity",
@@ -15246,6 +15247,7 @@ class MidisoftStudio:
             "Song Settings",
             f"Quantization: {'Off' if not self.quantize_division else '1/'+str(self.quantize_division)}\n"
             f"Grace Cleanup: {self.grace_cleanup_ms} ms"))
+        hm.add_command(label="User Guide (PDF)",command=self._open_user_guide)   # v22ze-197
         hm.add_command(label="About…",command=self._about)
         binds=[("<Control-n>",self._new),("<Control-o>",self._open),("<Control-s>",self._save),
                ("<Control-1>",self._open_score_view),("<Control-2>",self._open_piano_roll),
@@ -16727,7 +16729,7 @@ class MidisoftStudio:
             "ON: every note keeps its original start, length and velocity, "
             "pedal and other events are untouched, other instruments are not "
             "touched and the tempo is never changed. Rationalize only works "
-            "out the hands and the bars; the score tidies the display. "
+            "out the hands and the measures; the score tidies the display. "
             "OFF: the old behaviour - notes are snapped/merged/shortened so "
             "the sound changes to match the cleaned score (quantize, "
             "arpeggio and pedal settings then apply).")
@@ -17252,7 +17254,7 @@ class MidisoftStudio:
         out=(("MIDI OUT OK (FluidSynth)" if midi_io.output_label() == "FluidSynth (built-in)" else "MIDI OUT OK") if midi_io.output_ready() else "No MIDI out — run: timidity -B8,8 -Os -iA &")
         inp=" | MIDI IN OK" if midi_io.MIDI_IN_OK else ""
         self.status_var.set(f"BPM:{s.bpm}  {s.time_sig_num}/{s.time_sig_den}  "
-                            f"Tracks:{len(s.tracks)}  Bars:{bars:.0f}  TPB:{s.ticks_per_beat}  {out}{inp}")
+                            f"Tracks:{len(s.tracks)}  Measures:{bars:.0f}  TPB:{s.ticks_per_beat}  {out}{inp}")
         # Rationalization indicator
         if hasattr(self,'_ration_var'):
             if self._is_rationalized:
@@ -17645,7 +17647,7 @@ class MidisoftStudio:
 
         # Bar numbers toggle
         bar_var = tk.BooleanVar(value=True)
-        tk.Checkbutton(frm, text="Show bar numbers (at each system start)",
+        tk.Checkbutton(frm, text="Show measure numbers",
                        variable=bar_var,
                        bg=BG, fg=FG, selectcolor="#21262d",
                        activebackground=BG, activeforeground=FG,
@@ -18140,7 +18142,7 @@ class MidisoftStudio:
                 if _bad_bars:
                     _lst = sorted(_bad_bars)
                     _warn = (
-                        f"\n{len(_lst)} bar(s) hold chords that one hand of this size cannot play "
+                        f"\n{len(_lst)} measure(s) hold chords that one hand of this size cannot play "
                         f"(too many notes or too wide a stretch): "
                         + ", ".join(str(b) for b in _lst[:12])
                         + (" ..." if len(_lst) > 12 else "")
@@ -18198,7 +18200,7 @@ class MidisoftStudio:
                       "compare.  Undo restores everything.").pack(padx=16, pady=(0, 4))
         tk.Label(dlg, bg=BG, fg="#8b949e", justify=tk.LEFT, font=("TkDefaultFont", 9),
                  text="Y = do the change shown   N = leave that chord alone   Change… = choose per note\n"
-                      "Click a line to select it, then listen to that bar.  Nothing changes until you apply."
+                      "Click a line to select it, then listen to that measure.  Nothing changes until you apply."
                  ).pack(padx=16)
         # buttons and status first, packed at the bottom, so they never scroll out of sight
         bf = tk.Frame(dlg, bg=BG)
@@ -18254,10 +18256,10 @@ class MidisoftStudio:
             hn = "RH" if e["hand"] == "R" else "LH"
             if e.get("kind") == "roll" and e.get("simul"):
                 _sp = e["ps"][-1] - e["ps"][0]
-                return (f"Bar {e['bar']}: {hn} {len(e['ps'])} notes [chord {e['chord_no']}] spans {_sp} semitones "
+                return (f"Measure {e['bar']}: {hn} {len(e['ps'])} notes [chord {e['chord_no']}] spans {_sp} semitones "
                         f"\u2192 play as roll (roll sign, notes unchanged)")
             if e.get("kind") == "roll":
-                return (f"Bar {e['bar']}: {hn} roll of {len(e['ps'])} notes [roll {e['chord_no']}] "
+                return (f"Measure {e['bar']}: {hn} roll of {len(e['ps'])} notes [roll {e['chord_no']}] "
                         f"{_nm(e['ps'][0])}\u2013{_nm(e['ps'][-1])}  \u2192 roll sign, notes unchanged")
             other = "LH" if e["hand"] == "R" else "RH"
             acts = []
@@ -18267,7 +18269,7 @@ class MidisoftStudio:
                                             "keep": "stays"}[a])
             left = sum(1 for p in e["rem"] if e["actions"].get(p) in ("move", "delete"))
             _a = len(e["ps"]) - left
-            return (f"Bar {e['bar']}: {hn} {len(e['ps'])} notes [chord {e['chord_no']}] "
+            return (f"Measure {e['bar']}: {hn} {len(e['ps'])} notes [chord {e['chord_no']}] "
                     f"→ {_a} note{'s' if _a != 1 else ''}   (" + ", ".join(acts) + ")")
 
         def _refresh_row(i):
@@ -18441,7 +18443,7 @@ class MidisoftStudio:
             if ans is False:   # preview: play the selected chord's bar (or the first chosen one) as changed
                 e0 = plan[sel[0]] if (plan and include(plan[sel[0]])) else chosen[0]
                 _play_bar(e0["bar"], True, include)
-                status.config(text=f"Playing bar {e0['bar']} with your changes.  "
+                status.config(text=f"Playing measure {e0['bar']} with your changes.  "
                                    "Press Apply again to accept.", fg="#d29922")
                 return
             before = _copy.deepcopy(song.tracks)
@@ -18883,6 +18885,31 @@ class MidisoftStudio:
             + ("\n\nTip: run  pkill timidity && timidity -B8,8 -Os -iA &\n"
                "to ensure only one TiMidity instance is active."
                if sys.platform.startswith("linux") else ""),parent=self.root)
+
+    def _open_user_guide(self):
+        # v22ze-197: Help > User Guide - the PDF next to the program, else the online copy
+        import subprocess, webbrowser
+        name = "MIDI-Studio-User-Guide.pdf"
+        here = os.path.dirname(os.path.abspath(__file__))
+        dirs = []
+        if getattr(sys, "frozen", False):
+            dirs.append(os.path.dirname(sys.executable))
+        if getattr(sys, "_MEIPASS", None):
+            dirs.append(sys._MEIPASS)
+        dirs += [here, os.path.join(here, "docs"), os.path.join(os.path.dirname(here), "docs")]
+        path = next((os.path.join(d, name) for d in dirs if os.path.isfile(os.path.join(d, name))), None)
+        if path:
+            try:
+                if sys.platform == "win32":
+                    os.startfile(path)
+                elif sys.platform == "darwin":
+                    subprocess.Popen(["open", path])
+                else:
+                    subprocess.Popen(["xdg-open", path])
+                return
+            except Exception:
+                pass
+        webbrowser.open("https://github.com/winthrom/midi-studio/blob/main/docs/MIDI-Studio-User-Guide.pdf")
 
     def _about(self):
         import webbrowser
