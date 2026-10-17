@@ -51,6 +51,7 @@ jobs:
           New-Item -ItemType Directory -Force -Path stage | Out-Null
           Copy-Item -Recurse dist/windows/MIDI-Studio $stage
           Remove-Item "$stage/MIDI-Studio-selftest.exe"
+          Copy-Item docs/MIDI-Studio-User-Guide.pdf $stage
           $lines = @(
             "MIDI Studio - START HERE",
             "",
@@ -62,6 +63,7 @@ jobs:
             "3. Double-click MIDI-Studio.exe.",
             "",
             "Leave the _internal folder where it is; the program needs it.",
+            "The User Guide (MIDI-Studio-User-Guide.pdf) is in this folder too.",
             "",
             "Windows may say 'Windows protected your PC' because this free program is not code-signed.",
             "Click the small 'More info' link, then 'Run anyway'.",

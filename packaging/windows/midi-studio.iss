@@ -29,9 +29,11 @@ Name: "desktopicon"; Description: "Create a &desktop icon"; GroupDescription: "I
 
 [Files]
 Source: "..\..\dist\windows\MIDI-Studio\*"; DestDir: "{app}"; Excludes: "MIDI-Studio-selftest.exe"; Flags: recursesubdirs createallsubdirs ignoreversion
+Source: "..\..\docs\MIDI-Studio-User-Guide.pdf"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
 Name: "{group}\MIDI Studio"; Filename: "{app}\MIDI-Studio.exe"
+Name: "{group}\MIDI Studio User Guide"; Filename: "{app}\MIDI-Studio-User-Guide.pdf"
 Name: "{group}\Uninstall MIDI Studio"; Filename: "{uninstallexe}"
 Name: "{autodesktop}\MIDI Studio"; Filename: "{app}\MIDI-Studio.exe"; Tasks: desktopicon
 

@@ -43,7 +43,7 @@ if _orig_toplevel_init is not None:
 _WORK_TITLES = {
     "Score Setup", "Rationalize Score", "Separate Hands", "Staff Type", "Song Settings",
     "Quantize", "Key Signature", "LilyPond Export Options", "MIDI Output Device",
-    "Thin Chords", "Combine Tracks", "Thin Chords - hand size",
+    "Fix Chords", "Combine Tracks", "Fix Chords - hand size",
 }
 
 
@@ -869,21 +869,146 @@ def _ly_missing_dialog(root):
     return result[0]
 
 
-# ── v22ze-195: instrument names for the printed score ────────────────────────
-# A conductor expects every staff labelled, with a short name on later systems.
-# Names the user typed are used as typed.  Default labels ("Track 3", "Ch 1 - X")
-# become the instrument name; the drum channel becomes "Drums".
-_LY_SHORT = {
-    "drums": "Dr.", "violin": "Vln.", "viola": "Vla.", "cello": "Vc.",
-    "contrabass": "Cb.", "flute": "Fl.", "piccolo": "Picc.", "oboe": "Ob.",
-    "english horn": "E.H.", "clarinet": "Cl.", "bassoon": "Bn.", "trumpet": "Tpt.",
-    "trombone": "Tbn.", "french horn": "Hn.", "tuba": "Tba.", "harp": "Hp.",
-    "timpani": "Timp.", "voice": "Vo.", "choir aahs": "Ch.", "string ensemble 1": "Str.",
-    "string ensemble 2": "Str.", "alto sax": "A. Sax.", "tenor sax": "T. Sax.",
-    "soprano sax": "S. Sax.", "baritone sax": "B. Sax.", "finger bass": "E. Bass",
-    "pick bass": "E. Bass", "fretless bass": "E. Bass", "acoustic bass": "Bass",
-    "synth bass 1": "Syn. Bass", "synth bass 2": "Syn. Bass",
-}
+# ── v22ze-196: instrument names for the printed score ────────────────────────
+# Names sit in small print ABOVE each staff at the left margin (full name on the
+# first system, short name on later ones).  Default labels ("Track 3", "Ch 1 - X")
+# become the instrument; the drum channel becomes "Drums".  Names the user typed
+# are used as typed.  Two staves with the same name are numbered (Violin 1 / 2).
+_GM_SHORT = [
+    "Pno.",
+    "Br. Pno.",
+    "El. Gr.",
+    "H-t. Pno.",
+    "E. Pno. 1",
+    "E. Pno. 2",
+    "Hpschd.",
+    "Clav.",
+    "Cel.",
+    "Glock.",
+    "Mus. Bx.",
+    "Vib.",
+    "Mba.",
+    "Xyl.",
+    "Tub. B.",
+    "Dulc.",
+    "Dr. Org.",
+    "Pc. Org.",
+    "Rk. Org.",
+    "Org.",
+    "Rd. Org.",
+    "Acc.",
+    "Harm.",
+    "Tg. Acc.",
+    "Nyl. Gtr.",
+    "Stl. Gtr.",
+    "Jz. Gtr.",
+    "Cl. Gtr.",
+    "Mt. Gtr.",
+    "OD Gtr.",
+    "Dist. Gtr.",
+    "Gtr. Hm.",
+    "Ac. Bs.",
+    "Fng. Bs.",
+    "Pck. Bs.",
+    "Frl. Bs.",
+    "Slp. Bs. 1",
+    "Slp. Bs. 2",
+    "Syn. Bs. 1",
+    "Syn. Bs. 2",
+    "Vln.",
+    "Vla.",
+    "Vc.",
+    "Cb.",
+    "Trem. Str.",
+    "Pizz. Str.",
+    "Hp.",
+    "Tmp.",
+    "Str. 1",
+    "Str. 2",
+    "Syn. Str. 1",
+    "Syn. Str. 2",
+    "Ch. Aah",
+    "Vo. Ooh",
+    "Syn. Vo.",
+    "Orch. Hit",
+    "Tpt.",
+    "Tbn.",
+    "Tba.",
+    "Mt. Tpt.",
+    "Hn.",
+    "Brass",
+    "Syn. Br. 1",
+    "Syn. Br. 2",
+    "S. Sax.",
+    "A. Sax.",
+    "T. Sax.",
+    "B. Sax.",
+    "Ob.",
+    "E.H.",
+    "Bn.",
+    "Cl.",
+    "Picc.",
+    "Fl.",
+    "Rec.",
+    "Pan Fl.",
+    "Bt. Blw.",
+    "Shak.",
+    "Whis.",
+    "Oc.",
+    "Sq. Ld.",
+    "Saw Ld.",
+    "Cal. Ld.",
+    "Chf. Ld.",
+    "Chr. Ld.",
+    "Vo. Ld.",
+    "5th Ld.",
+    "Bs.+Ld.",
+    "NA Pad",
+    "Wm. Pad",
+    "Ply. Pad",
+    "Ch. Pad",
+    "Bw. Pad",
+    "Mtl. Pad",
+    "Halo Pad",
+    "Swp. Pad",
+    "Rain FX",
+    "Snd. FX",
+    "Cry. FX",
+    "Atm. FX",
+    "Brt. FX",
+    "Gob. FX",
+    "Ech. FX",
+    "SciFi FX",
+    "Sit.",
+    "Bj.",
+    "Sham.",
+    "Koto",
+    "Kal.",
+    "Bgp.",
+    "Fid.",
+    "Shan.",
+    "Tnk. Bl.",
+    "Ago.",
+    "Stl. Dr.",
+    "Wd. Blk.",
+    "Taiko",
+    "Mel. Tom",
+    "Syn. Dr.",
+    "Rev. Cym.",
+    "Fret Ns.",
+    "Br. Ns.",
+    "Shore",
+    "Bird",
+    "Tel.",
+    "Heli.",
+    "Appl.",
+    "Shot"
+]
+_LY_REG = []
+
+
+def _ly_reg_reset():
+    del _LY_REG[:]
 
 
 def _ly_esc(s):
@@ -894,8 +1019,14 @@ def _ly_abbrev(name):
     import re as _re
     base = _re.sub(r"\s*\(.*?\)", "", name or "").strip()
     low = base.lower()
-    if low in _LY_SHORT:
-        return _LY_SHORT[low]
+    if low == "drums":
+        return "Dr."
+    try:
+        for i, n in enumerate(GM_INSTRUMENTS):
+            if n.lower() == low:
+                return _GM_SHORT[i]
+    except Exception:
+        pass
     if "piano" in low:
         return "Pno."
     words = base.split()
@@ -916,7 +1047,7 @@ def _ly_generic_name(nm):
 
 
 def _ly_staff_names(tr):
-    # (full, short) instrument names for a track, already escaped for LilyPond.
+    # (full, short) instrument names for a track, escaped for LilyPond.
     import re as _re
     nm = (getattr(tr, "name", "") or "").strip().rstrip(":").strip()
     m = _re.match(r"^Ch\s*\d+\s*-\s*(.+)$", nm, _re.I)
@@ -942,6 +1073,37 @@ def _ly_piano_names(base_name):
     if _ly_generic_name(nm):
         nm = "Piano"
     return _ly_esc(nm), _ly_esc(_ly_abbrev(nm))
+
+
+def _ly_reg(full, short):
+    i = len(_LY_REG)
+    _LY_REG.append((full, short))
+    return "@@LYN%dF@@" % i, "@@LYN%dS@@" % i
+
+
+def _ly_reg_staff(tr):
+    return _ly_reg(*_ly_staff_names(tr))
+
+
+def _ly_reg_piano(base_name):
+    return _ly_reg(*_ly_piano_names(base_name))
+
+
+def _ly_resolve_names(entries):
+    # Replace the name tokens; staves that share a full name get numbers.
+    total = {}
+    for full, _s in _LY_REG:
+        total[full] = total.get(full, 0) + 1
+    seen = {}
+    out = list(entries)
+    for i, (full, short) in enumerate(_LY_REG):
+        if total[full] > 1:
+            seen[full] = seen.get(full, 0) + 1
+            f2, s2 = "%s %d" % (full, seen[full]), "%s %d" % (short, seen[full])
+        else:
+            f2, s2 = full, short
+        out = [e.replace("@@LYN%dF@@" % i, f2).replace("@@LYN%dS@@" % i, s2) for e in out]
+    return out
 
 
 def _lilypond_version_string():
@@ -5674,7 +5836,8 @@ class Song:
             return "bass" if median < 57 else "treble"
 
         def is_piano(tr):
-            return 0 <= tr.program <= 7
+            # v22ze-196: the drum channel is never a piano
+            return getattr(tr, 'channel', 0) != 9 and 0 <= tr.program <= 7
 
         def analyze_velocity(notes):
             """Analyze velocity distribution in notes.
@@ -6115,7 +6278,7 @@ class Song:
             # system-system-spacing controls whitespace between systems on a page
             W(f, r"\paper {")
             W(f, r'  #(set-paper-size "letter")')
-            W(f, f"  indent           = {_dynamic_indent_in:.2f}\\in")
+            W(f, r"  indent           = 0\in")   # v22ze-196: names sit above the staff
             W(f, r"  short-indent     = 0\in")
             W(f, r"  left-margin      = 0.75\in")
             W(f, r"  right-margin     = 0.75\in")
@@ -6215,6 +6378,7 @@ class Song:
                 return stripped if stripped else name
 
             score_entries = []
+            _ly_reg_reset()   # v22ze-196
             # v22x: filter out tracks with no notes before generating any
             # staves.  Without this, every empty metadata track in a MIDI
             # file (a "Pedal" track with only CC64 events and no notes, a
@@ -6263,9 +6427,10 @@ class Song:
                     write_voice(f, v_bass, notes_lh, "bass", mmap)
                     entry = (
                         "    \\new PianoStaff <<\n"
-                        '      \\set PianoStaff.instrumentName = #"' + _ly_piano_names(base_name)[0] + '"\n'
-                        '      \\set PianoStaff.shortInstrumentName = #"' + _ly_piano_names(base_name)[1] + '"\n'
-                        "      \\new Staff { \\" + v_treble + " }\n"
+                        "      \\new Staff \\with {\n"
+                        '        instrumentName = #(ms-nm "' + (_pn := _ly_reg_piano(base_name))[0] + '")\n'
+                        '        shortInstrumentName = #(ms-nm "' + _pn[1] + '")\n'
+                        "      } { \\" + v_treble + " }\n"
                         "      \\new Staff { \\" + v_bass + " }\n"
                         "    >>"
                     )
@@ -6308,9 +6473,10 @@ class Song:
                     write_voice(f, v_bass, b_notes, "bass", mmap)
                     entry = (
                         "    \\new PianoStaff <<\n"
-                        '      \\set PianoStaff.instrumentName = #"' + _ly_piano_names(base_name)[0] + '"\n'
-                        '      \\set PianoStaff.shortInstrumentName = #"' + _ly_piano_names(base_name)[1] + '"\n'
-                        "      \\new Staff { \\" + v_treble + " }\n"
+                        "      \\new Staff \\with {\n"
+                        '        instrumentName = #(ms-nm "' + (_pn := _ly_reg_piano(base_name))[0] + '")\n'
+                        '        shortInstrumentName = #(ms-nm "' + _pn[1] + '")\n'
+                        "      } { \\" + v_treble + " }\n"
                         "      \\new Staff { \\" + v_bass + " }\n"
                         "    >>"
                     )
@@ -6326,17 +6492,18 @@ class Song:
                     write_voice(f, vbase, notes, clef, mmap, _density_map, emit_spacing=True)
                     entry = (
                         "    \\new Staff \\with {\n"
-                        '      instrumentName = #"' + _ly_staff_names(tr)[0] + '"\n'
-                        '      shortInstrumentName = #"' + _ly_staff_names(tr)[1] + '"\n'
+                        '      instrumentName = #(ms-nm "' + (_sn := _ly_reg_staff(tr))[0] + '")\n'
+                        '      shortInstrumentName = #(ms-nm "' + _sn[1] + '")\n'
                         "    } { \\" + vbase + " }"
                     )
                     score_entries.append(entry)
                     ti += 1
 
             # ── Score block ───────────────────────────────────────────────
+            W(f, '#(define (ms-nm s) (markup #:with-dimensions (cons 0 0) (cons 0 0) #:fontsize -2 s))')
             W(f, r"\score {")
             W(f, r"  \new StaffGroup <<")
-            for entry in score_entries:
+            for entry in _ly_resolve_names(score_entries):   # v22ze-196
                 W(f, entry)
             W(f, r"  >>")
             W(f, r"  \layout {")
@@ -6351,6 +6518,7 @@ class Song:
             # for sparse ones.  Kept modest since per-measure values should
             # cover virtually every measure in practice.
             W(f, r"      \override SpacingSpanner.spacing-increment = #1.4")
+            W(f, r"      \override MetronomeMark.extra-offset = #'(0 . 2.6)")   # v22ze-196: clear of the name
             # v22z(2): show EVERY bar number, not just system starts.
             # Previously only the first measure of each system was numbered
             # — correct, standard engraving practice, but combined with
@@ -6364,6 +6532,11 @@ class Song:
                 W(f, r"      barNumberVisibility = #all-bar-numbers-visible")
             else:
                 W(f, r'      \remove "Bar_number_engraver"')
+            W(f, r"    }")
+            W(f, r"    \context {")
+            W(f, r"      \Staff")
+            W(f, r"      \override InstrumentName.padding = #0")
+            W(f, r"      \override InstrumentName.extra-offset = #'(0.5 . 4.2)")
             W(f, r"    }")
             W(f, r"    \context {")
             W(f, r"      \StaffGroup")
@@ -10739,7 +10912,7 @@ class ScoreView(tk.Frame):
                           xs + u * 0.28, y - u * 0.45, xs, y - u * 0.20,
                           fill=col, width=lw * 1.4, smooth=True, tags="acc")
 
-    # v22ze-182: roll signs and Thin Chords highlighting
+    # v22ze-182: roll signs and Fix Chords highlighting
     def _draw_roll_signs(self, c):
         """Wavy roll sign (with an arrow for the direction) left of every rolled chord."""
         groups = {}
@@ -10786,7 +10959,7 @@ class ScoreView(tk.Frame):
                                  fill="#222", outline="#222", tags="roll")
 
     def thin_highlight(self, entry):
-        """Green box round the chord (or roll) a Thin Chords line talks about, red boxes
+        """Green box round the chord (or roll) a Fix Chords line talks about, red boxes
         round the notes that would move or go.  entry=None clears it."""
         c = self.canvas
         c.delete("thinhl")
@@ -14400,7 +14573,7 @@ def _tt(widget, text, delay=500):
 import copy as _copy
 
 
-# v22ze-171: chord thinning (used by Edit > Thin Chords...)
+# v22ze-171: chord thinning (used by Edit > Fix Chords...)
 def _thin_hand_chord(pitches, hand, max_notes, max_span):
     """Return the set of pitches to leave out so one hand can play the chord.
     hand 'R': the top note is kept (melody); hand 'L': the bottom note is kept (bass)."""
@@ -14455,7 +14628,7 @@ def _thin_two_hand_tracks(song, rh_i, lh_i, max_notes, max_span, win=20):
     return removed_keys, report
 
 
-# v22ze-177: Thin Chords plan - one entry per chord a hand cannot play, with a
+# v22ze-177: Fix Chords plan - one entry per chord a hand cannot play, with a
 # per-note choice of MOVE (to the other hand, keeps sounding) or DELETE.
 _ROLL_MAX_SPAN = 19  # v22ze-183: a twelfth (octave + fifth) - wider chords cannot be rolled by anyone
 
@@ -14994,7 +15167,7 @@ class MidisoftStudio:
         em.add_command(label="Separate Channels…",command=self._separate_channels)
         em.add_separator()
         em.add_command(label="Separate Hands…",command=self._separate_hands)
-        em.add_command(label="Thin Chords…",command=self._thin_chords)  # v22ze-171
+        em.add_command(label="Fix Chords…",command=self._thin_chords)  # v22ze-171
         vm=TkPopupMenu(mb,tearoff=0); mb.add_cascade(label="View",menu=vm)
         vm.add_command(label="Score View\tCtrl+1",command=self._open_score_view,accelerator="Ctrl+1")
         vm.add_command(label="Piano Roll\tCtrl+2",command=self._open_piano_roll,accelerator="Ctrl+2")
@@ -17183,9 +17356,22 @@ class MidisoftStudio:
 
     def _open(self):
         if not self._confirm_discard(): return
+        _kw = {}
+        try:
+            _ld = midi_io._load_settings().get("last_open_dir")
+            if _ld and os.path.isdir(_ld):
+                _kw["initialdir"] = _ld   # v22ze-196: start where you left off
+        except Exception:
+            pass
         path=filedialog.askopenfilename(parent=self.root,title="Open MIDI",
-            filetypes=[("MIDI","*.mid *.midi *.MID"),("All","*.*")])
-        if path: self._close_current(); self._load_file(path)
+            filetypes=[("MIDI","*.mid *.midi *.MID"),("All","*.*")], **_kw)
+        if path:
+            try:
+                _st = midi_io._load_settings(); _st["last_open_dir"] = os.path.dirname(path)
+                midi_io._save_settings(_st)
+            except Exception:
+                pass
+            self._close_current(); self._load_file(path)
 
     def _load_file(self,path):
         try:
@@ -17798,7 +17984,7 @@ class MidisoftStudio:
         FG = "#f0f6fc"
         MUTED = "#8b949e"
         dlg = tk.Toplevel(self.root)
-        dlg.title("Thin Chords - hand size" if thin else "Separate Hands")
+        dlg.title("Fix Chords - hand size" if thin else "Separate Hands")
         dlg.configure(bg=BG)
         dlg.resizable(False, False)
         try:
@@ -17811,7 +17997,7 @@ class MidisoftStudio:
         tk.Label(
             dlg,
             text=(
-                ("Tell Thin Chords how big a hand to plan for.\n"
+                ("Tell Fix Chords how big a hand to plan for.\n"
                  "It then lists the chords that hand cannot play.")
                 if thin else
                 ("Sort the piano notes into a right-hand staff and a\n"
@@ -17977,14 +18163,14 @@ class MidisoftStudio:
         move a note to the other hand (keeps sounding) or delete it; hear before accepting.
         The window stays open after Apply; fixed chords drop off the list."""
         import copy as _copy
-        if not self._grand_staff_guard("Thin Chords"):   # v22ze-191
+        if not self._grand_staff_guard("Fix Chords"):   # v22ze-191
             return
         song = self.song
         names = [(t.name or "") for t in song.tracks]
         rh_i = next((i for i, n in enumerate(names) if n.endswith(" (RH)")), None)
         lh_i = next((i for i, n in enumerate(names) if n.endswith(" (LH)")), None)
         if rh_i is None or lh_i is None:
-            messagebox.showinfo("Thin Chords",
+            messagebox.showinfo("Fix Chords",
                 "Run Edit ▸ Separate Hands first, so the music is split into a "
                 "right-hand part and a left-hand part.", parent=self.root)
             return
@@ -17994,7 +18180,7 @@ class MidisoftStudio:
         max_span, max_notes = opts
         plan = _thin_plan(song, rh_i, lh_i, max_notes, max_span)
         if not plan:
-            messagebox.showinfo("Thin Chords",
+            messagebox.showinfo("Fix Chords",
                 "Every chord can already be played by one hand of this size.\nNothing to thin.",
                 parent=self.root)
             return
@@ -18002,7 +18188,7 @@ class MidisoftStudio:
         pv = Transport(song)  # separate player used only for listening
         BG = "#0d1117"
         dlg = tk.Toplevel(self.root)
-        dlg.title("Thin Chords")
+        dlg.title("Fix Chords")
         dlg.configure(bg=BG)
         title = tk.Label(dlg, bg=BG, fg="#58a6ff", font=("TkDefaultFont", 11, "bold"))
         title.pack(padx=16, pady=(14, 2))
@@ -18237,7 +18423,7 @@ class MidisoftStudio:
             _stop_pv()
             chosen = [e for e in plan if include(e)]
             if not chosen:
-                messagebox.showinfo("Thin Chords",
+                messagebox.showinfo("Fix Chords",
                     "Nothing is marked Y yet, so there is nothing to apply.\n"
                     "Press Y on a line (or choose a note action under Change…), "
                     "or use Accept all remaining.", parent=dlg)
@@ -18245,7 +18431,7 @@ class MidisoftStudio:
             n_mv = sum(1 for e in chosen for a in e["actions"].values() if a == "move")
             n_de = sum(1 for e in chosen for a in e["actions"].values() if a == "delete")
             n_rl = sum(1 for e in chosen if e.get("kind") == "roll")
-            ans = messagebox.askyesnocancel("Thin Chords",
+            ans = messagebox.askyesnocancel("Fix Chords",
                 f"Apply the change to {len(chosen)} chord(s)?\n"
                 f"{n_mv} note(s) move to the other hand, {n_de} left out, {n_rl} roll sign(s).\n\n"
                 "Yes = apply now      No = hear it first      Cancel = go back",
@@ -18264,7 +18450,7 @@ class MidisoftStudio:
             after = _copy.deepcopy(song.tracks)
             after_map = _copy.deepcopy(song.rationalized_measure_map)
             self._push_undo(RationalizationAction(
-                description="Thin Chords", before_tracks=before, after_tracks=after,
+                description="Fix Chords", before_tracks=before, after_tracks=after,
                 before_map=before_map, after_map=after_map))
             song.modified = True
             self._update_title()
