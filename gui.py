@@ -558,6 +558,317 @@ class TkMenuBar(tk.Frame):
 _LY_VERSION_CACHE = []
 
 
+# ── v22ze-194: finding and fetching LilyPond ─────────────────────────────────
+# LilyPond for Windows is a plain folder (no installer).  We look for it in the
+# usual places, remember where it is, and on Windows can download the official
+# zip into the user's own folder (no administrator rights, no PATH changes).
+_LY_DL_URL = ("https://gitlab.com/api/v4/projects/lilypond%2Flilypond/packages/"
+              "generic/lilypond/2.26.0/lilypond-2.26.0-mingw-x86_64.zip")
+_LY_DL_MB = 45
+_LY_FOUND = []
+
+
+class _LyCancel(Exception):
+    pass
+
+
+def _ly_exe_name():
+    return "lilypond.exe" if os.name == "nt" else "lilypond"
+
+
+def _ly_data_dir():
+    if os.name == "nt":
+        base = os.environ.get("LOCALAPPDATA") or os.path.expanduser("~")
+        return os.path.join(base, "MIDI-Studio", "ly")
+    base = os.environ.get("XDG_DATA_HOME") or os.path.expanduser("~/.local/share")
+    return os.path.join(base, "midi-studio", "ly")
+
+
+def _ly_version_of(path):
+    # '2.26.0' if `path` is a working LilyPond, else None.
+    try:
+        import re as _re
+        import subprocess as _sp
+        kw = {}
+        if os.name == "nt":
+            kw["creationflags"] = 0x08000000   # no console window
+        r = _sp.run([path, "--version"], capture_output=True, text=True,
+                    timeout=60, **kw)
+        txt = (r.stdout or "") + (r.stderr or "")
+        if "lilypond" not in txt.lower():
+            return None
+        m = _re.search(r"(\d+\.\d+\.\d+)", txt)
+        return m.group(1) if m else "?"
+    except Exception:
+        return None
+
+
+def _ly_search_tree(root, depth=4):
+    # Find bin/lilypond(.exe) somewhere under root (shallowest first).
+    name = _ly_exe_name().lower()
+    root = os.path.abspath(root)
+    if not os.path.isdir(root):
+        return None
+    base = root.count(os.sep)
+    for dp, dn, fn in os.walk(root):
+        if dp.count(os.sep) - base >= depth:
+            dn[:] = []
+        if os.path.basename(dp).lower() == "bin":
+            for f in fn:
+                if f.lower() == name:
+                    return os.path.join(dp, f)
+    return None
+
+
+def _ly_remember(path):
+    try:
+        s = midi_io._load_settings()
+        s["lilypond_path"] = path
+        midi_io._save_settings(s)
+    except Exception:
+        pass
+    del _LY_FOUND[:]
+    _LY_FOUND.append(path)
+    del _LY_VERSION_CACHE[:]
+
+
+def _find_lilypond():
+    # Path to a LilyPond we can run, or None.  Order: remembered path, PATH,
+    # our own download folder, then common folders (home, Downloads, Program Files).
+    import shutil, glob
+    if _LY_FOUND and os.path.isfile(_LY_FOUND[0]):
+        return _LY_FOUND[0]
+    del _LY_FOUND[:]
+    try:
+        saved = midi_io._load_settings().get("lilypond_path")
+    except Exception:
+        saved = None
+    if saved and os.path.isfile(saved):
+        _LY_FOUND.append(saved)
+        return saved
+    w = shutil.which("lilypond")
+    if w:
+        _LY_FOUND.append(w)
+        return w
+    cand = _ly_search_tree(_ly_data_dir(), 5)
+    if not cand:
+        home = os.path.expanduser("~")
+        bases = [home, os.path.join(home, "Downloads"), os.path.join(home, "Applications")]
+        if os.name == "nt":
+            bases += [os.environ.get("ProgramFiles", ""), os.environ.get("ProgramFiles(x86)", "")]
+        else:
+            bases += ["/opt", "/usr/local"]
+        for b in bases:
+            if not b or cand:
+                continue
+            for d in sorted(glob.glob(os.path.join(b, "lilypond*")), reverse=True):
+                if not os.path.isdir(d):
+                    continue
+                exe = os.path.join(d, "bin", _ly_exe_name())
+                cand = exe if os.path.isfile(exe) else _ly_search_tree(d, 3)
+                if cand:
+                    break
+    if cand and _ly_version_of(cand):
+        _ly_remember(cand)
+        return cand
+    return None
+
+
+def _ly_download_and_setup(url, progress, cancel):
+    # Download + unpack + check.  Returns (exe_path, None) or (None, message).
+    # progress(phase, done, total) and cancel() are supplied by the caller.
+    import urllib.request, zipfile, shutil
+    d = _ly_data_dir()
+    tmp = os.path.join(d, "download.part")
+    dest = os.path.join(d, "unpack")
+    exe = None
+    try:
+        try:
+            os.makedirs(d, exist_ok=True)
+        except Exception as e:
+            return None, "Could not create the folder " + d + " (" + str(e) + ")."
+        req = urllib.request.Request(url, headers={"User-Agent": "MIDI-Studio"})
+        with urllib.request.urlopen(req, timeout=30) as r, open(tmp, "wb") as f:
+            total = int(r.headers.get("Content-Length") or 0)
+            got = 0
+            while True:
+                if cancel():
+                    raise _LyCancel()
+                chunk = r.read(65536)
+                if not chunk:
+                    break
+                f.write(chunk)
+                got += len(chunk)
+                progress("Downloading", got, total)
+        if not zipfile.is_zipfile(tmp):
+            return None, "The downloaded file was not a valid zip file."
+        if os.path.isdir(dest):
+            shutil.rmtree(dest, ignore_errors=True)
+        with zipfile.ZipFile(tmp) as z:
+            names = z.namelist()
+            for i, nm in enumerate(names):
+                if cancel():
+                    raise _LyCancel()
+                z.extract(nm, dest)
+                if i % 40 == 0:
+                    progress("Unpacking", i, len(names))
+        progress("Checking", 0, 0)
+        exe = _ly_search_tree(dest, 5)
+        if not exe:
+            return None, "LilyPond was downloaded, but its program file (bin\\lilypond.exe) was not found inside."
+        if not _ly_version_of(exe):
+            exe = None
+            return None, "LilyPond was downloaded but would not start on this computer."
+        _ly_remember(exe)
+        return exe, None
+    except _LyCancel:
+        exe = None
+        return None, "Cancelled."
+    except Exception as e:
+        exe = None
+        return None, "The download did not finish (" + str(e) + "). Check the internet connection and try again."
+    finally:
+        try:
+            if os.path.exists(tmp):
+                os.remove(tmp)
+        except Exception:
+            pass
+        if exe is None:
+            shutil.rmtree(dest, ignore_errors=True)
+
+
+def _ly_missing_dialog(root):
+    # One clear dialog: download it (Windows), point to an existing copy, or skip.
+    # Returns the lilypond path, or None.
+    BG, FG, MUTED, WARN = "#0d1117", "#f0f6fc", "#8b949e", "#d29922"
+    result = [None]
+    st = {"cancel": False, "busy": False, "phase": "", "done": 0, "total": 0, "res": None}
+    dlg = tk.Toplevel(root)
+    dlg.title("LilyPond Not Found")
+    dlg.resizable(False, False)
+    dlg.configure(bg=BG)
+    try:
+        dlg.grab_set()
+        dlg.attributes("-topmost", True)
+    except Exception:
+        pass
+    tk.Label(dlg, text="LilyPond is needed for printing", bg=BG, fg=WARN,
+             font=("TkDefaultFont", 13, "bold")).pack(pady=(20, 6))
+    tk.Label(dlg, text="Printing and PDF export use LilyPond, a free music\n"
+                       "engraving program.  It was not found on this computer.",
+             bg=BG, fg=FG, font=("TkDefaultFont", 10), justify=tk.CENTER).pack(padx=28, pady=(0, 10))
+    btns = tk.Frame(dlg, bg=BG)
+    btns.pack(padx=20, pady=(0, 6))
+    bs = dict(relief=tk.FLAT, padx=14, pady=6, font=("TkDefaultFont", 10), cursor="hand2")
+    status = tk.Label(dlg, text="", bg=BG, fg=FG, font=("TkDefaultFont", 10))
+    bar = ttk.Progressbar(dlg, length=320, mode="determinate")
+    cancel_btn = tk.Button(dlg, text="Cancel", bg="#21262d", fg=FG, activebackground="#30363d",
+                           command=lambda: st.__setitem__("cancel", True), **bs)
+    all_btns = []
+
+    def set_enabled(on):
+        for b in all_btns:
+            try:
+                b.configure(state=(tk.NORMAL if on else tk.DISABLED))
+            except Exception:
+                pass
+
+    def finish(path):
+        result[0] = path
+        try:
+            dlg.destroy()
+        except Exception:
+            pass
+
+    def poll():
+        try:
+            if not dlg.winfo_exists():
+                return
+        except Exception:
+            return
+        if st["res"] is not None:
+            exe, msg = st["res"]
+            st["res"] = None
+            st["busy"] = False
+            status.pack_forget(); bar.pack_forget(); cancel_btn.pack_forget()
+            set_enabled(True)
+            if exe:
+                finish(exe)
+            elif msg != "Cancelled.":
+                messagebox.showerror("LilyPond", msg, parent=dlg)
+            return
+        tot, dn = st["total"], st["done"]
+        if st["phase"] == "Downloading" and tot > 0:
+            bar.configure(mode="determinate", maximum=tot, value=dn)
+            status.configure(text="Downloading LilyPond...  %d of %d MB" % (dn // 1048576, tot // 1048576))
+        elif st["phase"] == "Unpacking" and tot > 0:
+            bar.configure(mode="determinate", maximum=tot, value=dn)
+            status.configure(text="Unpacking...")
+        else:
+            bar.configure(mode="indeterminate")
+            bar.step(5)
+            status.configure(text=(st["phase"] or "Working") + "...")
+        dlg.after(150, poll)
+
+    def do_download():
+        st.update(cancel=False, busy=True, phase="Downloading", done=0, total=0, res=None)
+        set_enabled(False)
+        status.pack(pady=(4, 2)); bar.pack(padx=20, pady=2); cancel_btn.pack(pady=(4, 6))
+
+        def prog(phase, dn, tot):
+            st["phase"], st["done"], st["total"] = phase, dn, tot
+
+        def work():
+            st["res"] = _ly_download_and_setup(_LY_DL_URL, prog, lambda: st["cancel"])
+        threading.Thread(target=work, daemon=True).start()
+        poll()
+
+    def do_find():
+        p = filedialog.askopenfilename(
+            parent=dlg, title="Find lilypond (inside the LilyPond folder, in bin)",
+            initialdir=os.path.expanduser("~"),
+            filetypes=([("LilyPond program", "lilypond.exe")] if os.name == "nt"
+                       else [("All files", "*")]))
+        if not p:
+            return
+        if _ly_version_of(p):
+            _ly_remember(p)
+            finish(p)
+        else:
+            messagebox.showerror("LilyPond", "That file did not start as LilyPond.\n"
+                                 "Pick lilypond.exe inside the LilyPond folder's bin folder.",
+                                 parent=dlg)
+
+    if os.name == "nt":
+        b = tk.Button(btns, text="Download and set it up for me  (about %d MB)" % _LY_DL_MB,
+                      bg="#238636", fg="white", activebackground="#2ea043", command=do_download, **bs)
+        b.pack(fill=tk.X, pady=3)
+        all_btns.append(b)
+    b = tk.Button(btns, text="I already have it - find lilypond...", bg="#21262d", fg=FG,
+                  activebackground="#30363d", command=do_find, **bs)
+    b.pack(fill=tk.X, pady=3)
+    all_btns.append(b)
+    b = tk.Button(btns, text="Not now", bg="#21262d", fg=FG, activebackground="#30363d",
+                  command=lambda: finish(None), **bs)
+    b.pack(fill=tk.X, pady=3)
+    all_btns.append(b)
+    if os.name != "nt":
+        tk.Label(dlg, text="  Linux : apt install lilypond   /   pacman -S lilypond\n"
+                           "  Mac   : brew install lilypond",
+                 bg="#161b22", fg=MUTED, font=("TkFixedFont", 9), justify=tk.LEFT,
+                 padx=12, pady=6).pack(fill=tk.X, padx=28, pady=(4, 6))
+    tk.Button(dlg, text="Open the LilyPond website", bg=BG, fg="#58a6ff", relief=tk.FLAT,
+              activebackground=BG, cursor="hand2", font=("TkDefaultFont", 9, "underline"),
+              command=lambda: webbrowser.open("https://lilypond.org")).pack(pady=(0, 12))
+
+    def on_close():
+        st["cancel"] = True
+        finish(None)
+    dlg.protocol("WM_DELETE_WINDOW", on_close)
+    root.wait_window(dlg)
+    return result[0]
+
+
 def _lilypond_version_string():
     """v22ze-145: the version to write after \\version in exported .ly files.
     LilyPond refuses files that ask for a NEWER version than the program, so
@@ -570,7 +881,7 @@ def _lilypond_version_string():
         import re as _re
         import shutil as _sh
         import subprocess as _sp
-        _lp = _sh.which("lilypond")
+        _lp = _find_lilypond()    # v22ze-194
         if _lp:
             _out = _sp.run([_lp, "--version"], capture_output=True,
                            text=True, timeout=15).stdout
@@ -17000,47 +17311,12 @@ class MidisoftStudio:
                 parent=self.root)
 
     def _check_lilypond(self):
-        """Return the lilypond executable path, or None if not found.
-        Shows the 'not found' dialog if missing.
-        """
-        import shutil, webbrowser
-        lp = shutil.which("lilypond")
+        # v22ze-194: find LilyPond automatically; otherwise one clear dialog
+        # (download on Windows / find an existing copy / not now).
+        lp = _find_lilypond()
         if lp:
             return lp
-        # Not found — show friendly dialog
-        dlg = tk.Toplevel(self.root)
-        dlg.title("LilyPond Not Found")
-        dlg.resizable(False, False)
-        dlg.configure(bg="#0d1117")
-        dlg.grab_set()
-        dlg.attributes("-topmost", True)
-        BG = "#0d1117"; FG = "#f0f6fc"; MUTED = "#8b949e"; WARN = "#d29922"
-        tk.Label(dlg, text="⚠️  LilyPond Not Found",
-                 bg=BG, fg=WARN, font=("TkDefaultFont", 13, "bold")).pack(pady=(22, 8))
-        tk.Label(dlg,
-                 text="Printing and PDF export require LilyPond, a free\n"
-                      "music engraving program, which was not found on\n"
-                      "your system.  Would you like to download it?",
-                 bg=BG, fg=FG, font=("TkDefaultFont", 10),
-                 justify=tk.CENTER).pack(padx=28, pady=(0, 8))
-        tk.Label(dlg,
-                 text="  Linux  : pacman -S lilypond  /  apt install lilypond\n"
-                      "  Windows: installer at lilypond.org\n"
-                      "  macOS  : brew install lilypond",
-                 bg="#161b22", fg=MUTED, font=("TkFixedFont", 9),
-                 justify=tk.LEFT, padx=12, pady=8).pack(fill=tk.X, padx=28, pady=(0, 14))
-        btn_frame = tk.Frame(dlg, bg=BG); btn_frame.pack(pady=(0, 18))
-        bs = dict(relief=tk.FLAT, padx=14, pady=6,
-                  font=("TkDefaultFont", 10), cursor="hand2")
-        tk.Button(btn_frame, text="Open LilyPond Website",
-                  bg="#238636", fg="white", activebackground="#2ea043",
-                  command=lambda: [webbrowser.open("https://lilypond.org"), dlg.destroy()],
-                  **bs).pack(side=tk.LEFT, padx=6)
-        tk.Button(btn_frame, text="I'll Install It Myself",
-                  bg="#21262d", fg=FG, activebackground="#30363d",
-                  command=dlg.destroy, **bs).pack(side=tk.LEFT, padx=6)
-        self.root.wait_window(dlg)
-        return None
+        return _ly_missing_dialog(self.root)
 
     def _ly_options_dialog(self):
         """Show export options dialog.  Returns (show_bar_numbers, staff_size)
