@@ -33,11 +33,14 @@ jobs:
           cat > notes.md <<EOF
           Test build $GITHUB_REF_NAME. Download the file for your computer:
 
-          - **Windows 10 / 11 (64-bit):** [MIDI-Studio-windows-x64.zip]($BASE/MIDI-Studio-windows-x64.zip)
+          - **Windows 10 / 11 (64-bit), easiest:** [MIDI-Studio-Setup.exe]($BASE/MIDI-Studio-Setup.exe)
+          - **Windows 10 / 11 (64-bit), no install:** [MIDI-Studio-windows-x64.zip]($BASE/MIDI-Studio-windows-x64.zip)
           - **Linux (64-bit):** [MIDI-Studio-x86_64.AppImage]($BASE/MIDI-Studio-x86_64.AppImage)
           - **Mac:** not available yet.
 
-          **Windows, 3 steps:** (1) Right-click the downloaded zip file and choose Extract All, then Extract. (2) Open the new folder. (3) Double-click MIDI-Studio.exe. Do not run it from inside the zip window, and leave the _internal folder where it is. Windows will probably show a window titled "Windows protected your PC" because this program is not code-signed (it says the publisher is unknown). Look for the small, faint "More info" link in that window, click it, then click "Run anyway". Windows should not ask again for that copy.
+          **Windows, easiest:** download MIDI-Studio-Setup.exe and double-click it. It installs for your user only (no administrator password) and can put an icon on your desktop. Windows will probably show a window titled "Windows protected your PC" because this program is not code-signed (it says the publisher is unknown). Click the small "More info" link, then "Run anyway".
+          
+          **Windows, without installing:** download the zip, right-click it, choose Extract All, open the new folder and double-click MIDI-Studio.exe. Do not run it from inside the zip window.
 
           **Linux:** after downloading, make the file runnable (right-click, Properties, Allow executing as program, or run chmod +x MIDI-Studio-x86_64.AppImage), then double-click it.
 
@@ -48,4 +51,4 @@ jobs:
             --repo "$GITHUB_REPOSITORY" \
             --title "MIDI Studio $GITHUB_REF_NAME" \
             --notes-file notes.md \
-            dl/MIDI-Studio-windows-x64.zip dl/MIDI-Studio-x86_64.AppImage
+            dl/MIDI-Studio-Setup.exe dl/MIDI-Studio-windows-x64.zip dl/MIDI-Studio-x86_64.AppImage

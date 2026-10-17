@@ -71,6 +71,36 @@ jobs:
           Set-Content -Path "$stage/START HERE.txt" -Value $lines -Encoding ascii
           Compress-Archive -Path "$stage/*" -DestinationPath MIDI-Studio-windows-x64.zip
 
+      - name: Installer (Inno Setup) - build, silent install test, uninstall test
+        shell: pwsh
+        run: |
+          choco install innosetup -y --no-progress
+          $iscc = Join-Path ${env:ProgramFiles(x86)} "Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) { throw "Inno Setup compiler not found at $iscc" }
+          $ver = (Select-String -Path sys_platform.py -Pattern 'APP_VERSION = "([^"]+)"').Matches[0].Groups[1].Value
+          $out = Join-Path (Get-Location).Path "installer-out"
+          New-Item -ItemType Directory -Force -Path $out | Out-Null
+          & $iscc "/DMyAppVersion=$ver" "/O$out" packaging/windows/midi-studio.iss
+          if ($LASTEXITCODE -ne 0) { throw "Inno Setup failed" }
+          $setup = Join-Path $out "MIDI-Studio-Setup.exe"
+          if (-not (Test-Path $setup)) { throw "installer was not produced" }
+          $dir = Join-Path $env:RUNNER_TEMP "ms-install-test"
+          $p = Start-Process -FilePath $setup -ArgumentList "/VERYSILENT","/SUPPRESSMSGBOXES","/NORESTART","/DIR=$dir" -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "silent install failed (exit $($p.ExitCode))" }
+          if (-not (Test-Path (Join-Path $dir "MIDI-Studio.exe"))) { throw "installed program is missing" }
+          $un = Join-Path $dir "unins000.exe"
+          if (-not (Test-Path $un)) { throw "uninstaller is missing" }
+          $p = Start-Process -FilePath $un -ArgumentList "/VERYSILENT","/SUPPRESSMSGBOXES","/NORESTART" -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "silent uninstall failed (exit $($p.ExitCode))" }
+          Start-Sleep -Seconds 3
+          if (Test-Path (Join-Path $dir "MIDI-Studio.exe")) { throw "uninstall left the program behind" }
+          Copy-Item $setup MIDI-Studio-Setup.exe
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: MIDI-Studio-windows-installer
+          path: MIDI-Studio-Setup.exe
+
       - uses: actions/upload-artifact@v4
         with:
           name: MIDI-Studio-windows-x64

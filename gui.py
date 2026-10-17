@@ -869,6 +869,81 @@ def _ly_missing_dialog(root):
     return result[0]
 
 
+# ── v22ze-195: instrument names for the printed score ────────────────────────
+# A conductor expects every staff labelled, with a short name on later systems.
+# Names the user typed are used as typed.  Default labels ("Track 3", "Ch 1 - X")
+# become the instrument name; the drum channel becomes "Drums".
+_LY_SHORT = {
+    "drums": "Dr.", "violin": "Vln.", "viola": "Vla.", "cello": "Vc.",
+    "contrabass": "Cb.", "flute": "Fl.", "piccolo": "Picc.", "oboe": "Ob.",
+    "english horn": "E.H.", "clarinet": "Cl.", "bassoon": "Bn.", "trumpet": "Tpt.",
+    "trombone": "Tbn.", "french horn": "Hn.", "tuba": "Tba.", "harp": "Hp.",
+    "timpani": "Timp.", "voice": "Vo.", "choir aahs": "Ch.", "string ensemble 1": "Str.",
+    "string ensemble 2": "Str.", "alto sax": "A. Sax.", "tenor sax": "T. Sax.",
+    "soprano sax": "S. Sax.", "baritone sax": "B. Sax.", "finger bass": "E. Bass",
+    "pick bass": "E. Bass", "fretless bass": "E. Bass", "acoustic bass": "Bass",
+    "synth bass 1": "Syn. Bass", "synth bass 2": "Syn. Bass",
+}
+
+
+def _ly_esc(s):
+    return str(s).replace("\\", "\\\\").replace('"', '\\"')
+
+
+def _ly_abbrev(name):
+    import re as _re
+    base = _re.sub(r"\s*\(.*?\)", "", name or "").strip()
+    low = base.lower()
+    if low in _LY_SHORT:
+        return _LY_SHORT[low]
+    if "piano" in low:
+        return "Pno."
+    words = base.split()
+    if not words:
+        return ""
+    if len(base) <= 4:
+        return base
+    if len(words) == 1:
+        return base[:4] + "."
+    initials = "".join(w[0].upper() + ". " for w in words[:-1])
+    last = words[-1]
+    return initials + (last if len(last) <= 5 else last[:4] + ".")
+
+
+def _ly_generic_name(nm):
+    import re as _re
+    return (not nm) or bool(_re.match(r"^(track|channel|ch|untitled)\s*\d*$", nm, _re.I))
+
+
+def _ly_staff_names(tr):
+    # (full, short) instrument names for a track, already escaped for LilyPond.
+    import re as _re
+    nm = (getattr(tr, "name", "") or "").strip().rstrip(":").strip()
+    m = _re.match(r"^Ch\s*\d+\s*-\s*(.+)$", nm, _re.I)
+    if m:
+        nm = m.group(1).strip()
+    elif _ly_generic_name(nm):
+        if getattr(tr, "channel", 0) == 9:
+            nm = "Drums"
+        else:
+            try:
+                nm = GM_INSTRUMENTS[int(tr.program)]
+            except Exception:
+                nm = "Staff"
+    return _ly_esc(nm), _ly_esc(_ly_abbrev(nm))
+
+
+def _ly_piano_names(base_name):
+    import re as _re
+    nm = (base_name or "").strip().rstrip(":").strip()
+    _m = _re.match(r"^Ch\s*\d+\s*-\s*(.+)$", nm, _re.I)
+    if _m:
+        nm = _m.group(1).strip()
+    if _ly_generic_name(nm):
+        nm = "Piano"
+    return _ly_esc(nm), _ly_esc(_ly_abbrev(nm))
+
+
 def _lilypond_version_string():
     """v22ze-145: the version to write after \\version in exported .ly files.
     LilyPond refuses files that ask for a NEWER version than the program, so
@@ -5091,7 +5166,7 @@ class Song:
         # Fix: reserve indent proportional to the longest instrument name
         # that will actually be used in THIS score, clamped to a sane range.
         _ly_track_list_preview = [tr for tr in self.tracks if tr.notes]
-        _longest_name_len = max((len(tr.name) for tr in _ly_track_list_preview), default=5)
+        _longest_name_len = max((len(_ly_staff_names(tr)[0]) for tr in _ly_track_list_preview), default=5)
         # ~0.09in per character is a reasonable estimate for the default
         # instrument-name font at staff-size 16; clamp so a very long name
         # can't blow out the page and a very short one still gets a
@@ -6188,7 +6263,8 @@ class Song:
                     write_voice(f, v_bass, notes_lh, "bass", mmap)
                     entry = (
                         "    \\new PianoStaff <<\n"
-                        '      \\set PianoStaff.instrumentName = #"' + base_name + '"\n'
+                        '      \\set PianoStaff.instrumentName = #"' + _ly_piano_names(base_name)[0] + '"\n'
+                        '      \\set PianoStaff.shortInstrumentName = #"' + _ly_piano_names(base_name)[1] + '"\n'
                         "      \\new Staff { \\" + v_treble + " }\n"
                         "      \\new Staff { \\" + v_bass + " }\n"
                         "    >>"
@@ -6232,7 +6308,8 @@ class Song:
                     write_voice(f, v_bass, b_notes, "bass", mmap)
                     entry = (
                         "    \\new PianoStaff <<\n"
-                        '      \\set PianoStaff.instrumentName = #"' + base_name + '"\n'
+                        '      \\set PianoStaff.instrumentName = #"' + _ly_piano_names(base_name)[0] + '"\n'
+                        '      \\set PianoStaff.shortInstrumentName = #"' + _ly_piano_names(base_name)[1] + '"\n'
                         "      \\new Staff { \\" + v_treble + " }\n"
                         "      \\new Staff { \\" + v_bass + " }\n"
                         "    >>"
@@ -6249,8 +6326,8 @@ class Song:
                     write_voice(f, vbase, notes, clef, mmap, _density_map, emit_spacing=True)
                     entry = (
                         "    \\new Staff \\with {\n"
-                        '      instrumentName = #"' + tr.name + '"\n'
-                        '      shortInstrumentName = #"' + tr.name[:4] + '."\n'
+                        '      instrumentName = #"' + _ly_staff_names(tr)[0] + '"\n'
+                        '      shortInstrumentName = #"' + _ly_staff_names(tr)[1] + '"\n'
                         "    } { \\" + vbase + " }"
                     )
                     score_entries.append(entry)
@@ -9287,7 +9364,7 @@ class ScoreView(tk.Frame):
             "Move the staves closer together vertically.",
         ).pack(side=tk.LEFT, padx=2)
         # v22ze-166: page-turn or smooth following while playing
-        self._follow_btn = tk.Button(tb, text="Follow: Smooth", command=self._toggle_follow, **bs)
+        self._follow_btn = tk.Button(tb, text="Follow: Page", command=self._toggle_follow, **bs)
         _tt(
             self._follow_btn,
             "While playing: Page = the score stays still while the red line crosses a "
@@ -10139,6 +10216,47 @@ class ScoreView(tk.Frame):
         except Exception:
             return False
 
+    def _slow_watch(self):
+        # v22ze-195: notice a computer too slow for smooth scrolling.  Called on
+        # every scroll step while playing; looks at the time between steps.
+        if getattr(self, "_follow_mode", "page") != "smooth" or getattr(self.app, "_slow_scroll_told", False):
+            self._sw_last = None
+            return
+        now = time.perf_counter()
+        last = getattr(self, "_sw_last", None)
+        self._sw_last = now
+        if last is None or now - last > 1.0:      # first step, pause or jump
+            self._sw_hist = []
+            self._sw_t0 = now
+            return
+        if now - self._sw_t0 < 2.0:               # let playback settle first
+            return
+        h = self._sw_hist
+        h.append(now - last)
+        del h[:-40]
+        if len(h) >= 40 and (sorted(h)[len(h) // 2] > 0.055 or sum(1 for g in h if g > 0.08) >= 5):
+            self._sw_last = None
+            self._switch_to_page_slow()
+
+    def _switch_to_page_slow(self):
+        self._follow_mode = "page"
+        self._page_first = None
+        try:
+            self._follow_btn.configure(text="Follow: Page")
+        except Exception:
+            pass
+        if getattr(self.app, "_slow_scroll_told", False):
+            return
+        self.app._slow_scroll_told = True
+        try:
+            self.canvas.after(50, lambda: messagebox.showinfo(
+                "MIDI Studio",
+                "This computer cannot redraw the score fast enough for smooth movement "
+                "of the score. Switching to Page mode",
+                parent=self.winfo_toplevel()))
+        except Exception:
+            pass
+
     def _toggle_follow(self):
         self._follow_mode = "smooth" if getattr(self, "_follow_mode", "page") == "page" else "page"
         self._page_first = None
@@ -10149,6 +10267,10 @@ class ScoreView(tk.Frame):
 
     def _scroll_to(self, cx, total_w):
         """v22ze-190: diagnostic wrapper - logs, then does exactly what it always did."""
+        try:
+            self._slow_watch()   # v22ze-195
+        except Exception:
+            pass
         _n = getattr(self, "_flog_n", 0)
         self._flog_n = _n + 1
         _log = _n < 20 or _n % 150 == 0
@@ -10704,7 +10826,7 @@ class ScoreView(tk.Frame):
 
     # ─── Chord-aware note drawing ────────────────────────────────────────────
 
-    _follow_mode = "smooth"  # v22ze-167: smooth | page
+    _follow_mode = "page"  # v22ze-195: page | smooth (page is the safe default)
     CHORD_TOL = 20  # ticks — notes within this range are treated as one chord
 
     def _group_chords(self, notes):
