@@ -13908,6 +13908,13 @@ class ScoreView(tk.Frame):
             return
         src, dst = (lh, rh) if where == "upper" else (rh, lh)
         sel = [n for n in song.tracks[src].notes if n in self._selection]
+        if sel:   # v22ze-201: a note moves together with its tied pieces
+            _mp = _tie_maps(song.tracks[src].notes)
+            _seen = {id(n) for n in sel}
+            for _n in list(sel):
+                for _pc in _tie_chain(_mp, _n):
+                    if id(_pc) not in _seen:
+                        _seen.add(id(_pc)); sel.append(_pc)
         if not sel:
             messagebox.showinfo("Move to staff", "None of the selected notes is on the "
                                 f"{'lower' if where == 'upper' else 'upper'} staff.", parent=self.app.root)
@@ -14641,7 +14648,52 @@ def _thin_two_hand_tracks(song, rh_i, lh_i, max_notes, max_span, win=20):
 _ROLL_MAX_SPAN = 19  # v22ze-183: a twelfth (octave + fifth) - wider chords cannot be rolled by anyone
 
 
-def _thin_plan(song, rh_i, lh_i, max_notes, max_span, win=20):
+def _min_transfer(ps, other, hand, max_notes, max_span):   # v22ze-201
+    """Smallest set of this chord's pitches that can go to the other hand so that BOTH
+    hands then stay within max_notes / max_span.  Right hand offers its lowest notes first,
+    left hand its highest.  None if no transfer works."""
+    import itertools as _it
+    ps = sorted(set(ps)); other = sorted(set(other))
+    order = ps if hand == "R" else ps[::-1]
+    for k in range(1, len(ps)):
+        for S in _it.combinations(order, k):
+            keep = [p for p in ps if p not in S]
+            tgt = sorted(set(other) | set(S))
+            if (keep and len(keep) <= max_notes and max(keep) - min(keep) <= max_span
+                    and len(tgt) <= max_notes and max(tgt) - min(tgt) <= max_span):
+                return sorted(S)
+    return None
+
+
+def _tie_maps(notes):   # v22ze-201
+    by_end, by_start = {}, {}
+    for x in notes:
+        by_end.setdefault((x.pitch, x.tick + x.duration), []).append(x)
+        by_start[(x.pitch, x.tick)] = x
+    return by_end, by_start
+
+
+def _tie_chain(maps, n):   # v22ze-201: the note plus every tied piece before and after it
+    by_end, by_start = maps
+    chain = [n]
+    cur = n
+    while getattr(cur, "articulation", "") == "tie_continuation":
+        p = next((x for x in by_end.get((cur.pitch, cur.tick), []) if x is not cur and x not in chain), None)
+        if p is None:
+            break
+        chain.insert(0, p)
+        cur = p
+    cur = n
+    while True:
+        c = by_start.get((cur.pitch, cur.tick + cur.duration))
+        if c is None or c is cur or c in chain or getattr(c, "articulation", "") != "tie_continuation":
+            break
+        chain.append(c)
+        cur = c
+    return chain
+
+
+def _thin_plan(song, rh_i, lh_i, max_notes, max_span, win=20, avoid_rolls=False):
     """Return a list of dict entries, one per chord a hand cannot play (kind 'chord') and
     one per rolled chord (kind 'roll': 4+ notes struck 20-90 ticks apart that no hand
     could hold at once).  Keys: kind, ti, other_i, hand ('R'|'L'), bar, chord_no, tick,
@@ -14652,7 +14704,8 @@ def _thin_plan(song, rh_i, lh_i, max_notes, max_span, win=20):
     starts = [m[1] for m in mmap]
 
     def _groups(ti):
-        ns = sorted(song.tracks[ti].notes, key=lambda n: n.tick)
+        ns = sorted((n for n in song.tracks[ti].notes if getattr(n, "articulation", "") != "tie_continuation"),
+                    key=lambda n: n.tick)   # v22ze-201: a tied piece is not a new strike
         out, i = [], 0
         while i < len(ns):
             j = i
@@ -14704,7 +14757,11 @@ def _thin_plan(song, rh_i, lh_i, max_notes, max_span, win=20):
             ent = dict(kind="chord", ti=ti, other_i=oi, hand=hand, bar=bar,
                        chord_no=per_bar[bar], tick=g[0].tick, ps=ps, keys=keys,
                        rem=sorted(rem), actions=actions, other_ps=other, state="pending")
-            if _rollable:
+            _tf = _min_transfer(ps, other, hand, max_notes, max_span) if (_rollable and avoid_rolls) else None
+            if _tf:
+                # v22ze-201: the smallest transfer to the other hand makes both hands playable
+                ent.update(rem=list(_tf), actions={p: "move" for p in _tf})
+            elif _rollable:
                 # v22ze-183: 13-19 semitones, 5 notes or fewer: the proposal is a roll sign
                 # (keeps every note and tells the player what to do); thinning stays as the alternative
                 ent["alt"] = dict(rem=ent["rem"], actions=dict(ent["actions"]))
@@ -14713,7 +14770,8 @@ def _thin_plan(song, rh_i, lh_i, max_notes, max_span, win=20):
     # v22ze-182: rolled chords - notes struck one after another within ~90 ticks that
     # no hand could hold together; the cure is a roll sign, not changing notes
     for ti, oi, hand in ((rh_i, lh_i, "R"), (lh_i, rh_i, "L")):
-        ns = sorted(song.tracks[ti].notes, key=lambda n: n.tick)
+        ns = sorted((n for n in song.tracks[ti].notes if getattr(n, "articulation", "") != "tie_continuation"),
+                    key=lambda n: n.tick)   # v22ze-201
         per_bar = {}
         i = 0
         while i < len(ns):
@@ -14736,6 +14794,19 @@ def _thin_plan(song, rh_i, lh_i, max_notes, max_span, win=20):
             keys = {}
             for n in ch:
                 keys.setdefault(n.pitch, []).append(n.tick)
+            if avoid_rolls:   # v22ze-201: quick roll across the hands' limits -> smallest transfer
+                _oth = set()
+                _k = _bs.bisect_left(gtick[oi], ch[0].tick - win)
+                while _k < len(gtick[oi]) and gtick[oi][_k] <= ch[-1].tick + win:
+                    _oth |= {n.pitch for n in grp[oi][_k]}
+                    _k += 1
+                _tf2 = _min_transfer(ps, _oth, hand, max_notes, max_span)
+                if _tf2:
+                    plan.append(dict(kind="chord", ti=ti, other_i=oi, hand=hand, bar=bar,
+                                     chord_no=per_bar[bar], tick=ch[0].tick, ps=ps, keys=keys,
+                                     rem=list(_tf2), actions={p: "move" for p in _tf2},
+                                     other_ps=_oth, state="pending"))
+                    continue
             plan.append(dict(kind="roll", ti=ti, other_i=oi, hand=hand, bar=bar,
                              chord_no=per_bar[bar], tick=ch[0].tick, ps=ps, keys=keys,
                              rem=[], actions={}, other_ps=set(), state="pending",
@@ -14756,6 +14827,11 @@ def _thin_apply(song, plan, include):
             idx[ti] = {(n.tick, n.pitch): n for n in song.tracks[ti].notes}
         return idx[ti].get((tick, pitch))
     drop, add = set(), []
+    _tm = {}
+    def _chain(ti, n):   # v22ze-201: tied pieces follow the note
+        if ti not in _tm:
+            _tm[ti] = _tie_maps(song.tracks[ti].notes)
+        return _tie_chain(_tm[ti], n)
     for e in plan:
         if not include(e):
             continue
@@ -14775,12 +14851,15 @@ def _thin_apply(song, plan, include):
                 n = _find(e["ti"], tk, p)
                 if n is None:
                     continue
-                drop.add((e["ti"], tk, p))
-                if act == "move" and _find(oi, tk, p) is None:
-                    nc = _cp.copy(n)
-                    if oc is not None:
-                        nc.channel = oc
-                    add.append((oi, nc))
+                for pc in _chain(e["ti"], n):   # v22ze-201
+                    if (e["ti"], pc.tick, pc.pitch) in drop:
+                        continue
+                    drop.add((e["ti"], pc.tick, pc.pitch))
+                    if act == "move" and _find(oi, pc.tick, pc.pitch) is None:
+                        nc = _cp.copy(pc)
+                        if oc is not None:
+                            nc.channel = oc
+                        add.append((oi, nc))
     for ti in {k[0] for k in drop} | {a[0] for a in add}:
         song.tracks[ti].notes = [n for n in song.tracks[ti].notes if (ti, n.tick, n.pitch) not in drop]
     for oi, nc in add:
@@ -16787,7 +16866,7 @@ class MidisoftStudio:
             "'Off' preserves every gap exactly as played.")
 
         # Hand span
-        span_var = tk.IntVar(value=14)
+        span_var = tk.IntVar(value=12)   # v22ze-201: 12 = one octave, the standard hand
         _tt(_row(pfrm, "Max hand span (semitones):", lambda p: tk.Spinbox(
             p, from_=10, to=18, textvariable=span_var, width=4,
             bg="#21262d", fg=FG, buttonbackground="#30363d"), 10),
@@ -18005,6 +18084,7 @@ class MidisoftStudio:
         result = [None]
         span_var = tk.IntVar(value=12)  # v22ze-142: 12 = an octave; 14 is a very large hand
         notes_var = tk.IntVar(value=5)
+        avoid_var = tk.BooleanVar(value=getattr(self, "_fc_avoid_rolls", True))   # v22ze-201
         tk.Label(
             dlg,
             text=(
@@ -18048,12 +18128,19 @@ class MidisoftStudio:
         def _ok():
             try:
                 result[0] = (int(span_var.get()), int(notes_var.get()))
+                if thin:
+                    self._fc_avoid_rolls = bool(avoid_var.get())   # v22ze-201
             except Exception:
                 result[0] = (12, 5)
             dlg.destroy()
 
+        if thin:   # v22ze-201
+            tk.Checkbutton(dlg, text="Move notes to the other hand instead of roll signs",
+                           variable=avoid_var, bg=BG, fg=FG, selectcolor="#21262d",
+                           activebackground=BG, activeforeground=FG).grid(
+                row=5, column=0, columnspan=2, padx=16, pady=(10, 0), sticky="w")
         bfrm = tk.Frame(dlg, bg=BG)
-        bfrm.grid(row=5, column=0, columnspan=2, pady=(14, 14))
+        bfrm.grid(row=6, column=0, columnspan=2, pady=(14, 14))
         bs = dict(relief=tk.FLAT, padx=14, pady=5, bg="#21262d", fg=FG,
                   activebackground="#30363d", activeforeground=FG)
         tk.Button(bfrm, text="Continue" if thin else "Separate", command=_ok, **bs).pack(side=tk.LEFT, padx=6)
@@ -18196,7 +18283,8 @@ class MidisoftStudio:
         if opts is None:
             return
         max_span, max_notes = opts
-        plan = _thin_plan(song, rh_i, lh_i, max_notes, max_span)
+        _avoid = bool(getattr(self, "_fc_avoid_rolls", True))   # v22ze-201
+        plan = _thin_plan(song, rh_i, lh_i, max_notes, max_span, avoid_rolls=_avoid)
         if not plan:
             messagebox.showinfo("Fix Chords",
                 "Every chord can already be played by one hand of this size.\nNothing to thin.",
@@ -18475,7 +18563,7 @@ class MidisoftStudio:
             self._refresh_views()
             # keep the N decisions, rebuild the list from the edited song
             keep_no = {(e["ti"], e["tick"]) for e in plan if e["state"] == "no"}
-            plan[:] = _thin_plan(song, rh_i, lh_i, max_notes, max_span)
+            plan[:] = _thin_plan(song, rh_i, lh_i, max_notes, max_span, avoid_rolls=_avoid)
             for e in plan:
                 if (e["ti"], e["tick"]) in keep_no:
                     e["state"] = "no"
