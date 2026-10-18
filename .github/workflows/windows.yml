@@ -65,6 +65,9 @@ jobs:
             "Leave the _internal folder where it is; the program needs it.",
             "The User Guide (MIDI-Studio-User-Guide.pdf) is in this folder too.",
             "",
+            "To remove the program later, delete this folder. If MIDI Studio downloaded LilyPond for you,",
+            "it is in %LOCALAPPDATA%\MIDI-Studio\ly (type that into a File Explorer address bar); delete it too if you like.",
+            "",
             "Windows may say 'Windows protected your PC' because this free program is not code-signed.",
             "Click the small 'More info' link, then 'Run anyway'.",
             "",
@@ -92,10 +95,21 @@ jobs:
           if (-not (Test-Path (Join-Path $dir "MIDI-Studio.exe"))) { throw "installed program is missing" }
           $un = Join-Path $dir "unins000.exe"
           if (-not (Test-Path $un)) { throw "uninstaller is missing" }
+          # v22ze-199: seed a fake downloaded LilyPond and a settings file, then check the uninstaller
+          # removes the first and keeps the second (silent uninstall: standard answers)
+          $lyd = Join-Path $env:LOCALAPPDATA "MIDI-Studio\ly\lilypond-test\bin"
+          New-Item -ItemType Directory -Force -Path $lyd | Out-Null
+          Set-Content -Path (Join-Path $lyd "lilypond.exe") -Value "fake"
+          $cfg = Join-Path $env:USERPROFILE ".midistudio_settings.json"
+          $madeCfg = -not (Test-Path $cfg)
+          if ($madeCfg) { Set-Content -Path $cfg -Value "{}" }
           $p = Start-Process -FilePath $un -ArgumentList "/VERYSILENT","/SUPPRESSMSGBOXES","/NORESTART" -Wait -PassThru
           if ($p.ExitCode -ne 0) { throw "silent uninstall failed (exit $($p.ExitCode))" }
           Start-Sleep -Seconds 3
           if (Test-Path (Join-Path $dir "MIDI-Studio.exe")) { throw "uninstall left the program behind" }
+          if (Test-Path (Join-Path $env:LOCALAPPDATA "MIDI-Studio\ly")) { throw "uninstall left the downloaded LilyPond behind" }
+          if (-not (Test-Path $cfg)) { throw "uninstall removed the settings file (silent uninstall must keep it)" }
+          if ($madeCfg) { Remove-Item $cfg -Force }
           Copy-Item $setup MIDI-Studio-Setup.exe
 
       - uses: actions/upload-artifact@v4

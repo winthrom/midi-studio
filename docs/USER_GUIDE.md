@@ -30,7 +30,17 @@ You do not need to read music to use the program, but it helps. Words you may no
 
 Download **MIDI-Studio-x86_64.AppImage**. Make it runnable (right-click ▸ Properties ▸ *Allow executing as program*, or `chmod +x MIDI-Studio-x86_64.AppImage`) and double-click it. It carries its own copy of Python, the built-in synthesizer (FluidSynth) and a set of instrument sounds, so it makes sound without any setup. If you already have another synthesizer on your computer (a software one such as TiMidity, or a Musical Instrument Digital Interface (MIDI) keyboard or sound module), the program lists it under **Setup ▸ MIDI Output Device…** and you can choose it instead (section 9).
 
-On recent Ubuntu and Kubuntu (24.04 and later) an AppImage may refuse to start until you install one small library: `sudo apt install libfuse2t64`.
+**Adding it to your application menu.** Download **install-linux.sh** from the same page and run `bash install-linux.sh` in the folder that holds both files. It copies the program to a folder called `Applications` in your home folder (no administrator password) and asks **"Add MIDI Studio to your application menu?"** Answer Enter for yes. To remove everything later, run `bash uninstall-linux.sh`; it also offers to remove a copy of LilyPond that MIDI Studio downloaded for you (it never touches one you installed yourself) and asks, with the standard answer No, whether to remove your saved settings.
+
+**If the program will not start.** On recent Ubuntu and Kubuntu (24.04 and later) an AppImage may refuse to start until you install one small library: `sudo apt install libfuse2t64` (on older Ubuntu: `libfuse2`). The install script notices this and sets up the menu entry so that the program still starts, just a little slower.
+
+**Running from the source code instead** is explained in the file `docs/LINUX_FROM_SOURCE.md` on the project page.
+
+## Removing the program
+
+- **Windows installer:** **Settings ▸ Apps**, or **Uninstall MIDI Studio** in the Start menu. If MIDI Studio had downloaded LilyPond for you, the uninstaller asks whether to remove it too (the standard answer is Yes), and then whether to remove your saved settings (the standard answer is No). A LilyPond that you installed or unpacked yourself is never touched.
+- **Windows zip:** delete the folder you extracted. If MIDI Studio downloaded LilyPond, it is in `%LOCALAPPDATA%\MIDI-Studio\ly` (type that into the address bar of a File Explorer window); delete that folder too if you like.
+- **Linux:** `bash uninstall-linux.sh`, or delete the AppImage file.
 
 ## Where the downloads are
 

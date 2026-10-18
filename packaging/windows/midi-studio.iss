@@ -39,3 +39,48 @@ Name: "{autodesktop}\MIDI Studio"; Filename: "{app}\MIDI-Studio.exe"; Tasks: des
 
 [Run]
 Filename: "{app}\MIDI-Studio.exe"; Description: "Start MIDI Studio now"; Flags: nowait postinstall skipifsilent
+
+[Code]
+{ v22ze-199: clean up what the PROGRAM downloaded (never a LilyPond the user installed) }
+function OurLilyPondDir(): String;
+begin
+  Result := ExpandConstant('{localappdata}\MIDI-Studio\ly');
+end;
+
+function AskRemoveLilyPond(ly: String): Boolean;
+begin
+  if UninstallSilent() then
+    Result := True
+  else
+    Result := MsgBox('MIDI Studio downloaded its own copy of LilyPond (the program that prints scores) into:'#13#10#13#10 + ly + #13#10#13#10 +
+                     'Remove it too?'#13#10#13#10 +
+                     'A LilyPond that you installed or unpacked yourself is not touched.',
+                     mbConfirmation, MB_YESNO) = IDYES;
+end;
+
+procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
+var
+  ly, cfg: String;
+begin
+  if CurUninstallStep <> usPostUninstall then Exit;
+  ly := OurLilyPondDir();
+  if DirExists(ly) then
+  begin
+    if AskRemoveLilyPond(ly) then
+    begin
+      DelTree(ly, True, True, True);
+      RemoveDir(ExpandConstant('{localappdata}\MIDI-Studio'));
+    end;
+  end;
+  cfg := ExpandConstant('{%USERPROFILE}\.midistudio_settings.json');
+  if FileExists(cfg) then
+  begin
+    if not UninstallSilent() then
+    begin
+      if MsgBox('Also remove your saved MIDI Studio settings?'#13#10#13#10 + cfg + #13#10#13#10 +
+                'Choose No if you may install MIDI Studio again.',
+                mbConfirmation, MB_YESNO or MB_DEFBUTTON2) = IDYES then
+        DeleteFile(cfg);
+    end;
+  end;
+end;

@@ -37,6 +37,7 @@ jobs:
           - **Windows 10 / 11 (64-bit), easiest:** [MIDI-Studio-Setup.exe]($BASE/MIDI-Studio-Setup.exe)
           - **Windows 10 / 11 (64-bit), no install:** [MIDI-Studio-windows-x64.zip]($BASE/MIDI-Studio-windows-x64.zip)
           - **Linux (64-bit):** [MIDI-Studio-x86_64.AppImage]($BASE/MIDI-Studio-x86_64.AppImage)
+          - **Linux menu entry (optional):** [install-linux.sh]($BASE/install-linux.sh) and [uninstall-linux.sh]($BASE/uninstall-linux.sh); run with `bash install-linux.sh`
           - **User Guide (PDF):** [MIDI-Studio-User-Guide.pdf]($BASE/MIDI-Studio-User-Guide.pdf)
           - **Mac:** not available yet.
 
@@ -54,4 +55,4 @@ jobs:
             --title "MIDI Studio $GITHUB_REF_NAME" \
             --notes-file notes.md \
             dl/MIDI-Studio-Setup.exe dl/MIDI-Studio-windows-x64.zip dl/MIDI-Studio-x86_64.AppImage \
-            docs/MIDI-Studio-User-Guide.pdf
+            docs/MIDI-Studio-User-Guide.pdf packaging/linux/install-linux.sh packaging/linux/uninstall-linux.sh
