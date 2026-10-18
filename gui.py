@@ -10320,6 +10320,7 @@ class ScoreView(tk.Frame):
         row_h = self.TPAD1 + self.SH + self.BPAD1
         total_h = 4 + n * row_h + 20
         c.configure(scrollregion=(0, 0, w, total_h))
+        self._last_sr = None   # v22ze-200: forget the remembered width, or reopening the same piece keeps this narrow one
         names = [f"Track {i+1}" for i in range(n)]
         for ti in range(n):
             tt = 4 + ti * row_h + self.TPAD1_TOP
