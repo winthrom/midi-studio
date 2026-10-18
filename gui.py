@@ -14708,13 +14708,15 @@ def _thin_plan(song, rh_i, lh_i, max_notes, max_span, win=20, avoid_rolls=False)
     mmap = song.get_measure_map()
     starts = [m[1] for m in mmap]
 
+    _gapmax = max(2, song.ticks_per_beat // 16)   # v22ze-203
     def _groups(ti):
         ns = sorted((n for n in song.tracks[ti].notes if getattr(n, "articulation", "") != "tie_continuation"),
                     key=lambda n: n.tick)   # v22ze-201: a tied piece is not a new strike
         out, i = [], 0
         while i < len(ns):
             j = i
-            while j + 1 < len(ns) and ns[j + 1].tick - ns[i].tick <= win:
+            while (j + 1 < len(ns) and ns[j + 1].tick - ns[i].tick <= win
+                   and ns[j + 1].tick - ns[j].tick <= _gapmax):   # v22ze-203: a bigger gap = a new chord
                 j += 1
             out.append(ns[i:j + 1])
             i = j + 1
