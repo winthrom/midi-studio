@@ -10980,22 +10980,23 @@ class ScoreView(tk.Frame):
         boxes = [b for b in (c.bbox(i) for i in items) if b]
         if not boxes:
             return
-        x0 = min(b[0] for b in boxes) - 8
-        x1 = max(b[2] for b in boxes) + 8
-        y0 = min(b[1] for b in boxes) - 8
-        y1 = max(b[3] for b in boxes) + 8
-        c.create_rectangle(x0, y0, x1, y1, outline="#2ea043", width=3, tags="thinhl")
+        x0 = min(b[0] for b in boxes) - 6
+        x1 = max(b[2] for b in boxes) + 6
+        y0 = min(b[1] for b in boxes) - 6
+        y1 = max(b[3] for b in boxes) + 6
+        c.create_rectangle(x0, y0, x1, y1, outline="#2ea043", width=1, tags="thinhl")   # v22ze-202: thin
         for i in red:
             b = c.bbox(i)
             if b:
-                c.create_rectangle(b[0] - 3, b[1] - 3, b[2] + 3, b[3] + 3, outline="#e5242b", width=3, tags="thinhl")
+                c.create_rectangle(b[0] - 2, b[1] - 2, b[2] + 2, b[3] + 2, outline="#e5242b", width=1,
+                                   dash=(2, 2), tags="thinhl")
         c.tag_raise("thinhl")
         try:
             W = c.winfo_width()
             sr = [float(v) for v in str(c.cget("scrollregion")).split()]
             lo = c.canvasx(0)
-            if W > 100 and len(sr) == 4 and not (lo + 60 <= x0 and x1 <= lo + W - 60):
-                target = max(sr[0], min(x0 - W / 3.0, sr[2] - W))
+            if W > 100 and len(sr) == 4 and not (lo + 20 <= x0 <= lo + 140):   # v22ze-202: chord at the LEFT edge
+                target = max(sr[0], min(x0 - 70, sr[2] - W))
                 c.xview_moveto((target - sr[0]) / (sr[2] - sr[0]))
         except Exception:
             pass
@@ -11159,6 +11160,7 @@ class ScoreView(tk.Frame):
                 clipped.articulation = getattr(cur, "articulation", "")
                 clipped.spelling = getattr(cur, "spelling", "")
                 clipped.duration = _MAX_TIE_TICKS_r
+                clipped._orig = getattr(cur, "_orig", cur)   # v22ze-202: pieces select the real note
                 cur = clipped
             _guard = 0  # safety cap -- a note can only cross so many
             # real barlines; this just prevents a runaway
@@ -11184,6 +11186,7 @@ class ScoreView(tk.Frame):
                 piece.articulation = getattr(cur, "articulation", "")
                 piece.spelling = getattr(cur, "spelling", "")  # v22ze-51
                 piece.duration = max_dur
+                piece._orig = getattr(cur, "_orig", cur)   # v22ze-202
                 _split_notes.append(piece)
                 # Piece 2 (continuation): starts at the barline, carries
                 # the remainder.  Loop again in case it crosses ANOTHER
@@ -11196,6 +11199,7 @@ class ScoreView(tk.Frame):
                 nxt.articulation = getattr(cur, "articulation", "")
                 nxt.spelling = getattr(cur, "spelling", "")  # v22ze-51
                 nxt.duration = cur.duration - max_dur
+                nxt._orig = getattr(cur, "_orig", cur)   # v22ze-202
                 cur = nxt
             if cur is not None:
                 _split_notes.append(cur)
@@ -14648,13 +14652,14 @@ def _thin_two_hand_tracks(song, rh_i, lh_i, max_notes, max_span, win=20):
 _ROLL_MAX_SPAN = 19  # v22ze-183: a twelfth (octave + fifth) - wider chords cannot be rolled by anyone
 
 
-def _min_transfer(ps, other, hand, max_notes, max_span):   # v22ze-201
+def _min_transfer(ps, other, hand, max_notes, max_span, prefer=()):   # v22ze-201/202
     """Smallest set of this chord's pitches that can go to the other hand so that BOTH
     hands then stay within max_notes / max_span.  Right hand offers its lowest notes first,
     left hand its highest.  None if no transfer works."""
     import itertools as _it
     ps = sorted(set(ps)); other = sorted(set(other))
     order = ps if hand == "R" else ps[::-1]
+    order = sorted(order, key=lambda p: p not in prefer)   # v22ze-202: tied (held) notes first
     for k in range(1, len(ps)):
         for S in _it.combinations(order, k):
             keep = [p for p in ps if p not in S]
@@ -14715,6 +14720,13 @@ def _thin_plan(song, rh_i, lh_i, max_notes, max_span, win=20, avoid_rolls=False)
             i = j + 1
         return out
 
+    _tmc = {}
+    def _tie_maps_for(ti):   # v22ze-202: start-of-note lookup of tied continuation pieces
+        if ti not in _tmc:
+            _tmc[ti] = {(x.pitch, x.tick): x for x in song.tracks[ti].notes
+                        if getattr(x, "articulation", "") == "tie_continuation"}
+        return _tmc[ti]
+
     grp = {rh_i: _groups(rh_i), lh_i: _groups(lh_i)}
     gtick = {k: [g[0].tick for g in v] for k, v in grp.items()}
     plan = []
@@ -14757,7 +14769,9 @@ def _thin_plan(song, rh_i, lh_i, max_notes, max_span, win=20, avoid_rolls=False)
             ent = dict(kind="chord", ti=ti, other_i=oi, hand=hand, bar=bar,
                        chord_no=per_bar[bar], tick=g[0].tick, ps=ps, keys=keys,
                        rem=sorted(rem), actions=actions, other_ps=other, state="pending")
-            _tf = _min_transfer(ps, other, hand, max_notes, max_span) if (_rollable and avoid_rolls) else None
+            _tied = {n.pitch for n in g if _tie_maps_for(ti).get((n.pitch, n.tick + n.duration)) is not None}   # v22ze-202
+            _tf = (_min_transfer(ps, other, hand, max_notes, max_span, _tied)
+                   if (_rollable and avoid_rolls) else None)
             if _tf:
                 # v22ze-201: the smallest transfer to the other hand makes both hands playable
                 ent.update(rem=list(_tf), actions={p: "move" for p in _tf})
@@ -14800,7 +14814,8 @@ def _thin_plan(song, rh_i, lh_i, max_notes, max_span, win=20, avoid_rolls=False)
                 while _k < len(gtick[oi]) and gtick[oi][_k] <= ch[-1].tick + win:
                     _oth |= {n.pitch for n in grp[oi][_k]}
                     _k += 1
-                _tf2 = _min_transfer(ps, _oth, hand, max_notes, max_span)
+                _tied2 = {n.pitch for n in ch if _tie_maps_for(ti).get((n.pitch, n.tick + n.duration)) is not None}   # v22ze-202
+                _tf2 = _min_transfer(ps, _oth, hand, max_notes, max_span, _tied2)
                 if _tf2:
                     plan.append(dict(kind="chord", ti=ti, other_i=oi, hand=hand, bar=bar,
                                      chord_no=per_bar[bar], tick=ch[0].tick, ps=ps, keys=keys,
