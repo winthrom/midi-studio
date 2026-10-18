@@ -19,6 +19,8 @@ for f in "$ROOT"/*.py; do
     cp "$f" "$OUT/"
 done
 cp "$ROOT/packaging/linux/selftest.py" "$OUT/"
+# v22ze-198: the User Guide travels with the AppImage (Help > User Guide works offline)
+[ -f "$ROOT/docs/MIDI-Studio-User-Guide.pdf" ] && cp "$ROOT/docs/MIDI-Studio-User-Guide.pdf" "$OUT/"
 
 for sub in lib sound; do
     if [ -d "$ROOT/packaging/linux/payload/$sub" ] && \

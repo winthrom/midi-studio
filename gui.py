@@ -3090,7 +3090,8 @@ class Song:
         try:
             _ri = next((i for i, t in enumerate(out.tracks) if t is rh), None)
             _li = next((i for i, t in enumerate(out.tracks) if t is lh), None)
-            if _ri is not None and _li is not None and rh.notes and lh.notes:
+            if (p.get("auto_move", True) and _ri is not None and _li is not None
+                    and rh.notes and lh.notes):
                 _moved = _auto_move_between_hands(
                     out, _ri, _li, int(p.get("max_notes_per_hand", 5)), int(p.get("max_span", 14)))
                 print(f"[rationalize] moved {_moved} spare note(s) to the other hand", file=sys.stderr)
@@ -14592,6 +14593,11 @@ def _thin_hand_chord(pitches, hand, max_notes, max_span):
     # 2. fingers: leave out octave doublings first, then middle notes
     while len(c) > max_notes:
         inner = c[1:-1]
+        if not inner:   # v22ze-198: only two notes left (a hand limited to one finger)
+            r = c[0] if hand == "R" else c[-1]
+            removed.add(r)
+            c.remove(r)
+            continue
         doubled = [p for p in inner if any(q != p and (q - p) % 12 == 0 for q in c)]
         r = doubled[0] if doubled else inner[len(inner) // 2]
         removed.add(r)
@@ -16794,9 +16800,11 @@ class MidisoftStudio:
         _tt(_row(pfrm, "Arpeggio window (0=auto):", lambda p: tk.Spinbox(
             p, from_=0, to=200, textvariable=arp_var, width=5,
             bg="#21262d", fg=FG, buttonbackground="#30363d"), 11),
-            "Notes within this many ticks of each other are treated as a "
-            "rolled chord/arpeggio rather than sequential notes. 0 lets "
-            "the app compute a sensible value from the detected tempo.")
+            "How close together in time notes must be to count as one chord, in ticks "
+            "(tiny time steps inside the MIDI file). Standard value: 0 = automatic, "
+            "about 1/50 of a second at the speed of the piece. Bigger gathers more "
+            "spread-out notes into one chord; smaller keeps them separate. "
+            "Leave at 0 unless a fast run is being merged or a rolled chord is missed.")
 
         # ── Measure range ────────────────────────────────────────────────────
         rfrm = tk.LabelFrame(content, text=" Measure Range ", bg=BG, fg=FG,
@@ -18012,12 +18020,12 @@ class MidisoftStudio:
         tk.Label(dlg, text="Widest stretch of one hand (semitones):", bg=BG, fg=FG).grid(
             row=1, column=0, padx=(16, 6), pady=4, sticky="w"
         )
-        tk.Spinbox(dlg, from_=8, to=30, textvariable=span_var, width=5).grid(
+        tk.Spinbox(dlg, from_=6, to=30, textvariable=span_var, width=5).grid(
             row=1, column=1, padx=(0, 16), pady=4
         )
         tk.Label(
             dlg,
-            text="12 = one octave. Raise this for music written for very large hands.",
+            text="12 = one octave (standard). Raise it for large hands, lower it for small (children's) hands.",
             bg=BG,
             fg=MUTED,
             font=("TkDefaultFont", 8),
@@ -18025,12 +18033,12 @@ class MidisoftStudio:
         tk.Label(dlg, text="Most notes one hand plays at once:", bg=BG, fg=FG).grid(
             row=3, column=0, padx=(16, 6), pady=(10, 4), sticky="w"
         )
-        tk.Spinbox(dlg, from_=3, to=10, textvariable=notes_var, width=5).grid(
+        tk.Spinbox(dlg, from_=1, to=5, textvariable=notes_var, width=5).grid(
             row=3, column=1, padx=(0, 16), pady=(10, 4)
         )
         tk.Label(
             dlg,
-            text="5 = one note per finger. Raise it only if the music needs more.",
+            text="5 = one note per finger (standard, the most there can be). Lower it for an injured hand.",
             bg=BG,
             fg=MUTED,
             font=("TkDefaultFont", 8),
@@ -18040,7 +18048,7 @@ class MidisoftStudio:
             try:
                 result[0] = (int(span_var.get()), int(notes_var.get()))
             except Exception:
-                result[0] = (14, 5)
+                result[0] = (12, 5)
             dlg.destroy()
 
         bfrm = tk.Frame(dlg, bg=BG)
@@ -18102,6 +18110,7 @@ class MidisoftStudio:
             }
             params["max_span"] = _hand_opts[0]  # v22ze-140
             params["max_notes_per_hand"] = _hand_opts[1]
+            params["auto_move"] = False   # v22ze-198: Fix Chords offers each move instead
             # v22ze-137: keep every note's original start/length/velocity
             # and every other instrument; only decide RH/LH.
             result = self.song.rationalize_keep_audio(params=params)
@@ -18146,21 +18155,26 @@ class MidisoftStudio:
                         f"(too many notes or too wide a stretch): "
                         + ", ".join(str(b) for b in _lst[:12])
                         + (" ..." if len(_lst) > 12 else "")
-                        + ".\nThey are shown as the file has them.\n"
+                        + ".\n"
                     )
             except Exception:
                 _warn = ""
-            messagebox.showinfo(
-                "Separate Hands",
-                f"Done.  RH: {rh_n} notes   LH: {lh_n} notes\n" + _warn + "\n"
-                "Open Setup \u25b8 Rationalize Score if you'd like to "
-                "Discard and revert to the original.",
-                parent=self.root)
+            _msg = (f"Done.  RH: {rh_n} notes   LH: {lh_n} notes\n" + _warn
+                    + "\nTo reverse this, use File \u25b8 Undo Correction.")   # v22ze-198
+            if _warn:
+                if messagebox.askyesno(
+                        "Separate Hands",
+                        _msg + "\n\nOpen Fix Chords now?  It offers, chord by chord, to give spare notes\n"
+                        "to the other hand where that hand can play them.",
+                        parent=self.root):
+                    self.root.after(50, lambda o=_hand_opts: self._thin_chords(opts=o))
+            else:
+                messagebox.showinfo("Separate Hands", _msg, parent=self.root)
         except Exception as exc:
             messagebox.showerror("Separate Hands", f"Error: {exc}",
                                  parent=self.root)
 
-    def _thin_chords(self):
+    def _thin_chords(self, opts=None):   # v22ze-198: opts = sizes already chosen
         """v22ze-183: optional - fix chords one hand cannot play, chord by chord:
         move a note to the other hand (keeps sounding) or delete it; hear before accepting.
         The window stays open after Apply; fixed chords drop off the list."""
@@ -18176,7 +18190,8 @@ class MidisoftStudio:
                 "Run Edit ▸ Separate Hands first, so the music is split into a "
                 "right-hand part and a left-hand part.", parent=self.root)
             return
-        opts = self._ask_separate_hands_options(thin=True)
+        if opts is None:
+            opts = self._ask_separate_hands_options(thin=True)
         if opts is None:
             return
         max_span, max_notes = opts
