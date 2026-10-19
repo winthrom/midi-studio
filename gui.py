@@ -9759,6 +9759,8 @@ class ScoreView(tk.Frame):
         ).pack(side=tk.LEFT, padx=10)
 
         # ── Mini transport (synced to main app) ──────────────────────────────
+        nb.select(t6)                  # v22ze-205: the usual first action is Select
+        self._active_tool = "select"
         tk.Frame(tb, width=1, bg="#aaa").pack(side=tk.LEFT, fill=tk.Y, padx=8, pady=2)
         mbs = dict(relief=tk.FLAT, bg="#c8c8c0", padx=5, pady=1, font=("TkDefaultFont", 12))
         tk.Button(tb, text="⏮", command=self._t_rewind, **mbs).pack(side=tk.LEFT, padx=1)
@@ -9820,6 +9822,16 @@ class ScoreView(tk.Frame):
             "measures the INTERVAL (in semitones) a hand can comfortably\n"
             "reach, not a fixed pitch line.",
         )
+        # v22ze-205: rests shorter than a quarter note are hidden unless this box is ticked
+        self._short_rests_var = tk.BooleanVar(value=False)
+        _srb = tk.Checkbutton(tb, text="Short rests", variable=self._short_rests_var, bg="#e8e8e0",
+                              command=self._draw)
+        _srb.pack(side=tk.LEFT, padx=(10, 2))
+        _tt(_srb,
+            "Show rests shorter than a quarter note.\n"
+            "Off (usual): a short recorded note followed by silence does not\n"
+            "get a string of 1/8, 1/16 and 1/32 rests.  The music is unchanged;\n"
+            "this only changes what the Score draws.")
         fr = tk.Frame(self, bg="#fffff8")
         fr.pack(fill=tk.BOTH, expand=True)
         self.canvas = tk.Canvas(fr, bg="#fffff8", cursor="crosshair")
@@ -10736,10 +10748,13 @@ class ScoreView(tk.Frame):
             0.5,
             2.0,
         ]  # in SLG units from treble top
-        _FLAT_POS_T = [1.5, 0.5, 2.0, 1.0, 2.5, 1.5, 3.0]  # Bb,Eb,Ab,Db,Gb,Cb,Fb
-        # Bass staff offsets — each accidental is 3 staff positions (1.5 SLG) lower
-        _SHARP_POS_B = [p + 1.5 for p in _SHARP_POS_T]
-        _FLAT_POS_B = [p + 1.5 for p in _FLAT_POS_T]
+        # v22ze-205: Bb on the middle line (B4), Eb top space... positions from the top line, in line-gaps
+        _FLAT_POS_T = [2.0, 0.5, 2.5, 1.0, 3.0, 1.5, 3.5]  # Bb,Eb,Ab,Db,Gb,Cb,Fb
+        # Bass staff: the same pattern one line-gap (2 steps) lower - F#3 on the 4th line, Bb2 on the 2nd line
+        _SHARP_POS_B = [p + 1.0 for p in _SHARP_POS_T]
+        _FLAT_POS_B = [p + 1.0 for p in _FLAT_POS_T]
+        _top_is_bass = (top_clef == "\U0001D122")      # staff that opens with the other clef
+        _bot_is_treble = (bot_clef == "\U0001D11E")
 
         # v22ze fix: this used to do `key_str.rstrip('m')` and look the
         # result up in the MAJOR-key tables above -- which silently
@@ -10765,18 +10780,18 @@ class ScoreView(tk.Frame):
         if n_sharps > 0:
             for k in range(n_sharps):
                 x = key_x0 + k * acc_w
-                yt = tt + _SHARP_POS_T[k] * self.SLG + _key_acc_dy
+                yt = tt + (_SHARP_POS_B if _top_is_bass else _SHARP_POS_T)[k] * self.SLG + _key_acc_dy
                 c.create_text(x, yt, text="♯", font=acc_font, fill="#111", anchor="w")
                 if grand and bt is not None:
-                    yb = bt + _SHARP_POS_B[k] * self.SLG + _key_acc_dy
+                    yb = bt + (_SHARP_POS_T if _bot_is_treble else _SHARP_POS_B)[k] * self.SLG + _key_acc_dy
                     c.create_text(x, yb, text="♯", font=acc_font, fill="#111", anchor="w")
         elif n_flats > 0:
             for k in range(n_flats):
                 x = key_x0 + k * acc_w
-                yt = tt + _FLAT_POS_T[k] * self.SLG + _key_acc_dy
+                yt = tt + (_FLAT_POS_B if _top_is_bass else _FLAT_POS_T)[k] * self.SLG + _key_acc_dy
                 c.create_text(x, yt, text="♭", font=acc_font, fill="#111", anchor="w")
                 if grand and bt is not None:
-                    yb = bt + _FLAT_POS_B[k] * self.SLG + _key_acc_dy
+                    yb = bt + (_FLAT_POS_T if _bot_is_treble else _FLAT_POS_B)[k] * self.SLG + _key_acc_dy
                     c.create_text(x, yb, text="♭", font=acc_font, fill="#111", anchor="w")
 
         # Advance time-sig x to clear the key signature
@@ -12163,8 +12178,8 @@ class ScoreView(tk.Frame):
             # Notehead as proper oval (wider than tall) that doesn't touch staff lines
             # h_rad = horizontal radius (width/2), v_rad = vertical radius (height/2)
             # Scale so noteheads fit snugly between staff lines (gap of ~0.1*SLG on each side)
-            h_rad = nr * 0.90  # horizontal (slightly wider)
-            v_rad = nr * 0.60  # vertical (noticeably shorter — fits between lines)
+            h_rad = nr * 0.82  # v22ze-205: was 0.90 (about 9% smaller)
+            v_rad = nr * 0.55  # v22ze-205: was 0.60
             # Grace notes: smaller notehead, drawn in dark grey to distinguish
             is_grace = any(getattr(n, "articulation", "") == "grace" for n in notes)
             if is_grace:
@@ -13540,6 +13555,9 @@ class ScoreView(tk.Frame):
         tt_local = self._treble_top(ti, self.app.song.tracks)
         bt_local = self._bass_top(ti, self.app.song.tracks)  # None for single-staff
         slg = self.SLG
+        # v22ze-205: a gap shorter than a quarter note is how short the recorded note was, not a written rest
+        _sr_var = getattr(self, "_short_rests_var", None)
+        _min_rest = (tpb // 8) if (_sr_var is not None and _sr_var.get()) else tpb
 
         REST_VALS = [
             (tpb * 4, "whole"),
@@ -13597,12 +13615,16 @@ class ScoreView(tk.Frame):
                 for tick, delta in events:
                     if active == 0 and tick > cursor:
                         gap = tick - cursor
-                        if gap >= tpb // 8:
+                        if gap >= _min_rest:
                             parts = _rest_seq(gap)
                             gx = self._tick_to_x(cursor)
                             frag_tick = cursor
                             for val, rtype in parts:
                                 pw = val * self._px_per_tick
+                                if val < _min_rest:   # v22ze-205: leftover short piece of a longer gap
+                                    gx += pw
+                                    frag_tick += val
+                                    continue
                                 mid = gx + pw / 2
                                 if rtype == "whole":
                                     ry = y_top + slg
@@ -13621,12 +13643,16 @@ class ScoreView(tk.Frame):
                 # Gap after last sounding note
                 if active == 0 and cursor < me:
                     gap = me - cursor
-                    if gap >= tpb // 8:
+                    if gap >= _min_rest:
                         parts = _rest_seq(gap)
                         gx = self._tick_to_x(cursor)
                         frag_tick = cursor
                         for val, rtype in parts:
                             pw = val * self._px_per_tick
+                            if val < _min_rest:   # v22ze-205
+                                gx += pw
+                                frag_tick += val
+                                continue
                             mid = gx + pw / 2
                             if rtype == "whole":
                                 ry = y_top + slg
