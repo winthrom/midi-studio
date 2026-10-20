@@ -15176,6 +15176,31 @@ def _ts_plan(song, target):   # v22ze-207
     return new, got, note
 
 
+def _ts_clean_candidates(song, target):   # v22ze-208
+    """Text naming the nearest measure counts below / above `target` that keep every note exactly on the
+    grid (ticks per beat becomes a whole multiple or a whole fraction of what it is now)."""
+    old = song.ticks_per_beat
+    opts = set()
+    for k in range(2, 17):
+        for new in (old * k, (old // k if old % k == 0 else None)):
+            if new is None or new < 24 or new > 30000 or new == old:
+                continue
+            try:
+                opts.add(_ts_measure_count(song, new))
+            except Exception:
+                pass
+    below = [m for m in opts if target / 2.0 <= m < target]
+    above = [m for m in opts if target < m <= target * 2.0]
+    parts = []
+    if below:
+        parts.append(str(max(below)))
+    if above:
+        parts.append(str(min(above)))
+    if not parts or target in opts:
+        return ""
+    return "Cleaner: " + " or ".join(parts) + " keep the notes on the grid."
+
+
 @dataclass
 class TimeScaleAction:   # v22ze-207
     description: str
@@ -16375,6 +16400,12 @@ class MidisoftStudio:
                 mc_msg.set("Would give " + str(got) + " measures (ticks per beat "
                            + str(self.song.ticks_per_beat) + " -> " + str(new_tpb)
                            + "); " + note + ". The sound does not change.")
+                try:
+                    _cl = _ts_clean_candidates(self.song, n)
+                except Exception:
+                    _cl = ""
+                if _cl:
+                    mc_msg.set(mc_msg.get() + " " + _cl)
         try:
             mc_var.trace_add("write", _mc_preview)
         except Exception:
