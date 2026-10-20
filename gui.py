@@ -13942,9 +13942,7 @@ class ScoreView(tk.Frame):
                                 "or drag a box around several).", parent=self.app.root)
             return
         song = self.app.song
-        names = [(t.name or "") for t in song.tracks]
-        rh = next((i for i, n in enumerate(names) if n.endswith(" (RH)")), None)
-        lh = next((i for i, n in enumerate(names) if n.endswith(" (LH)")), None)
+        rh, lh = _hand_tracks(song)   # v22ze-206
         if rh is None or lh is None:
             messagebox.showinfo("Move to staff", "Run Edit > Separate Hands first, so there is an "
                                 "upper and a lower staff to move between.", parent=self.app.root)
@@ -14735,6 +14733,36 @@ def _tie_chain(maps, n):   # v22ze-201: the note plus every tied piece before an
         chain.append(c)
         cur = c
     return chain
+
+
+def _hand_tracks(song):   # v22ze-206
+    """(rh_index, lh_index) of the two hand tracks, or (None, None).  Same recognition the Score uses
+    when it draws two tracks as one grand staff: (RH)/(LH) suffixes, right/left/RH/LH in the names,
+    or two neighbouring piano tracks (the first is the right hand)."""
+    import re as _re
+    tr = song.tracks
+    names = [(t.name or "") for t in tr]
+    rh = next((i for i, n in enumerate(names) if n.endswith(" (RH)")), None)
+    lh = next((i for i, n in enumerate(names) if n.endswith(" (LH)")), None)
+    if rh is not None and lh is not None:
+        return rh, lh
+
+    def _hint(n):
+        n = n.lower()
+        if _re.search(r"\bright\b|\brh\b", n):
+            return "R"
+        if _re.search(r"\bleft\b|\blh\b", n):
+            return "L"
+        return None
+    piano = frozenset(range(0, 8)) | frozenset(range(16, 24))
+    for i in range(len(tr) - 1):
+        a, b = tr[i], tr[i + 1]
+        if not a.notes or not b.notes:
+            continue
+        if (_hint(a.name or "") == "R" and _hint(b.name or "") == "L") or \
+                (a.program in piano and b.program in piano):
+            return i, i + 1
+    return None, None
 
 
 def _chord_win_gap(tpb):   # v22ze-204: ONE rule for "one chord", used by Fix Chords and the Score
@@ -15938,6 +15966,7 @@ class MidisoftStudio:
 
         dlg = tk.Toplevel(self.root)
         dlg.title("Key Signature")
+        self._work_dialogs = [w for w in getattr(self, "_work_dialogs", []) if w.winfo_exists()] + [dlg]   # v22ze-206
         dlg.configure(bg=BG)
         dlg.resizable(False, False)
         # v22ze: transient()+lift() is the standard, safe way to keep a
@@ -17502,6 +17531,17 @@ class MidisoftStudio:
                 except Exception:
                     pass
                 setattr(self, _dlg_attr, None)
+        for _w in list(getattr(self, "_work_dialogs", [])):   # v22ze-206: Fix Chords, Key Signature
+            try:
+                if _w.winfo_exists():
+                    _cb = getattr(_w, "_on_close", None)
+                    if _cb:
+                        _cb()
+                    else:
+                        _w.destroy()
+            except Exception:
+                pass
+        self._work_dialogs = []
         self.song=Song(); self.transport.song=self.song; self._rec_armed=0
         # v22ze-46 fix (presentation request 3): switching to a new/
         # different file left several pieces of state carried over from
@@ -18376,12 +18416,18 @@ class MidisoftStudio:
         Final box = this line is finished and locked.  Each tick is one Edit > Undo step."""
         import copy as _copy
         import bisect as _bs
+        _old = getattr(self, "_fixchords_dlg", None)   # v22ze-206: only one Fix Chords window
+        try:
+            if _old is not None and _old.winfo_exists():
+                _old.lift()
+                _old.focus_force()
+                return
+        except Exception:
+            pass
         if not self._grand_staff_guard("Fix Chords"):   # v22ze-191
             return
         song = self.song
-        names = [(t.name or "") for t in song.tracks]
-        rh_i = next((i for i, n in enumerate(names) if n.endswith(" (RH)")), None)
-        lh_i = next((i for i, n in enumerate(names) if n.endswith(" (LH)")), None)
+        rh_i, lh_i = _hand_tracks(song)   # v22ze-206
         if rh_i is None or lh_i is None:
             messagebox.showinfo("Fix Chords",
                 "Run Edit \u25b8 Separate Hands first, so the music is split into a "
@@ -18422,6 +18468,8 @@ class MidisoftStudio:
         BG = "#0d1117"
         dlg = tk.Toplevel(self.root)
         dlg.title("Fix Chords")
+        self._fixchords_dlg = dlg   # v22ze-206: closed with the piece
+        self._work_dialogs = [w for w in getattr(self, "_work_dialogs", []) if w.winfo_exists()] + [dlg]
         dlg.configure(bg=BG)
         title = tk.Label(dlg, bg=BG, fg="#58a6ff", font=("TkDefaultFont", 11, "bold"))
         title.pack(padx=16, pady=(14, 2))
@@ -18882,10 +18930,7 @@ class MidisoftStudio:
                 return
             picked = []
             for item in list(getattr(sv, "_selection", ()) or ()):
-                try:
-                    _ti, n = item
-                except Exception:
-                    continue
+                n = item[1] if (isinstance(item, tuple) and len(item) == 2) else item   # v22ze-206
                 for t in (rh_i, lh_i):
                     if any(x is n for x in song.tracks[t].notes):
                         picked.append((t, n))
@@ -19018,6 +19063,7 @@ class MidisoftStudio:
         tk.Button(bf2, text="Lock all changed", command=_lock_fixed, bg="#30363d", **bs).pack(side=tk.LEFT, padx=4)
         tk.Button(bf2, text="Close", command=_cancel, bg="#6e7681", **bs).pack(side=tk.LEFT, padx=4)
         dlg.protocol("WM_DELETE_WINDOW", _cancel)
+        dlg._on_close = _cancel   # v22ze-206
         try:
             dlg.update_idletasks()
             _w, _h = dlg.winfo_reqwidth(), dlg.winfo_reqheight()
