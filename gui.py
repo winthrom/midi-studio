@@ -15094,6 +15094,95 @@ def _thin_swap(song, rem, add, rolls, undo):
         n.roll_id = old if undo else new
 
 
+def _ts_snapshot(song):   # v22ze-207
+    """Everything the time-scale / speed changes touch, so Undo can put it back exactly."""
+    import copy as _c
+    return dict(
+        tpb=song.ticks_per_beat, tempo=song.tempo,
+        tmap=list(getattr(song, "tempo_map", None) or []),
+        tmf=getattr(song, "_tempo_map_for", None),
+        evs=[(ev, ev.msg) for tr in song.tracks for ev in tr.events
+             if ev.msg.type == "set_tempo"],
+        rmm=_c.deepcopy(song.rationalized_measure_map))
+
+
+def _ts_restore(song, snap):   # v22ze-207
+    import copy as _c
+    song.ticks_per_beat = snap["tpb"]
+    song.tempo = snap["tempo"]
+    song.tempo_map = list(snap["tmap"])
+    song._tempo_map_for = snap["tmf"]
+    for ev, msg in snap["evs"]:
+        ev.msg = msg
+    song.rationalized_measure_map = _c.deepcopy(snap["rmm"])
+    song.modified = True
+
+
+def _ts_transform(song, new_tpb, factor):   # v22ze-207
+    """Set ticks-per-beat to new_tpb and multiply every tempo (microseconds per beat) by factor.
+    Returns an error string, or None when done.  No note is touched."""
+    def _t(x):
+        return max(1, int(round(x * factor)))
+    olds = [song.tempo] + [tp for _t0, tp in (getattr(song, "tempo_map", None) or [])]
+    olds += [ev.msg.tempo for tr in song.tracks for ev in tr.events if ev.msg.type == "set_tempo"]
+    if any(_t(x) > 16777215 for x in olds):
+        return "That would make the slowest tempo too slow for a MIDI file."
+    if any(_t(x) < 1 for x in olds):
+        return "That would make a tempo too fast for a MIDI file."
+    old_tempo = song.tempo
+    song.tempo = _t(song.tempo)
+    tm = getattr(song, "tempo_map", None) or []
+    if tm:
+        keep_link = (getattr(song, "_tempo_map_for", None) == old_tempo)
+        song.tempo_map = [(t, _t(tp)) for t, tp in tm]
+        song._tempo_map_for = song.tempo if keep_link else getattr(song, "_tempo_map_for", None)
+    for tr in song.tracks:
+        for ev in tr.events:
+            if ev.msg.type == "set_tempo":
+                ev.msg = ev.msg.copy(tempo=_t(ev.msg.tempo))
+    song.ticks_per_beat = int(new_tpb)
+    song.rationalized_measure_map = None
+    song.modified = True
+    return None
+
+
+def _ts_measure_count(song, tpb):   # v22ze-207
+    """Number of measures the song would have at ticks-per-beat tpb (fixed grid from the meter)."""
+    raw = list(song.sig_changes) if song.sig_changes else []
+    seen = {}
+    for tick, num, den in raw:
+        seen[tick] = (num, den)
+    if 0 not in seen:
+        seen[0] = (song.time_sig_num, song.time_sig_den)
+    sigs = sorted((t, n, d) for t, (n, d) in seen.items())
+    total = max(song.total_ticks(), 1)
+    return len(_build_measure_map_core(int(tpb), sigs, total))
+
+
+def _ts_plan(song, target):   # v22ze-207
+    """For a wanted measure count, return (new_tpb, resulting_count, exact_note) or None."""
+    cur = len(song.get_measure_map())
+    if target < 1 or cur < 1:
+        return None
+    old = song.ticks_per_beat
+    new = max(1, int(round(old * cur / float(target))))
+    got = _ts_measure_count(song, new)
+    if new == old:
+        note = "no change"
+    elif new % old == 0 or old % new == 0:
+        note = "exact multiple: notes stay on the grid"
+    else:
+        note = "not an exact multiple: run Quantize or Clean up after applying"
+    return new, got, note
+
+
+@dataclass
+class TimeScaleAction:   # v22ze-207
+    description: str
+    before: dict
+    after: dict
+
+
 @dataclass
 class CalibrationAction:
     """Memento for a BPM or time-signature change (undo/redo).
@@ -15619,7 +15708,10 @@ class MidisoftStudio:
         import copy as _copy
         action = self._undo_stack.pop()
 
-        if isinstance(action, CalibrationAction):
+        if isinstance(action, TimeScaleAction):   # v22ze-207
+            _ts_restore(self.song, action.before)
+            self._redo_stack.append(action)
+        elif isinstance(action, CalibrationAction):
             # Restore song tempo and time signature
             redo_action = CalibrationAction(
                 description=action.description,
@@ -15699,7 +15791,10 @@ class MidisoftStudio:
         import copy as _copy
         action = self._redo_stack.pop()
 
-        if isinstance(action, CalibrationAction):
+        if isinstance(action, TimeScaleAction):   # v22ze-207
+            _ts_restore(self.song, action.after)
+            self._undo_stack.append(action)
+        elif isinstance(action, CalibrationAction):
             undo_action = CalibrationAction(
                 description=action.description,
                 before_tempo=action.after_tempo,
@@ -15814,6 +15909,54 @@ class MidisoftStudio:
         self.root.after(200, _clear_end)
 
     # ── Score Setup Panel ────────────────────────────────────────────────────
+
+    def _apply_time_scale(self, target):   # v22ze-207
+        """Re-label the piece so it has about `target` measures.  Sound unchanged."""
+        from tkinter import messagebox as _mb
+        song = self.song
+        pl = _ts_plan(song, int(target))
+        if pl is None:
+            return "Enter a number of measures of 1 or more."
+        new_tpb, got, note = pl
+        if new_tpb == song.ticks_per_beat:
+            return "No change: the piece already has that many measures."
+        if new_tpb < 24 or new_tpb > 30000:
+            return "That would need " + str(new_tpb) + " ticks per beat; choose a closer number."
+        before = _ts_snapshot(song)
+        err = _ts_transform(song, new_tpb, new_tpb / float(before["tpb"]))
+        if err:
+            _ts_restore(song, before)
+            return err
+        after = _ts_snapshot(song)
+        self._push_undo(TimeScaleAction(
+            description="Measure length: " + str(len(before["rmm"] or [])) + " -> " + str(got) + " measures",
+            before=before, after=after))
+        self._update_title()
+        self._refresh_views()
+        return "Done: " + str(got) + " measures (" + note + ")."
+
+    def _apply_speed(self, pct):   # v22ze-207
+        """Play faster (pct > 100) or slower (pct < 100).  Notes unchanged; all tempos scaled."""
+        song = self.song
+        try:
+            pct = float(pct)
+        except Exception:
+            return "Enter a percentage such as 125."
+        if pct < 10 or pct > 1000:
+            return "Choose a speed between 10 and 1000 percent."
+        if abs(pct - 100.0) < 1e-9:
+            return "No change: 100 percent is the current speed."
+        before = _ts_snapshot(song)
+        err = _ts_transform(song, song.ticks_per_beat, 100.0 / pct)
+        if err:
+            _ts_restore(song, before)
+            return err
+        after = _ts_snapshot(song)
+        self._push_undo(TimeScaleAction(
+            description="Speed " + str(round(pct)) + "%", before=before, after=after))
+        self._update_title()
+        self._refresh_views()
+        return "Done: now " + str(round(song.bpm)) + " BPM at the start."
 
     def _apply_global_bpm(self, new_bpm, source="manual"):
         """Change the song's global BPM, push to undo stack, refresh views."""
@@ -16175,6 +16318,81 @@ class MidisoftStudio:
             "Set the song's tempo. This changes playback speed and how "
             "wide each measure is on screen — it does not move or "
             "requantize any notes by itself.").pack(side=tk.LEFT)
+
+        # v22ze-207: Speed row
+        spd_var = tk.IntVar(value=100)
+        spd_msg = tk.StringVar(value="100 = same speed; 125 = 25% faster; 80 = 20% slower")
+        spd_row = tk.Frame(gfrm, bg=BG)
+        spd_row.pack(fill=tk.X, pady=3)
+        _lbl(spd_row, "Speed (%):", width=18).pack(side=tk.LEFT)
+        tk.Spinbox(spd_row, from_=10, to=1000, textvariable=spd_var,
+                   **sb).pack(side=tk.LEFT, padx=(0, 6))
+
+        def _do_speed():
+            try:
+                v = spd_var.get()
+            except Exception:
+                v = 0
+            spd_msg.set(self._apply_speed(v))
+            try:
+                bpm_var.set(round(self.song.bpm))
+            except Exception:
+                pass
+        _tt(tk.Button(spd_row, text="Apply", command=_do_speed, **bb),
+            "Make the piece play faster or slower in the saved file. All tempo "
+            "changes are scaled together. Notes do not move. Undo restores it."
+            ).pack(side=tk.LEFT)
+        _lbl(gfrm, "", textvariable=spd_msg, fg=MUTED, font=("TkDefaultFont", 8),
+             wraplength=330, justify=tk.LEFT, anchor="w").pack(fill=tk.X, padx=(4, 0))
+
+        # v22ze-207: Measure length row
+        try:
+            _cur_m = len(self.song.get_measure_map())
+        except Exception:
+            _cur_m = 1
+        mc_var = tk.IntVar(value=_cur_m)
+        mc_msg = tk.StringVar(value="Now " + str(_cur_m) + " measures. Type the number you want.")
+        mc_row = tk.Frame(gfrm, bg=BG)
+        mc_row.pack(fill=tk.X, pady=3)
+        _lbl(mc_row, "Measures wanted:", width=18).pack(side=tk.LEFT)
+        tk.Spinbox(mc_row, from_=1, to=5000, textvariable=mc_var,
+                   **sb).pack(side=tk.LEFT, padx=(0, 6))
+
+        def _mc_preview(*_a):
+            try:
+                n = int(mc_var.get())
+                pl = _ts_plan(self.song, n)
+            except Exception:
+                pl = None
+            if pl is None:
+                mc_msg.set("Type a whole number of measures.")
+                return
+            new_tpb, got, note = pl
+            cur = len(self.song.get_measure_map())
+            if new_tpb == self.song.ticks_per_beat:
+                mc_msg.set("Now " + str(cur) + " measures (no change).")
+            else:
+                mc_msg.set("Would give " + str(got) + " measures (ticks per beat "
+                           + str(self.song.ticks_per_beat) + " -> " + str(new_tpb)
+                           + "); " + note + ". The sound does not change.")
+        try:
+            mc_var.trace_add("write", _mc_preview)
+        except Exception:
+            pass
+
+        def _do_measures():
+            try:
+                n = int(mc_var.get())
+            except Exception:
+                mc_msg.set("Type a whole number of measures.")
+                return
+            mc_msg.set(self._apply_time_scale(n))
+        _tt(tk.Button(mc_row, text="Apply", command=_do_measures, **bb),
+            "Re-label the piece so it has this many measures. The sound is "
+            "identical; only the barlines move. Notes are not changed. "
+            "Undo restores it.").pack(side=tk.LEFT)
+        _lbl(gfrm, "", textvariable=mc_msg, fg=MUTED, font=("TkDefaultFont", 8),
+             wraplength=330, justify=tk.LEFT, anchor="w").pack(fill=tk.X, padx=(4, 0))
 
         # Auto-detect row
         detect_note_var = tk.StringVar(value="Not run yet")
