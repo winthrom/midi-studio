@@ -2326,12 +2326,14 @@ def _build_measure_map_core(tpb, sigs, total):
     return measures
 
 
-def remove_short_rests(song, thresh, m_from=None, m_to=None, dry=False):   # v22ze-211
+def remove_short_rests(song, thresh, m_from=None, m_to=None, dry=False):   # v22ze-211, 212
     """Close every gap shorter than `thresh` ticks between a note's end and the next onset (per track)
-    by lengthening the note(s) that end at the gap.  Gaps that would cross a barline are left alone.
+    by lengthening the note(s) that end at the gap.  The recorded SOUND is kept (orig_dur).  A gap that
+    crosses one barline is closed with a tied pair.  Notes already in a tie are left alone.
     m_from / m_to are 1-based measure numbers (None = whole piece).
-    Returns {"closed": gaps closed, "lengthened": notes lengthened, "skipped": barline-crossing gaps}."""
+    Returns {"closed", "lengthened", "crossed" (tied over a barline), "skipped"}."""
     import bisect as _bis
+    import copy as _cp
     mmap = song.get_measure_map()
     starts = [m[1] for m in mmap]
     n_m = len(mmap)
@@ -2340,23 +2342,43 @@ def remove_short_rests(song, thresh, m_from=None, m_to=None, dry=False):   # v22
 
     def meas(t):
         return _bis.bisect_right(starts, t) - 1
-    closed = lengthened = skipped = 0
+    closed = lengthened = skipped = crossed = 0
     for tr in song.tracks:
         if not tr.notes or getattr(tr, "channel", 0) == 9:
             continue
         cur = None
         ending = []
+        adds = []
         for n in sorted(tr.notes, key=lambda x: x.tick):
             ext = False
             if cur is not None and n.tick > cur:
                 gap = n.tick - cur
                 if 0 < gap < thresh and cur >= lo and (hi is None or cur < hi):
-                    if meas(cur) == meas(n.tick - 1):
+                    mn = meas(n.tick - 1)
+                    kinds = [mn - meas(e.tick) for e in ending]     # 0 = same measure, 1 = carried over a barline
+                    bad = (not all(k in (0, 1) for k in kinds)) or any(
+                        k == 1 and getattr(e, "articulation", "") in ("tie_predecessor", "tie_continuation")
+                        for k, e in zip(kinds, ending))
+                    if not bad:
                         closed += 1
                         lengthened += len(ending)
+                        crossed += 1 if any(k == 1 for k in kinds) else 0
                         if not dry:
-                            for e in ending:
-                                e.duration += gap
+                            for k, e in zip(kinds, ending):
+                                if getattr(e, "orig_dur", None) is None:
+                                    e.orig_dur = e.duration        # the sound stays as recorded
+                                if k == 1:
+                                    b = starts[mn]
+                                    cont = _cp.copy(e)
+                                    cont.tick = b
+                                    cont.duration = n.tick - b
+                                    cont.articulation = "tie_continuation"
+                                    cont.orig_dur = None
+                                    e.duration = b - e.tick
+                                    e.articulation = "tie_predecessor"
+                                    adds.append(cont)
+                                else:
+                                    e.duration += gap
                         ext = True
                     else:
                         skipped += 1
@@ -2368,7 +2390,10 @@ def remove_short_rests(song, thresh, m_from=None, m_to=None, dry=False):   # v22
                 ending = [n]
             elif end == cur:
                 ending.append(n)
-    return {"closed": closed, "lengthened": lengthened, "skipped": skipped}
+        if adds and not dry:
+            tr.notes.extend(adds)
+            tr.notes.sort(key=lambda x: x.tick)
+    return {"closed": closed, "lengthened": lengthened, "skipped": skipped, "crossed": crossed}
 
 
 class Song:
@@ -9570,7 +9595,7 @@ class QuantizeDlg(tk.Toplevel):
         ).pack(anchor="w", padx=6)
         gr = tk.Frame(gf, bg=LBG)
         gr.pack(anchor="w", padx=6, pady=(2, 6))
-        default_grace = getattr(self.app, "grace_cleanup_ms", 40)
+        default_grace = getattr(self.app, "grace_cleanup_ms", 0)
         self._grace = tk.IntVar(value=default_grace)
         for lbl, val in [
             ("Off", 0),
@@ -15642,7 +15667,7 @@ class MidisoftStudio:
 
     def __init__(self,root:tk.Tk):
         self.quantize_division = 0   # Off — user must explicitly choose a grid
-        self.grace_cleanup_ms = 40
+        self.grace_cleanup_ms = 0    # v22ze-212: Off -- it deletes notes, so the user must choose it
         self.midi_thru_enabled = tk.BooleanVar(value=True)
         self.midi_thru_volume  = tk.IntVar(value=100)   # 0-127, matches track volume scale
         # v22ze-58 fix: _thru_cb (see _start_midi_monitor) reads these two
@@ -15870,7 +15895,6 @@ class MidisoftStudio:
         nm=TkPopupMenu(mb,tearoff=0); mb.add_cascade(label="Corrections",menu=nm)
         nm.add_command(label="Quantize…\tCtrl+Q", command=lambda: QuantizeDlg(self.root, self),
                        accelerator="Ctrl+Q")
-        nm.add_command(label="Quantize Armed Track", command=self._quantize_armed_track)
         nm.add_command(label="Separate Hands…",command=self._separate_hands)
         nm.add_command(label="Rationalize Score…\tCtrl+R", command=self._rationalize_score,
                        accelerator="Ctrl+R")
@@ -15925,7 +15949,7 @@ class MidisoftStudio:
                            command=lambda: setattr(self, "quantize_division", 32))
 
         if not hasattr(self, "grace_cleanup_ms"):
-            self.grace_cleanup_ms = 40
+            self.grace_cleanup_ms = 0
 
         self._grace_var = tk.IntVar(value=self.grace_cleanup_ms)
 
@@ -20184,7 +20208,7 @@ class MidisoftStudio:
         tk.Label(dlg, text="Many recordings stop each note a little before the next one starts. Every "
                            "gap shows as a tiny rest, on screen and in the print. This makes the note "
                            "before each short gap last until the next note, so the rest disappears. "
-                           "No note is added, moved or removed. Undo restores everything.",
+                           "Only the score changes: the sound stays exactly as recorded. Undo restores everything.",
                  bg=BG, fg=MUTED, justify="left", anchor="w").pack(fill="x", padx=12, pady=(10, 6))
         tpb = self.song.ticks_per_beat
         n_m = max(1, len(self.song.get_measure_map()))
@@ -20226,7 +20250,7 @@ class MidisoftStudio:
                 r = remove_short_rests(self.song, th, a, b, dry=True)
                 t = str(r["closed"]) + " short rest" + ("" if r["closed"] == 1 else "s") + " would be closed"
                 if r["skipped"]:
-                    t += " (" + str(r["skipped"]) + " crossing a barline left alone)"
+                    t += " (" + str(r["skipped"]) + " left alone: part of a tie)"
                 msg.set(t + ".")
             except Exception:
                 msg.set("")
@@ -20240,7 +20264,8 @@ class MidisoftStudio:
             if r["closed"] == 0:
                 msg.set("Nothing to close here.")
             else:
-                msg.set("Closed " + str(r["closed"]) + " short rests (" + str(r["lengthened"]) + " notes lengthened). Edit > Undo restores them.")
+                msg.set("Closed " + str(r["closed"]) + " short rests (" + str(r["lengthened"]) + " notes lengthened, "
+                        + str(r.get("crossed", 0)) + " tied over a barline). The sound is unchanged. Edit > Undo restores them.")
         brow = tk.Frame(dlg, bg=BG); brow.pack(pady=(6, 10))
         tk.Button(brow, text="Remove", command=_go, bg="#238636", fg="white", relief=tk.FLAT,
                   padx=12, pady=4).pack(side="left", padx=4)
