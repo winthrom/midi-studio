@@ -47,7 +47,7 @@ if _orig_toplevel_init is not None:
 
 # v22ze-184: work windows wrap long text and open where they leave the score visible
 _WORK_TITLES = {
-    "Score Settings", "Rationalize Score", "Separate Hands", "Staff Type", "Send a Problem Report",
+    "Score Settings", "Rationalize Score", "Separate Hands", "Staff Type", "Send a Problem Report", "Remove Short Rests",
     "Quantize", "Key Signature", "LilyPond Export Options", "MIDI Output Device",
     "Fix Chords", "Combine Tracks", "Fix Chords - hand size",
 }
@@ -2326,6 +2326,51 @@ def _build_measure_map_core(tpb, sigs, total):
     return measures
 
 
+def remove_short_rests(song, thresh, m_from=None, m_to=None, dry=False):   # v22ze-211
+    """Close every gap shorter than `thresh` ticks between a note's end and the next onset (per track)
+    by lengthening the note(s) that end at the gap.  Gaps that would cross a barline are left alone.
+    m_from / m_to are 1-based measure numbers (None = whole piece).
+    Returns {"closed": gaps closed, "lengthened": notes lengthened, "skipped": barline-crossing gaps}."""
+    import bisect as _bis
+    mmap = song.get_measure_map()
+    starts = [m[1] for m in mmap]
+    n_m = len(mmap)
+    lo = mmap[max(1, int(m_from)) - 1][1] if m_from else 0
+    hi = mmap[min(n_m, int(m_to)) - 1][2] if m_to else None
+
+    def meas(t):
+        return _bis.bisect_right(starts, t) - 1
+    closed = lengthened = skipped = 0
+    for tr in song.tracks:
+        if not tr.notes or getattr(tr, "channel", 0) == 9:
+            continue
+        cur = None
+        ending = []
+        for n in sorted(tr.notes, key=lambda x: x.tick):
+            ext = False
+            if cur is not None and n.tick > cur:
+                gap = n.tick - cur
+                if 0 < gap < thresh and cur >= lo and (hi is None or cur < hi):
+                    if meas(cur) == meas(n.tick - 1):
+                        closed += 1
+                        lengthened += len(ending)
+                        if not dry:
+                            for e in ending:
+                                e.duration += gap
+                        ext = True
+                    else:
+                        skipped += 1
+                if ext:
+                    cur = n.tick
+            end = n.tick + n.duration
+            if cur is None or end > cur:
+                cur = end
+                ending = [n]
+            elif end == cur:
+                ending.append(n)
+    return {"closed": closed, "lengthened": lengthened, "skipped": skipped}
+
+
 class Song:
     def __init__(self):
         self.ticks_per_beat = 480
@@ -4179,7 +4224,7 @@ class Song:
         # long is essentially always intentional regardless of any other
         # setting, and this ceiling no longer depends on an unrelated
         # control the user didn't touch.
-        thresh = min(p["rest_threshold"], max(0, tpb - 1))
+        thresh = min(p["rest_threshold"], tpb)   # v22ze-211: "quarter" is allowed
         if thresh > 0:
             cleaned = []
             for i, group in enumerate(q_groups):
@@ -15829,6 +15874,7 @@ class MidisoftStudio:
         nm.add_command(label="Separate Hands…",command=self._separate_hands)
         nm.add_command(label="Rationalize Score…\tCtrl+R", command=self._rationalize_score,
                        accelerator="Ctrl+R")
+        nm.add_command(label="Remove Short Rests…", command=self._remove_short_rests_dialog)   # v22ze-211
         nm.add_command(label="Clean Up Measures…", command=self._open_score_setup)
         nm.add_command(label="Fix Chords…",command=self._thin_chords)
         nm.add_separator()
@@ -17651,7 +17697,7 @@ class MidisoftStudio:
         # value-to-ticks conversion in this app already does.
         _tpb_r = self.song.ticks_per_beat
         rest_opts = {"Off": 0, "32nd": _tpb_r // 8,
-                     "16th": _tpb_r // 4, "8th": _tpb_r // 2}
+                     "16th": _tpb_r // 4, "8th": _tpb_r // 2, "quarter": _tpb_r}   # v22ze-211
         _tt(_row(pfrm, "Remove rests shorter than:", lambda p: tk.OptionMenu(
             p, rest_var, *rest_opts.keys()), 9),
             "Gaps between notes shorter than this are merged away as "
@@ -20098,6 +20144,109 @@ class MidisoftStudio:
                  bg="#238636", fg="white", relief=tk.FLAT,
                  padx=12, pady=4).pack(pady=(10, 16))
 
+    def _remove_short_rests_apply(self, thresh, m_from=None, m_to=None):   # v22ze-211
+        import copy as _copy
+        song = self.song
+        before_tracks = _copy.deepcopy(song.tracks)
+        before_map = _copy.deepcopy(song.rationalized_measure_map)
+        res = remove_short_rests(song, int(thresh), m_from, m_to)
+        if res["closed"] == 0:
+            return res
+        song.modified = True
+        self._update_title()
+        self._push_undo(RationalizationAction(
+            description="Remove short rests",
+            before_tracks=before_tracks, after_tracks=_copy.deepcopy(song.tracks),
+            before_map=before_map, after_map=_copy.deepcopy(song.rationalized_measure_map)))
+        self._refresh_track_list()
+        try:
+            sv = self._score_view
+            if sv is not None and sv.winfo_exists():
+                sv._score_dirty = True
+                sv._draw()
+        except Exception:
+            pass
+        return res
+
+    def _remove_short_rests_dialog(self):   # v22ze-211
+        old = getattr(self, "_rsr_dlg", None)
+        if old is not None and old.winfo_exists():
+            old.lift(); return
+        BG, FG, MUTED = "#0d1117", "#f0f6fc", "#8b949e"
+        dlg = tk.Toplevel(self.root)
+        dlg.title("Remove Short Rests")
+        dlg.configure(bg=BG)
+        self._rsr_dlg = dlg
+        try:
+            self._work_dialogs = [w for w in getattr(self, "_work_dialogs", []) if w.winfo_exists()] + [dlg]
+        except Exception:
+            pass
+        tk.Label(dlg, text="Many recordings stop each note a little before the next one starts. Every "
+                           "gap shows as a tiny rest, on screen and in the print. This makes the note "
+                           "before each short gap last until the next note, so the rest disappears. "
+                           "No note is added, moved or removed. Undo restores everything.",
+                 bg=BG, fg=MUTED, justify="left", anchor="w").pack(fill="x", padx=12, pady=(10, 6))
+        tpb = self.song.ticks_per_beat
+        n_m = max(1, len(self.song.get_measure_map()))
+        opts = (("1/16", tpb // 4), ("1/8", tpb // 2), ("1/4", tpb))
+        sel = tk.StringVar(value="1/8")
+        row = tk.Frame(dlg, bg=BG); row.pack(fill="x", padx=12, pady=2)
+        tk.Label(row, text="Remove rests shorter than:", bg=BG, fg=FG).pack(side="left")
+        for lab, _t in opts:
+            tk.Radiobutton(row, text=lab, value=lab, variable=sel, bg=BG, fg=FG, selectcolor="#161b22",
+                           activebackground=BG, activeforeground=FG).pack(side="left", padx=4)
+        mode = tk.StringVar(value="all")
+        mrow = tk.Frame(dlg, bg=BG); mrow.pack(fill="x", padx=12, pady=2)
+        tk.Label(mrow, text="Measures:", bg=BG, fg=FG).pack(side="left")
+        tk.Radiobutton(mrow, text="All", value="all", variable=mode, bg=BG, fg=FG, selectcolor="#161b22",
+                       activebackground=BG, activeforeground=FG).pack(side="left", padx=4)
+        tk.Radiobutton(mrow, text="From", value="range", variable=mode, bg=BG, fg=FG, selectcolor="#161b22",
+                       activebackground=BG, activeforeground=FG).pack(side="left")
+        mf = tk.IntVar(value=1); mt = tk.IntVar(value=n_m)
+        sbk = dict(bg="#161b22", fg=FG, buttonbackground="#30363d", relief=tk.FLAT, width=5)
+        tk.Spinbox(mrow, from_=1, to=n_m, textvariable=mf, **sbk).pack(side="left", padx=2)
+        tk.Label(mrow, text="to", bg=BG, fg=FG).pack(side="left")
+        tk.Spinbox(mrow, from_=1, to=n_m, textvariable=mt, **sbk).pack(side="left", padx=2)
+        msg = tk.StringVar(value="")
+        tk.Label(dlg, textvariable=msg, bg=BG, fg="#3fb950", justify="left", anchor="w").pack(fill="x", padx=12, pady=(6, 0))
+
+        def _args():
+            th = dict(opts)[sel.get()]
+            if mode.get() == "range":
+                try:
+                    a, b = int(mf.get()), int(mt.get())
+                except Exception:
+                    return th, None, None
+                return th, min(a, b), max(a, b)
+            return th, None, None
+
+        def _preview(*_x):
+            try:
+                th, a, b = _args()
+                r = remove_short_rests(self.song, th, a, b, dry=True)
+                t = str(r["closed"]) + " short rest" + ("" if r["closed"] == 1 else "s") + " would be closed"
+                if r["skipped"]:
+                    t += " (" + str(r["skipped"]) + " crossing a barline left alone)"
+                msg.set(t + ".")
+            except Exception:
+                msg.set("")
+        for v in (sel, mode, mf, mt):
+            v.trace_add("write", _preview)
+        _preview()
+
+        def _go():
+            th, a, b = _args()
+            r = self._remove_short_rests_apply(th, a, b)
+            if r["closed"] == 0:
+                msg.set("Nothing to close here.")
+            else:
+                msg.set("Closed " + str(r["closed"]) + " short rests (" + str(r["lengthened"]) + " notes lengthened). Edit > Undo restores them.")
+        brow = tk.Frame(dlg, bg=BG); brow.pack(pady=(6, 10))
+        tk.Button(brow, text="Remove", command=_go, bg="#238636", fg="white", relief=tk.FLAT,
+                  padx=12, pady=4).pack(side="left", padx=4)
+        tk.Button(brow, text="Close", command=dlg.destroy, bg="#21262d", fg=FG, relief=tk.FLAT,
+                  padx=12, pady=4).pack(side="left", padx=4)
+
     def _show_log_folder(self):   # v22ze-210
         import subprocess
         d = _tlog_dir()
@@ -20191,6 +20340,7 @@ class MidisoftStudio:
             ("Corrections \u25b8 Fix Chords\u2026", "chords too wide for one hand span fingers move note other hand"),
             ("Corrections \u25b8 Quantize\u2026", "snap notes to a grid timing rhythm"),
             ("Corrections \u25b8 Rationalize Score\u2026", "turn a recording into clean notation measures"),
+            ("Corrections \u25b8 Remove Short Rests\u2026", "sliver rests tiny gaps eighth sixteenth rests too many rests legato"),
             ("Corrections \u25b8 Clean Up Measures\u2026", "overflow measure notes cross the barline tidy rests"),
             ("Corrections \u25b8 Quantization / Grace Cleanup", "grid size grace notes tiny notes"),
             ("Score Settings \u25b8 Score Settings\u2026", "tempo bpm speed faster slower measures wanted measure length time signature key title composer"),
@@ -20496,7 +20646,8 @@ def _tlog_install():
              "_rationalize_score", "_cleanup_all_measures", "_cleanup_measure", "_apply_time_scale",
              "_apply_speed", "_apply_global_bpm", "_apply_global_timesig", "_quantize_all_quiet",
              "_quantize_armed_track", "_move_selected_staff", "_set_key_signature", "_export_ly",
-             "_print_score", "_export_musicxml", "_undo", "_redo", "_combine_tracks", "_separate_channels"]
+             "_print_score", "_export_musicxml", "_undo", "_redo", "_combine_tracks", "_separate_channels",
+             "_remove_short_rests_apply"]
 
     def _mk(f, nm):
         @functools.wraps(f)
