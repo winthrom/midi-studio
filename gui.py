@@ -34,6 +34,12 @@ def _toplevel_init_stay_on_top(self, master=None, *args, **kw):
             self.transient(master)
     except Exception:
         pass
+    try:   # v22ze-210: a newly shown window goes above the older ones
+        if any(o.winfo_exists() and o.winfo_viewable() and _win_is_top(o) for o in _APP_WINDOWS):
+            self.attributes("-topmost", True)      # join the top layer before it is first shown
+        self.bind("<Map>", lambda e, s=self: _on_window_map(e, s), add="+")
+    except Exception:
+        pass
 
 
 if _orig_toplevel_init is not None:
@@ -41,7 +47,7 @@ if _orig_toplevel_init is not None:
 
 # v22ze-184: work windows wrap long text and open where they leave the score visible
 _WORK_TITLES = {
-    "Score Settings", "Rationalize Score", "Separate Hands", "Staff Type",
+    "Score Settings", "Rationalize Score", "Separate Hands", "Staff Type", "Send a Problem Report",
     "Quantize", "Key Signature", "LilyPond Export Options", "MIDI Output Device",
     "Fix Chords", "Combine Tracks", "Fix Chords - hand size",
 }
@@ -272,6 +278,195 @@ from sys_platform import (
 )
 
 
+# ── v22ze-210: windows stay in the order they were opened; message boxes open on the newest window ──
+_APP_WINDOWS = []
+
+
+def _win_is_top(w):
+    try:
+        return bool(int(w.attributes("-topmost")))
+    except Exception:
+        return False
+
+
+def _raise_new_window(w, tries=0):
+    try:
+        if not w.winfo_exists():
+            return
+        if not w.winfo_viewable():
+            if tries < 8:
+                w.after(50, lambda: _raise_new_window(w, tries + 1))
+            return
+        others = [o for o in _APP_WINDOWS if o is not w and o.winfo_exists() and o.winfo_viewable()]
+        if any(_win_is_top(o) for o in others) and not _win_is_top(w):
+            w.attributes("-topmost", True)
+        w.lift()
+    except Exception:
+        pass
+
+
+def _on_window_map(e, win):
+    try:
+        if e.widget is not win or win.overrideredirect():
+            return
+        if type(win).__name__.startswith(("TkPopup", "TkMenu")):
+            return
+        if win not in _APP_WINDOWS:
+            _APP_WINDOWS.append(win)
+        win.after(25, lambda w=win: _raise_new_window(w))
+    except Exception:
+        pass
+
+
+def _newest_window():
+    for w in reversed(list(_APP_WINDOWS)):
+        try:
+            if w.winfo_exists() and w.winfo_viewable() and w.state() == "normal":
+                return w
+        except Exception:
+            continue
+    return None
+
+
+def _wrap_messagebox(name):
+    f = getattr(messagebox, name, None)
+    if f is None or getattr(f, "_stack_wrapped", False):
+        return
+
+    def w(*a, **k):
+        p = k.get("parent")
+        if p is None or p is _APP_ROOT[0]:
+            top = _newest_window()
+            if top is not None:
+                k["parent"] = top
+        return f(*a, **k)
+    w._stack_wrapped = True
+    setattr(messagebox, name, w)
+
+
+for _mbn in ("showinfo", "showwarning", "showerror", "askyesno", "askokcancel",
+             "askyesnocancel", "askretrycancel", "askquestion"):
+    _wrap_messagebox(_mbn)
+
+
+# ── v22ze-210: tester log (local only; nothing is ever sent) ──
+_TLOG = {"fh": None, "tried": False, "on": None}
+
+
+def _tlog_dir():
+    return os.path.join(os.path.expanduser("~"), ".midistudio_logs")
+
+
+def _tlog_enabled():
+    if _TLOG["on"] is None:
+        try:
+            import json
+            with open(os.path.join(_tlog_dir(), "settings.json")) as f:
+                _TLOG["on"] = bool(json.load(f).get("enabled", True))
+        except Exception:
+            _TLOG["on"] = True
+    return _TLOG["on"]
+
+
+def _tlog_set_enabled(on):
+    _TLOG["on"] = bool(on)
+    try:
+        import json
+        os.makedirs(_tlog_dir(), exist_ok=True)
+        with open(os.path.join(_tlog_dir(), "settings.json"), "w") as f:
+            json.dump({"enabled": bool(on)}, f)
+    except Exception:
+        pass
+    if not on and _TLOG["fh"] is not None:
+        try:
+            _TLOG["fh"].close()
+        except Exception:
+            pass
+        _TLOG["fh"] = None
+        _TLOG["tried"] = False
+
+
+def _tl_clean_text(t):
+    t = str(t)
+    home = os.path.expanduser("~")
+    if home and home != "~":
+        t = t.replace(home, "~")
+    return t
+
+
+def _tlog_open():
+    if _TLOG["fh"] is not None or _TLOG["tried"]:
+        return _TLOG["fh"]
+    _TLOG["tried"] = True
+    try:
+        import glob, platform
+        d = _tlog_dir()
+        os.makedirs(d, exist_ok=True)
+        files = sorted(glob.glob(os.path.join(d, "session-*.jsonl")))
+        for old in files[:-19]:
+            try:
+                os.remove(old)
+            except Exception:
+                pass
+        name = "session-" + time.strftime("%Y%m%d-%H%M%S") + ".jsonl"
+        _TLOG["fh"] = open(os.path.join(d, name), "a", encoding="utf-8", buffering=1)
+        _TLOG["fh"].write(__import__("json").dumps({
+            "t": time.strftime("%Y-%m-%d %H:%M:%S"), "e": "session_start",
+            "app": APP_VERSION, "os": platform.platform(), "python": platform.python_version()}) + chr(10))
+        import atexit
+        atexit.register(lambda: _tlog("session_end"))
+    except Exception:
+        _TLOG["fh"] = None
+    return _TLOG["fh"]
+
+
+def _tl_val(v):
+    if isinstance(v, str):
+        if ("/" in v or chr(92) in v) and len(v) > 3:
+            v = os.path.basename(v.replace(chr(92), "/"))
+        return _tl_clean_text(v)[:300]
+    if isinstance(v, (int, float, bool)) or v is None:
+        return v
+    if isinstance(v, dict):
+        return {str(k): _tl_val(x) for k, x in list(v.items())[:30]}
+    if isinstance(v, (list, tuple, set)):
+        return [_tl_val(x) for x in list(v)[:20]]
+    return None
+
+
+def _tlog(event, **data):
+    try:
+        if not _tlog_enabled():
+            return
+        fh = _tlog_open()
+        if fh is None:
+            return
+        rec = {"t": time.strftime("%H:%M:%S"), "e": event}
+        for k, v in data.items():
+            if k == "tb":
+                rec[k] = _tl_clean_text(v)[-1800:]
+            else:
+                rec[k] = _tl_val(v)
+        fh.write(__import__("json").dumps(rec, default=str)[:4000] + chr(10))
+    except Exception:
+        pass
+
+
+def _tlog_state(app):
+    try:
+        sg = app.song
+        d = dict(notes=sum(len(t.notes) for t in sg.tracks), tracks=len(sg.tracks),
+                 tpb=sg.ticks_per_beat, bpm=sg.bpm, ts=str(sg.time_sig_num) + "/" + str(sg.time_sig_den),
+                 rationalized=bool(getattr(app, "_is_rationalized", False)))
+        try:
+            d["measures"] = len(sg.get_measure_map())
+        except Exception:
+            pass
+        return d
+    except Exception:
+        return {}
+
+
 class TkPopupMenu(tk.Toplevel):
     """A dropdown/context menu built entirely from ordinary Tk widgets in
     a real Toplevel window, instead of Tk's native tk.Menu popup.
@@ -319,6 +514,11 @@ class TkPopupMenu(tk.Toplevel):
 
     # ── tk.Menu-compatible construction API ─────────────────────────────
     def add_command(self, label="", command=None, accelerator="", tooltip="", **kw):
+        if command is not None:   # v22ze-210: tester log records which menu items get used
+            def _logged(*a, _c=command, _l=label, **k):
+                _tlog("menu", item=str(_l).split(chr(9))[0])
+                return _c(*a, **k)
+            command = _logged
         self._items.append(("command", label, command, accelerator, tooltip))
 
     def add_separator(self, **kw):
@@ -7148,7 +7348,8 @@ def quantize_notes_per_measure(
     # of letting it silently merge into the earlier one.
     notes_quantized = 0
     for ms, me in active_measures:
-        grid = max(1, tpb // div)
+        gridf = tpb / float(div)          # v22ze-210: exact (fractional) grid, so e.g. 415 ticks/beat stays on the beat
+        grid = max(1, int(round(gridf)))
 
         notes_in_measure = [n for n in track.notes if ms <= n.tick < me]
         if not notes_in_measure:
@@ -7193,7 +7394,7 @@ def quantize_notes_per_measure(
         last_assigned = None
         for orig_tick, group in groups:
             rel = orig_tick - ms
-            q_rel = round(rel / grid) * grid
+            q_rel = int(round(round(rel / gridf) * gridf))
             target_tick = ms + int(rel + strength * (q_rel - rel))
 
             if last_assigned is not None and target_tick <= last_assigned:
@@ -7226,7 +7427,7 @@ def quantize_notes_per_measure(
                 # grid cell), preserve the original duration so the note
                 # stays short rather than disappearing or jumping to the
                 # grid minimum.
-                q_dur = round(n.duration / grid) * grid
+                q_dur = int(round(round(n.duration / gridf) * gridf))
                 if q_dur > 0:
                     n.duration = int(n.duration + strength * (q_dur - n.duration))
                     n.duration = max(1, min(n.duration, me - n.tick))
@@ -15324,7 +15525,7 @@ def _ts_clean_candidates(song, target):   # v22ze-208
         parts.append(str(min(above)))
     if not parts or target in opts:
         return ""
-    return "Cleaner: " + " or ".join(parts) + " keep the notes on the grid."
+    return "Grid-exact counts nearby: " + " or ".join(parts) + " (arithmetic only, not musical advice)."
 
 
 @dataclass
@@ -15697,6 +15898,14 @@ class MidisoftStudio:
 
         hm.add_command(label="User Guide (PDF)",command=self._open_user_guide)   # v22ze-197
         hm.add_command(label="Where do I find…?",command=self._where_dialog)   # v22ze-209
+        hm.add_command(label="Send a Problem Report…",command=self._problem_report)   # v22ze-210
+        tlm=TkPopupMenu(hm,tearoff=0); hm.add_cascade(label="Tester Log",menu=tlm)
+        self._tlog_var=tk.IntVar(value=1 if _tlog_enabled() else 0)
+        tlm.add_radiobutton(label="On (kept on this computer only)",value=1,variable=self._tlog_var,
+                            command=lambda: _tlog_set_enabled(True))
+        tlm.add_radiobutton(label="Off",value=0,variable=self._tlog_var,
+                            command=lambda: _tlog_set_enabled(False))
+        tlm.add_command(label="Show the log folder",command=self._show_log_folder)
         hm.add_command(label="About…",command=self._about)
         binds=[("<Control-n>",self._new),("<Control-o>",self._open),("<Control-s>",self._save),
                ("<Control-1>",self._open_score_view),("<Control-2>",self._open_piano_roll),
@@ -16057,7 +16266,34 @@ class MidisoftStudio:
 
     # ── Score Setup Panel ────────────────────────────────────────────────────
 
-    def _apply_time_scale(self, target):   # v22ze-207
+    def _quantize_all_quiet(self, div=0):   # v22ze-210
+        """Quantize every track to the grid (strength 100%), no dialog, one Undo step."""
+        import copy as _copy
+        song = self.song
+        div = div or getattr(self, "quantize_division", 0) or 16
+        before_tracks = _copy.deepcopy(song.tracks)
+        before_map = _copy.deepcopy(song.rationalized_measure_map)
+        nq = 0
+        for tr in song.tracks:
+            q, _g = quantize_notes_per_measure(tr, song, div=div, strength=1.0)
+            nq += q
+        song.modified = True
+        self._update_title()
+        self._refresh_track_list()
+        self._push_undo(RationalizationAction(
+            description="Quantize",
+            before_tracks=before_tracks, after_tracks=_copy.deepcopy(song.tracks),
+            before_map=before_map, after_map=_copy.deepcopy(song.rationalized_measure_map)))
+        try:
+            sv = self._score_view
+            if sv is not None and sv.winfo_exists():
+                sv._score_dirty = True
+                sv._draw()
+        except Exception:
+            pass
+        return nq, div
+
+    def _apply_time_scale(self, target, quantize=False):   # v22ze-207
         """Re-label the piece so it has about `target` measures.  Sound unchanged."""
         from tkinter import messagebox as _mb
         song = self.song
@@ -16080,7 +16316,12 @@ class MidisoftStudio:
             before=before, after=after))
         self._update_title()
         self._refresh_views()
-        return "Done: " + str(got) + " measures (" + note + ")."
+        extra = ""
+        if quantize:   # v22ze-210
+            nq, qd = self._quantize_all_quiet()
+            extra = " Quantized " + str(nq) + " notes to the 1/" + str(qd) + " grid (a second Undo step)."
+            note = "now on the grid"
+        return "Done: " + str(got) + " measures (" + note + ")." + extra
 
     def _apply_speed(self, pct):   # v22ze-207
         """Play faster (pct > 100) or slower (pct < 100).  Notes unchanged; all tempos scaled."""
@@ -16570,19 +16811,26 @@ class MidisoftStudio:
         except Exception:
             pass
 
+        mc_q_var = tk.IntVar(value=0)   # v22ze-210
+
         def _do_measures():
             try:
                 n = int(mc_var.get())
             except Exception:
                 mc_msg.set("Type a whole number of measures.")
                 return
-            mc_msg.set(self._apply_time_scale(n))
+            mc_msg.set(self._apply_time_scale(n, bool(mc_q_var.get())))
         _tt(tk.Button(mc_row, text="Apply", command=_do_measures, **bb),
             "Re-label the piece so it has this many measures. The sound is "
             "identical; only the barlines move. Notes are not changed. "
             "Undo restores it.").pack(side=tk.LEFT)
         _lbl(gfrm, "", textvariable=mc_msg, fg=MUTED, font=("TkDefaultFont", 8),
              wraplength=330, justify=tk.LEFT, anchor="w").pack(fill=tk.X, padx=(4, 0))
+
+        tk.Checkbutton(gfrm, text="Quantize afterwards (puts the notes on the grid)",
+                       variable=mc_q_var, bg=BG, fg=FG, selectcolor=ENTRY,
+                       activebackground=BG, activeforeground=FG, anchor="w",
+                       justify=tk.LEFT).pack(fill=tk.X, padx=(4, 0))   # v22ze-210
 
         # Auto-detect row
         detect_note_var = tk.StringVar(value="Not run yet")
@@ -19850,6 +20098,89 @@ class MidisoftStudio:
                  bg="#238636", fg="white", relief=tk.FLAT,
                  padx=12, pady=4).pack(pady=(10, 16))
 
+    def _show_log_folder(self):   # v22ze-210
+        import subprocess
+        d = _tlog_dir()
+        try:
+            os.makedirs(d, exist_ok=True)
+            if sys.platform == "win32":
+                os.startfile(d)
+            elif sys.platform == "darwin":
+                subprocess.Popen(["open", d])
+            else:
+                subprocess.Popen(["xdg-open", d])
+        except Exception:
+            messagebox.showinfo("Tester Log", "The log folder is:" + chr(10) + d, parent=self.root)
+
+    def _problem_report(self):   # v22ze-210
+        """Help > Send a Problem Report: makes one zip the tester emails.  Nothing is sent by the program."""
+        old = getattr(self, "_report_dlg", None)
+        if old is not None and old.winfo_exists():
+            old.lift(); return
+        BG, FG = "#0d1117", "#f0f6fc"
+        dlg = tk.Toplevel(self.root)
+        dlg.title("Send a Problem Report")
+        dlg.configure(bg=BG)
+        self._report_dlg = dlg
+        tk.Label(dlg, text="This makes ONE zip file on your computer. Nothing is sent by the program: "
+                           "you email the zip yourself, to the person who gave you MIDI Studio. "
+                           "It holds your note, the recent tester logs (what the program did, no music "
+                           "unless you tick the box) and basic computer details.",
+                 bg=BG, fg="#8b949e", justify="left", anchor="w").pack(fill="x", padx=12, pady=(10, 6))
+        tk.Label(dlg, text="What went wrong, and what did you expect?", bg=BG, fg=FG,
+                 anchor="w").pack(fill="x", padx=12)
+        txt = tk.Text(dlg, height=7, width=60, bg="#161b22", fg=FG, insertbackground=FG, relief=tk.FLAT, wrap="word")
+        txt.pack(fill="both", expand=True, padx=12, pady=(2, 6))
+        inc = tk.IntVar(value=0)
+        tk.Checkbutton(dlg, text="Also include the piece that is open (optional)", variable=inc, bg=BG, fg=FG,
+                       selectcolor="#161b22", activebackground=BG, activeforeground=FG, anchor="w"
+                       ).pack(fill="x", padx=12)
+        msg = tk.StringVar(value="")
+        tk.Label(dlg, textvariable=msg, bg=BG, fg="#3fb950", justify="left", anchor="w").pack(fill="x", padx=12, pady=(4, 0))
+
+        def _make():
+            import zipfile, glob, platform, tempfile
+            stamp = time.strftime("%Y%m%d-%H%M%S")
+            home = os.path.expanduser("~")
+            outdir = os.path.join(home, "Desktop") if os.path.isdir(os.path.join(home, "Desktop")) else home
+            path = os.path.join(outdir, "midistudio-report-" + stamp + ".zip")
+            try:
+                with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as z:
+                    z.writestr("description.txt", txt.get("1.0", "end").strip() + chr(10))
+                    info = [
+                        "MIDI Studio " + str(APP_VERSION),
+                        "System: " + platform.platform(),
+                        "Python: " + platform.python_version(),
+                        "Tk: " + str(self.root.tk.call("info", "patchlevel")),
+                        "Screen: " + str(self.root.winfo_screenwidth()) + "x" + str(self.root.winfo_screenheight()),
+                        "Piece now: " + str(_tlog_state(self)),
+                    ]
+                    z.writestr("system.txt", chr(10).join(info) + chr(10))
+                    for f in sorted(glob.glob(os.path.join(_tlog_dir(), "session-*.jsonl"))):
+                        z.write(f, "logs/" + os.path.basename(f))
+                    if inc.get():
+                        try:
+                            tmp = os.path.join(tempfile.mkdtemp(prefix="midistudio_rep_"), "piece.mid")
+                            self.song.to_mid(tmp)
+                            z.write(tmp, "piece-as-it-is-now.mid")
+                        except Exception:
+                            pass
+                        src = getattr(self.song, "filename", None)
+                        if src and os.path.isfile(src):
+                            z.write(src, "piece-original-" + os.path.basename(src))
+                _tlog("report_created", zip=os.path.basename(path), with_piece=bool(inc.get()))
+                msg.set("Saved: " + path + chr(10) + "Email this file to the person who gave you MIDI Studio.")
+            except Exception as exc:
+                msg.set("Could not make the report: " + str(exc))
+        row = tk.Frame(dlg, bg=BG)
+        row.pack(pady=(6, 10))
+        tk.Button(row, text="Create the report", command=_make, bg="#238636", fg="white",
+                  relief=tk.FLAT, padx=12, pady=4).pack(side="left", padx=4)
+        tk.Button(row, text="Show the log folder", command=self._show_log_folder, bg="#21262d", fg=FG,
+                  relief=tk.FLAT, padx=12, pady=4).pack(side="left", padx=4)
+        tk.Button(row, text="Close", command=dlg.destroy, bg="#21262d", fg=FG,
+                  relief=tk.FLAT, padx=12, pady=4).pack(side="left", padx=4)
+
     def _where_dialog(self):   # v22ze-209
         """Help > Where do I find...?  Type a word, see which menu has it."""
         old = getattr(self, "_where_dlg", None)
@@ -20154,3 +20485,57 @@ class MidisoftStudio:
         except Exception as e:
             print("QUIT: root.destroy() exception:", e)
 
+
+
+# ── v22ze-210: tester-log wrappers (installed once, after every class exists) ──
+def _tlog_install():
+    import functools
+    import traceback as _traceback
+    cls = MidisoftStudio
+    names = ["_load_file", "_save", "_save_as", "_close", "_separate_hands", "_thin_chords",
+             "_rationalize_score", "_cleanup_all_measures", "_cleanup_measure", "_apply_time_scale",
+             "_apply_speed", "_apply_global_bpm", "_apply_global_timesig", "_quantize_all_quiet",
+             "_quantize_armed_track", "_move_selected_staff", "_set_key_signature", "_export_ly",
+             "_print_score", "_export_musicxml", "_undo", "_redo", "_combine_tracks", "_separate_channels"]
+
+    def _mk(f, nm):
+        @functools.wraps(f)
+        def w(self, *a, **k):
+            before = _tlog_state(self)
+            t0 = time.time()
+            try:
+                r = f(self, *a, **k)
+            except Exception as e:
+                _tlog("error", where=nm, error=repr(e), tb=_traceback.format_exc(), before=before)
+                raise
+            args = [x for x in a if isinstance(x, (str, int, float, bool))]
+            res = r if isinstance(r, (str, int, float, bool)) else (type(r).__name__ if r is not None else None)
+            _tlog("op", name=nm, args=args, ms=int((time.time() - t0) * 1000), before=before,
+                  after=_tlog_state(self), result=res)
+            return r
+        w._tlog_wrapped = True
+        return w
+    for nm in names:
+        f = getattr(cls, nm, None)
+        if f is not None and not getattr(f, "_tlog_wrapped", False):
+            setattr(cls, nm, _mk(f, nm))
+
+    g = globals()
+    _osw = g.get("_thin_swap")
+    if _osw is not None and not getattr(_osw, "_tlog_wrapped", False):
+        def _thin_swap_logged(song, removed, added, rolls, undo, _f=_osw):
+            _tlog("thin_swap", removed=len(removed), added=len(added), rolls=len(rolls or []), undo=bool(undo))
+            return _f(song, removed, added, rolls, undo)
+        _thin_swap_logged._tlog_wrapped = True
+        g["_thin_swap"] = _thin_swap_logged
+
+    _orce = tk.Tk.report_callback_exception
+
+    def _rce(self, exc, val, tb):
+        _tlog("error", where="tk callback", error=repr(val),
+              tb="".join(_traceback.format_exception(exc, val, tb)))
+        return _orce(self, exc, val, tb)
+    tk.Tk.report_callback_exception = _rce
+
+
+_tlog_install()
