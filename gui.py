@@ -41,7 +41,7 @@ if _orig_toplevel_init is not None:
 
 # v22ze-184: work windows wrap long text and open where they leave the score visible
 _WORK_TITLES = {
-    "Score Setup", "Rationalize Score", "Separate Hands", "Staff Type", "Song Settings",
+    "Score Settings", "Rationalize Score", "Separate Hands", "Staff Type",
     "Quantize", "Key Signature", "LilyPond Export Options", "MIDI Output Device",
     "Fix Chords", "Combine Tracks", "Fix Chords - hand size",
 }
@@ -60,40 +60,137 @@ def _tidy_work_window(win, max_w=700, place=True):
             pass
 
 
+def _tidy_walk(w):   # v22ze-209
+    for ch in w.winfo_children():
+        yield ch
+        yield from _tidy_walk(ch)
+
+
+def _tidy_rel_x(ch, win):
+    x = 0
+    w = ch
+    while w is not None and w is not win:
+        x += w.winfo_x()
+        w = w.master
+    return x
+
+
+def _tidy_prep(win):   # v22ze-209
+    """Once: remove a heading that only repeats the window's own title bar."""
+    try:
+        def _norm(t):
+            return " ".join(str(t).replace("\u266b", " ").split()).strip().lower()
+        title = _norm(win.title() or "")
+        if not title:
+            return
+        dead = []
+        for ch in _tidy_walk(win):
+            if isinstance(ch, tk.Label) and not str(ch.cget("textvariable")):
+                t = _norm(ch.cget("text"))
+                if t and len(t) <= len(title) + 14 and t.endswith(title):
+                    dead.append(ch)
+        for ch in dead:
+            ch.destroy()
+    except Exception:
+        pass
+
+
+def _tidy_fit(win, W=None):   # v22ze-209
+    """Text fills the window's width and re-wraps with it; empty text rows take no height."""
+    try:
+        if not win.winfo_exists():
+            return
+        if W is None:
+            W = win.winfo_width()
+        for ch in list(_tidy_walk(win)):
+            try:
+                if isinstance(ch, tk.Label):
+                    tv = str(ch.cget("textvariable"))
+                    txt = win.getvar(tv) if tv else ch.cget("text")
+                    blank = (not str(txt).strip()) and not str(ch.cget("image")) \
+                        and not str(ch.cget("bitmap")) \
+                        and int(float(str(ch.cget("width")) or 0)) == 0 \
+                        and int(float(str(ch.cget("height")) or 0)) == 0
+                    if blank:
+                        if not hasattr(ch, "_tidy_font0"):
+                            ch._tidy_font0 = ch.cget("font")
+                            ch._tidy_pady0 = ch.cget("pady")
+                            ch._tidy_pack0 = None
+                            if ch.winfo_manager() == "pack":
+                                ch._tidy_pack0 = ch.pack_info().get("pady", 0)
+                        ch.configure(font=("TkDefaultFont", 1), pady=0)
+                        if getattr(ch, "_tidy_pack0", None) is not None:
+                            ch.pack_configure(pady=0)
+                        ch._tidy_shrunk = True
+                        continue
+                    if getattr(ch, "_tidy_shrunk", False):
+                        ch._tidy_shrunk = False
+                        ch.configure(font=ch._tidy_font0, pady=ch._tidy_pady0)
+                        if getattr(ch, "_tidy_pack0", None) is not None:
+                            ch.pack_configure(pady=ch._tidy_pack0)
+                if isinstance(ch, (tk.Label, tk.Checkbutton, tk.Radiobutton)):
+                    tv = str(ch.cget("textvariable"))
+                    txt = win.getvar(tv) if tv else ch.cget("text")
+                    wl0 = int(float(str(ch.cget("wraplength")) or 0))
+                    if not (getattr(ch, "_tidy_wrap", False) or wl0 > 0 or len(str(txt)) >= 36):
+                        continue
+                    ch._tidy_wrap = True
+                    avail = W - _tidy_rel_x(ch, win) - 34
+                    for sib in ch.master.winfo_children():
+                        if sib is ch or not sib.winfo_manager():
+                            continue
+                        if sib.winfo_x() > ch.winfo_x() + 5 and \
+                                sib.winfo_y() < ch.winfo_y() + ch.winfo_height() and \
+                                sib.winfo_y() + sib.winfo_height() > ch.winfo_y():
+                            avail = min(avail, sib.winfo_x() - ch.winfo_x() - 10)
+                    if avail < 110:
+                        continue
+                    if abs(wl0 - avail) > 4:
+                        ch.configure(wraplength=int(avail), justify="left")
+            except Exception:
+                continue
+    except Exception:
+        pass
+
+
 def _tidy_work_window_body(win, max_w=700, place=True):
     try:
         if not win.winfo_exists():
             return
-        win.update_idletasks()
         sw, sh = win.winfo_screenwidth(), win.winfo_screenheight()
-        wrap = max(240, min(max_w, int(sw * 0.26)))
+        if place:
+            _tidy_prep(win)
+            win.update_idletasks()
+            _tidy_fit(win, W=max(360, min(max_w, int(sw * 0.36))))
+            win.update_idletasks()
+            w = min(max(win.winfo_reqwidth(), win.winfo_width(), 420), int(sw * 0.40))
+            h = min(max(win.winfo_reqheight(), win.winfo_height()), int(sh * 0.60))
+            x, y = max(0, (sw - w) // 2), max(0, sh - h - 70)
+            win.geometry(f"{w}x{h}+{x}+{y}")
+            win.update_idletasks()
+            _tidy_fit(win, W=w)          # re-wrap at the real width, then size the height to match
+            win.update_idletasks()
+            if not any(isinstance(c, tk.Canvas) and str(c.cget("yscrollcommand")) for c in _tidy_walk(win)):
+                h = min(max(win.winfo_reqheight(), 60), int(sh * 0.60))
+                win.geometry(f"{w}x{h}+{x}+{y}")
+                win.update_idletasks()
+            if not getattr(win, "_tidy_bound", False):
+                win._tidy_bound = True
+                _pend = [None]
 
-        def _walk(w):
-            for ch in w.winfo_children():
-                if isinstance(ch, tk.Button):      # v22ze-187: stack the words, narrower buttons
-                    try:
-                        if int(float(str(ch.cget("wraplength")) or 0)) == 0:
-                            ch.config(wraplength=max(70, int(sw * 0.055)), justify="center")
-                    except Exception:
-                        pass
-                if isinstance(ch, (tk.Label, tk.Checkbutton, tk.Radiobutton)):
-                    try:
-                        if int(float(str(ch.cget("wraplength")) or 0)) == 0:
-                            ch.config(wraplength=wrap, justify="left")
-                    except Exception:
-                        pass
-                _walk(ch)
-        _walk(win)
-        # labels added later (a panel that fills in as you click) are wrapped on the next pass
-        win.after(1500, lambda: _tidy_work_window(win, max_w, False))
-        if not place:
-            return
-        win.update_idletasks()
-        # v22ze-185: cap the size (lists inside scroll) and park low-centre
-        w = min(max(win.winfo_reqwidth(), win.winfo_width()), int(sw * 0.40))
-        h = min(max(win.winfo_reqheight(), win.winfo_height()), int(sh * 0.60))
-        x, y = max(0, (sw - w) // 2), max(0, sh - h - 70)
-        win.geometry(f"{w}x{h}+{x}+{y}")
+                def _on_cfg(e, win=win):
+                    if e.widget is not win:
+                        return
+                    if _pend[0] is not None:
+                        try:
+                            win.after_cancel(_pend[0])
+                        except Exception:
+                            pass
+                    _pend[0] = win.after(60, lambda: _tidy_fit(win))
+                win.bind("<Configure>", _on_cfg, add="+")
+        _tidy_fit(win)
+        # text added later (a panel that fills in as you click) is fitted on the next pass
+        win.after(700, lambda: _tidy_work_window(win, max_w, False))
     except Exception:
         pass
 
@@ -2037,6 +2134,8 @@ class Song:
         self.time_sig_den = 4
         self.sig_changes: list[tuple] = []  # [(abs_tick, numerator, denominator), ...]
         self.key_sig: str = "C"  # e.g. "C", "Bb", "F#", "Gm" — from MIDI key_signature meta
+        self.title: str = ""      # v22ze-209: printed on the score, saved in the MIDI file
+        self.composer: str = ""
         self.tracks: list[Track] = []
         self.filename = None
         self.modified = False
@@ -2423,6 +2522,17 @@ class Song:
         song.filename = path
         song.ticks_per_beat = mid.ticks_per_beat
         song.midi_type = mid.type
+        try:   # v22ze-209: title / composer written by to_mid() into the tempo track
+            if mid.type == 1 and mid.tracks:
+                _t0 = mid.tracks[0]
+                if not any(m.type in ("note_on", "note_off") for m in _t0):
+                    for m in _t0:
+                        if m.type == "track_name" and not song.title:
+                            song.title = str(m.name).strip()
+                        elif m.type == "text" and str(m.text).startswith("Composer:") and not song.composer:
+                            song.composer = str(m.text)[9:].strip()
+        except Exception:
+            pass
 
         def _close_note(open_n, key, abs_t, notes_list, channel):
             """Close an open note safely; returns True if a note was appended."""
@@ -2618,6 +2728,15 @@ class Song:
         tt = mido.MidiTrack()
         _tc = self.tempo_changes()  # v22ze-137: all tempo changes, not just one
         tt.append(mido.MetaMessage("set_tempo", tempo=_tc[0][1], time=0))
+        for _nm, _val, _mk in (("title", getattr(self, "title", ""), lambda v: mido.MetaMessage("track_name", name=v, time=0)),
+                               ("composer", getattr(self, "composer", ""), lambda v: mido.MetaMessage("text", text="Composer: " + v, time=0))):
+            _val = (_val or "").strip()
+            if _val:
+                try:
+                    _val.encode("latin-1")      # MIDI text is single-byte; skip rather than fail the save
+                    tt.append(_mk(_val))
+                except Exception:
+                    pass
         tt.append(
             mido.MetaMessage(
                 "time_signature",
@@ -5068,6 +5187,7 @@ class Song:
         out.sig_changes = _bk.deepcopy(self.sig_changes)
         out.filename = self.filename
         out.title = getattr(self, "title", "")
+        out.composer = getattr(self, "composer", "")   # v22ze-209
         out.modified = True  # baked copy always needs a Save
 
         for tr in self.tracks:
@@ -5314,7 +5434,13 @@ class Song:
         mmap = self.get_measure_map()
         tpm = mmap[0][5] if mmap else self.ticks_per_measure()  # first measure tpm (for compat)
         n_meas = len(mmap)
-        title = os.path.splitext(os.path.basename(path))[0]
+        title = (getattr(self, "title", "") or "").strip()     # v22ze-209: the score's own title
+        if not title:
+            _fn = getattr(self, "filename", None)
+            title = os.path.splitext(os.path.basename(_fn if _fn else path))[0]
+        _composer = (getattr(self, "composer", "") or "").strip()
+        title = title.replace("\\", " ").replace('"', "'")
+        _composer = _composer.replace("\\", " ").replace('"', "'")
 
         # v22x: compute the filtered (non-empty) track list and a dynamic
         # `indent` value BEFORE the \paper block is written, fixing a real
@@ -6260,7 +6386,7 @@ class Song:
             W(f)
             W(f, r"\header {")
             W(f, r'  title = "' + title + r'"')
-            W(f, r'  composer = ""')
+            W(f, '  composer = "' + _composer + '"')
             W(f, r"  tagline = ##f")  # suppress "Music engraving by LilyPond" footer
             W(f, r"}")
             W(f)
@@ -15476,29 +15602,39 @@ class MidisoftStudio:
         fm.add_command(label="Save\tCtrl+S",command=self._save,accelerator="Ctrl+S")
         fm.add_command(label="Save As…",command=self._save_as)
         fm.add_separator()
-        fm.add_command(label="Export MIDI…",command=self._save_as)
-        fm.add_command(label="Save as .musicxml (standard)…",
+        xm=TkPopupMenu(fm,tearoff=0); fm.add_cascade(label="Export",menu=xm)   # v22ze-209
+        xm.add_command(label="MusicXML (.musicxml)…",
                        command=self._export_musicxml,
                        tooltip="MuseScore/Sibelius/Finale can read this")
-        fm.add_command(label="Open in MuseScore (via MIDI)…",command=self._open_in_musescore)
-        fm.add_command(label="Export LilyPond (.ly)…",command=self._export_ly)
+        xm.add_command(label="Open in MuseScore (via MIDI)…",command=self._open_in_musescore)
+        xm.add_command(label="LilyPond (.ly)…",command=self._export_ly)
         fm.add_command(label="Print Score (via LilyPond)…",command=self._print_score)
-        fm.add_separator()
-        fm.add_command(label="Undo Correction\tCtrl+Z",command=self._undo,
-                       accelerator="Ctrl+Z")
-        fm.add_command(label="Redo Correction\tCtrl+Y",command=self._redo,
-                       accelerator="Ctrl+Y")
         fm.add_separator()
         fm.add_command(label="Close Program",command=self._on_quit)
         em=TkPopupMenu(mb,tearoff=0); mb.add_cascade(label="Edit",menu=em)
+        em.add_command(label="Undo\tCtrl+Z",command=self._undo,accelerator="Ctrl+Z")   # v22ze-209
+        em.add_command(label="Redo\tCtrl+Y",command=self._redo,accelerator="Ctrl+Y")
+        em.add_separator()
         em.add_command(label="Add Track",command=self._add_track)
         em.add_command(label="Delete Track",command=self._del_track)
         em.add_separator()
         em.add_command(label="Combine Tracks…",command=self._combine_tracks)
         em.add_command(label="Separate Channels…",command=self._separate_channels)
-        em.add_separator()
-        em.add_command(label="Separate Hands…",command=self._separate_hands)
-        em.add_command(label="Fix Chords…",command=self._thin_chords)  # v22ze-171
+        # v22ze-209: Corrections and Score Settings sit right after Edit
+        nm=TkPopupMenu(mb,tearoff=0); mb.add_cascade(label="Corrections",menu=nm)
+        nm.add_command(label="Quantize…\tCtrl+Q", command=lambda: QuantizeDlg(self.root, self),
+                       accelerator="Ctrl+Q")
+        nm.add_command(label="Quantize Armed Track", command=self._quantize_armed_track)
+        nm.add_command(label="Separate Hands…",command=self._separate_hands)
+        nm.add_command(label="Rationalize Score…\tCtrl+R", command=self._rationalize_score,
+                       accelerator="Ctrl+R")
+        nm.add_command(label="Clean Up Measures…", command=self._open_score_setup)
+        nm.add_command(label="Fix Chords…",command=self._thin_chords)
+        nm.add_separator()
+        scm=TkPopupMenu(mb,tearoff=0); mb.add_cascade(label="Score Settings",menu=scm)
+        scm.add_command(label="Score Settings…\tCtrl+G", command=self._open_score_setup,
+                        accelerator="Ctrl+G")
+        scm.add_command(label="Key Signature…", command=self._set_key_signature)
         vm=TkPopupMenu(mb,tearoff=0); mb.add_cascade(label="View",menu=vm)
         vm.add_command(label="Score View\tCtrl+1",command=self._open_score_view,accelerator="Ctrl+1")
         vm.add_command(label="Piano Roll\tCtrl+2",command=self._open_piano_roll,accelerator="Ctrl+2")
@@ -15508,9 +15644,6 @@ class MidisoftStudio:
         sm.add_command(label="MIDI I/O Info",command=self._midi_info)
         sm.add_command(label="MIDI Output Device…",command=self._choose_midi_output)
         hm=TkPopupMenu(mb,tearoff=0); mb.add_cascade(label="Help",menu=hm)
-
-        nm=TkPopupMenu(mb,tearoff=0)
-        mb.add_cascade(label="Song Settings", menu=nm)
 
         if not hasattr(self, "quantize_division"):
             self.quantize_division = 0
@@ -15561,23 +15694,9 @@ class MidisoftStudio:
                 command=lambda ms=_ms: setattr(self, "grace_cleanup_ms", ms)
             )
 
-        nm.add_separator()
-        nm.add_command(label="Quantize…\tCtrl+Q", command=lambda: QuantizeDlg(self.root, self),
-                       accelerator="Ctrl+Q")
-        nm.add_command(label="Quantize Armed Track", command=self._quantize_armed_track)
-        nm.add_separator()
-        nm.add_command(label="Score Setup…\tCtrl+G", command=self._open_score_setup,
-                       accelerator="Ctrl+G")
-        nm.add_command(label="Song Elements…", command=self._song_settings)
-        nm.add_command(label="Set Key Signature…", command=self._set_key_signature)
-        nm.add_command(label="Rationalize Score…\tCtrl+R", command=self._rationalize_score,
-                       accelerator="Ctrl+R")
-        nm.add_separator()
-        nm.add_command(label="About Song Settings...", command=lambda: messagebox.showinfo(
-            "Song Settings",
-            f"Quantization: {'Off' if not self.quantize_division else '1/'+str(self.quantize_division)}\n"
-            f"Grace Cleanup: {self.grace_cleanup_ms} ms"))
+
         hm.add_command(label="User Guide (PDF)",command=self._open_user_guide)   # v22ze-197
+        hm.add_command(label="Where do I find…?",command=self._where_dialog)   # v22ze-209
         hm.add_command(label="About…",command=self._about)
         binds=[("<Control-n>",self._new),("<Control-o>",self._open),("<Control-s>",self._save),
                ("<Control-1>",self._open_score_view),("<Control-2>",self._open_piano_roll),
@@ -15680,6 +15799,9 @@ class MidisoftStudio:
             else:
                 # Re-rationalizing: keep the already-saved original
                 pass
+            for _a in ("title", "composer"):   # v22ze-209: keep the title through rationalize / separate hands
+                if not getattr(song, _a, ""):
+                    setattr(song, _a, getattr(self.song, _a, ""))
             self.song = song
             self.transport.song = song
             self._is_rationalized = True
@@ -16224,7 +16346,7 @@ class MidisoftStudio:
                      activeforeground=FG, relief=tk.FLAT, padx=8, pady=3)
 
         dlg = tk.Toplevel(self.root)
-        dlg.title("Score Setup")
+        dlg.title("Score Settings")
         dlg.configure(bg=BG)
         # v22ze-79 fix: clicking a different measure in the strip while
         # this dialog was already open correctly called
@@ -16264,7 +16386,7 @@ class MidisoftStudio:
             tk.Frame(parent, bg=SEP, height=1).pack(fill=tk.X, padx=10, pady=6)
 
         # ── Header ────────────────────────────────────────────────────────
-        _lbl(content, "♫  Score Setup",
+        _lbl(content, "♫  Score Settings",
              fg=BLUE, font=("TkDefaultFont", 12, "bold"),
              anchor="center").pack(pady=(14, 2))
         _lbl(content,
@@ -16280,6 +16402,43 @@ class MidisoftStudio:
 
         gfrm = tk.Frame(content, bg=BG, padx=14, pady=4)
         gfrm.pack(fill=tk.X)
+
+        # v22ze-209: title and composer (printed by LilyPond, saved in the MIDI file)
+        def _mk_text_row(label, attr, default):
+            row = tk.Frame(gfrm, bg=BG)
+            row.pack(fill=tk.X, pady=3)
+            _lbl(row, label, width=18).pack(side=tk.LEFT)
+            v = tk.StringVar(value=getattr(self.song, attr, "") or default)
+
+            def _store(*_a):
+                try:
+                    setattr(self.song, attr, v.get())
+                except Exception:
+                    pass
+
+            def _commit(_e=None):
+                _store()
+                try:
+                    self.song.modified = True
+                    self._update_title()
+                except Exception:
+                    pass
+            v.trace_add("write", _store)
+            e = tk.Entry(row, textvariable=v, bg=ENTRY, fg=FG, insertbackground=FG,
+                         relief=tk.FLAT, width=34)
+            e.pack(side=tk.LEFT, fill=tk.X, expand=True)
+            e.bind("<FocusOut>", _commit)
+            e.bind("<Return>", _commit)
+            return v
+        _def_title = ""
+        try:
+            _fn0 = getattr(self.song, "filename", None)
+            if _fn0:
+                _def_title = os.path.splitext(os.path.basename(_fn0))[0]
+        except Exception:
+            pass
+        _mk_text_row("Title:", "title", _def_title)
+        _mk_text_row("Composer:", "composer", "")
 
         # Time signature row
         ts_num_var = tk.IntVar(value=self.song.time_sig_num)
@@ -18645,7 +18804,7 @@ class MidisoftStudio:
             except Exception:
                 _warn = ""
             _msg = (f"Done.  RH: {rh_n} notes   LH: {lh_n} notes\n" + _warn
-                    + "\nTo reverse this, use File \u25b8 Undo Correction.")   # v22ze-198
+                    + "\nTo reverse this, use Edit \u25b8 Undo.")   # v22ze-198
             if _warn:
                 if messagebox.askyesno(
                         "Separate Hands",
@@ -19625,7 +19784,7 @@ class MidisoftStudio:
                  bg="#0d1117", fg="#58a6ff",
                  font=("TkDefaultFont", 11, "bold")).pack(padx=20, pady=(16, 4))
 
-        tk.Label(dlg, text="Using Pianoteq? It has no MIDI input port that other programs can see,\nso choose \u201cMidi Through Port-0\u201d here and set Pianoteq's own MIDI\ninput to it.  Then untick Midi Thru in the Mixer, or you will hear\nevery note twice.  (Tested on Linux only; Windows and macOS not verified.)",  # v22ze-163
+        tk.Label(dlg, text="Using Pianoteq? It has no MIDI input port that other programs can see, so choose \u201cMidi Through Port-0\u201d here and set Pianoteq's own MIDI input to it.  Then untick Midi Thru in the Mixer, or you will hear every note twice.  (Tested on Linux only; Windows and macOS not verified.)",  # v22ze-163
                  bg="#0d1117", fg="#d29922", font=("TkDefaultFont", 8),
                  justify=tk.LEFT).pack(padx=20, pady=(0, 8), anchor="w")
 
@@ -19636,9 +19795,11 @@ class MidisoftStudio:
         # off-screen and unreachable. Cap the list area's height and make
         # it scrollable instead, so the button always stays visible.
         _list_max_height = 320
-        _list_canvas = tk.Canvas(dlg, bg="#0d1117", highlightthickness=0,
+        _list_holder = tk.Frame(dlg, bg="#0d1117")      # v22ze-209: keeps the volume box below the list
+        _list_holder.pack(fill=tk.BOTH)
+        _list_canvas = tk.Canvas(_list_holder, bg="#0d1117", highlightthickness=0,
                                   width=360, height=_list_max_height)
-        _list_scroll = tk.Scrollbar(dlg, orient="vertical", command=_list_canvas.yview)
+        _list_scroll = tk.Scrollbar(_list_holder, orient="vertical", command=_list_canvas.yview)
         _list_frame = tk.Frame(_list_canvas, bg="#0d1117")
         _list_frame.bind("<Configure>",
             lambda e: _list_canvas.configure(scrollregion=_list_canvas.bbox("all")))
@@ -19654,6 +19815,7 @@ class MidisoftStudio:
                           bg="#0d1117", fg="white", selectcolor="#21262d",
                           activebackground="#0d1117", activeforeground="white",
                           anchor="w").pack(fill=tk.X, padx=4, pady=2)
+        _list_canvas.configure(height=min(_list_max_height, max(40, 30 * len(options) + 8)))   # v22ze-209
 
         def _apply():
             chosen = var.get()
@@ -19687,6 +19849,54 @@ class MidisoftStudio:
         tk.Button(dlg, text="Use This", command=_apply,
                  bg="#238636", fg="white", relief=tk.FLAT,
                  padx=12, pady=4).pack(pady=(10, 16))
+
+    def _where_dialog(self):   # v22ze-209
+        """Help > Where do I find...?  Type a word, see which menu has it."""
+        old = getattr(self, "_where_dlg", None)
+        if old is not None and old.winfo_exists():
+            old.lift(); return
+        items = [
+            ("Corrections \u25b8 Separate Hands\u2026", "split a piano recording into right-hand and left-hand staves hands"),
+            ("Corrections \u25b8 Fix Chords\u2026", "chords too wide for one hand span fingers move note other hand"),
+            ("Corrections \u25b8 Quantize\u2026", "snap notes to a grid timing rhythm"),
+            ("Corrections \u25b8 Rationalize Score\u2026", "turn a recording into clean notation measures"),
+            ("Corrections \u25b8 Clean Up Measures\u2026", "overflow measure notes cross the barline tidy rests"),
+            ("Corrections \u25b8 Quantization / Grace Cleanup", "grid size grace notes tiny notes"),
+            ("Score Settings \u25b8 Score Settings\u2026", "tempo bpm speed faster slower measures wanted measure length time signature key title composer"),
+            ("Score Settings \u25b8 Key Signature\u2026", "sharps flats key"),
+            ("File \u25b8 Save As\u2026", "save a copy midi file name"),
+            ("File \u25b8 Export \u25b8 \u2026", "musicxml lilypond musescore sibelius finale"),
+            ("File \u25b8 Print Score\u2026", "print paper pdf sheet music"),
+            ("Edit \u25b8 Undo / Redo", "undo redo take back"),
+            ("Edit \u25b8 Combine Tracks / Separate Channels / Add Track / Delete Track", "tracks channels instruments merge split"),
+            ("View \u25b8 Score View / Piano Roll / MIDI List / Mixer", "windows volume instruments mute solo"),
+            ("Setup \u25b8 MIDI Output Device\u2026", "sound speaker synth volume pianoteq fluidsynth"),
+            ("Help \u25b8 User Guide", "manual instructions"),
+        ]
+        BG, FG = "#0d1117", "#f0f6fc"
+        dlg = tk.Toplevel(self.root)
+        dlg.title("Where do I find\u2026?")
+        dlg.configure(bg=BG)
+        self._where_dlg = dlg
+        tk.Label(dlg, text="Type a word, for example: speed, print, title, hands, key.",
+                 bg=BG, fg="#8b949e", justify="left", anchor="w").pack(fill="x", padx=12, pady=(10, 4))
+        var = tk.StringVar()
+        ent = tk.Entry(dlg, textvariable=var, bg="#161b22", fg=FG, insertbackground=FG, relief=tk.FLAT)
+        ent.pack(fill="x", padx=12, pady=(0, 6))
+        lb = tk.Listbox(dlg, bg="#161b22", fg=FG, relief=tk.FLAT, height=10, activestyle="none",
+                        selectbackground="#30363d", highlightthickness=0)
+        lb.pack(fill="both", expand=True, padx=12, pady=(0, 12))
+
+        def _fill(*_a):
+            words = var.get().lower().split()
+            lb.delete(0, "end")
+            for path, kw in items:
+                hay = (path + " " + kw).lower()
+                if all(w in hay for w in words):
+                    lb.insert("end", path)
+        var.trace_add("write", _fill)
+        _fill()
+        ent.focus_set()
 
     def _midi_info(self):
         try: outs="\n  ".join(mido.get_output_names() or ["(none)"])
