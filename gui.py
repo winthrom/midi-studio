@@ -2984,7 +2984,7 @@ class Song:
         return song
 
     # ── MIDI export ──────────────────────────────────────────────────────────
-    def to_mid(self, path):
+    def to_mid(self, path, match_score=False):   # v22ze-213
         """Write song to a Standard MIDI File.
 
         Tie-continuation notes (articulation='tie_continuation') are merged
@@ -3007,6 +3007,13 @@ class Song:
                     tt.append(_mk(_val))
                 except Exception:
                     pass
+        try:   # v22ze-213: say what this file is
+            tt.append(mido.MetaMessage(
+                "text", time=0,
+                text="Saved by MIDI Studio " + str(APP_VERSION)
+                + ("; notes lengthened as the score shows" if match_score else "; sound as recorded")))
+        except Exception:
+            pass
         tt.append(
             mido.MetaMessage(
                 "time_signature",
@@ -3073,7 +3080,7 @@ class Song:
         mid.tracks.append(tt)
         for tr in self.tracks:
             # v22ze-191: join ties and keep recorded sounding lengths
-            merged = _sound_list(tr.notes)
+            merged = _sound_list(tr.notes, match_score)
 
             mt = mido.MidiTrack()
             mt.name = tr.name
@@ -7558,7 +7565,7 @@ class _SN:
         self.tick, self.pitch, self.velocity, self.duration, self.channel = tick, pitch, velocity, duration, channel
 
 
-def _sound_list(notes):
+def _sound_list(notes, match_score=False):   # v22ze-213
     """v22ze-191: the notes as they should SOUND.  Tied pieces are joined into one
     note (a note split at a barline was being cut off at the barline when played
     live), and a note whose length was only adjusted for the score keeps its
@@ -7573,7 +7580,7 @@ def _sound_list(notes):
                 if not fixed:
                     p.duration = n.tick + n.duration - p.tick
                 continue
-        od = getattr(n, "orig_dur", None)
+        od = None if match_score else getattr(n, "orig_dur", None)
         last[n.pitch] = len(out)
         out.append((_SN(n.tick, n.pitch, n.velocity, od if od is not None else n.duration, n.channel),
                     od is not None))
@@ -18413,18 +18420,70 @@ class MidisoftStudio:
             self.root.after(4000,self._update_title)
         except Exception as e: messagebox.showerror("Error",str(e),parent=self.root)
 
+    def _score_only_changes(self):   # v22ze-213
+        """How many notes are longer in the score than their recorded sound."""
+        n = 0
+        for tr in self.song.tracks:
+            for x in tr.notes:
+                od = getattr(x, "orig_dur", None)
+                if od is not None and od != x.duration:
+                    n += 1
+        return n
+
+    def _write_mid(self, path):   # v22ze-213
+        match = False
+        n = self._score_only_changes()
+        if n:
+            match = bool(messagebox.askyesno(
+                "Save",
+                str(n) + " notes were lengthened in the score only (for example by Remove Short Rests)." + chr(10) + chr(10)
+                + "Yes = save the file to match the score (those notes are joined up as shown; the sound is slightly more connected)." + chr(10)
+                + "No = keep the sound exactly as recorded (the usual choice).",
+                default="no", parent=self.root))
+        self.song.to_mid(path, match)
+        self._update_title()
+
     def _save(self):
-        if not self.song.filename: self._save_as()
-        else:
-            try: self.song.to_mid(self.song.filename); self._update_title()
-            except Exception as e: messagebox.showerror("Save Error",str(e),parent=self.root)
+        if not self.song.filename:
+            self._save_as()
+            return
+        fn = self.song.filename
+        if os.path.exists(fn) and getattr(self, "_save_warned", None) != fn and getattr(self.song, "modified", False):   # v22ze-213
+            ans = messagebox.askyesnocancel(
+                "Save",
+                "This will replace the file:" + chr(10) + os.path.basename(fn) + chr(10) + chr(10)
+                + "Yes = Save As... (keeps the original safe)" + chr(10)
+                + "No = replace it" + chr(10) + "Cancel = do nothing",
+                parent=self.root)
+            if ans is None:
+                return
+            if ans:
+                self._save_as()
+                return
+            self._save_warned = fn
+        try:
+            self._write_mid(fn)
+        except Exception as e:
+            messagebox.showerror("Save Error", str(e), parent=self.root)
 
     def _save_as(self):
-        path=filedialog.asksaveasfilename(parent=self.root,title="Save MIDI",
-            defaultextension=".mid",filetypes=[("MIDI","*.mid"),("All","*.*")])
+        kw = {}
+        fn = getattr(self.song, "filename", None)
+        if fn:   # v22ze-213: suggest a new name so the original keeps its own
+            stem = os.path.splitext(os.path.basename(fn))[0]
+            if not stem.endswith("-edited"):
+                stem += "-edited"
+            kw = dict(initialfile=stem + ".mid", initialdir=os.path.dirname(fn) or None)
+            if kw["initialdir"] is None:
+                del kw["initialdir"]
+        path = filedialog.asksaveasfilename(parent=self.root, title="Save MIDI",
+            defaultextension=".mid", filetypes=[("MIDI", "*.mid"), ("All", "*.*")], **kw)
         if path:
-            try: self.song.to_mid(path); self._update_title()
-            except Exception as e: messagebox.showerror("Error",str(e),parent=self.root)
+            try:
+                self._write_mid(path)
+                self._save_warned = path
+            except Exception as e:
+                messagebox.showerror("Error", str(e), parent=self.root)
 
     def _check_python_ly(self):
         """Return the ly module, or None if python-ly isn't installed.
@@ -18965,8 +19024,8 @@ class MidisoftStudio:
                 ("Tell Fix Chords how big a hand to plan for.\n"
                  "It then lists the chords that hand cannot play.")
                 if thin else
-                ("Sort the piano notes into a right-hand staff and a\n"
-                 "left-hand staff. The sound is not changed.")
+                ("Sort the keyboard notes (piano, organ, accordion) into a\n"
+                 "right-hand staff and a left-hand staff. The sound is not changed.")
             ),
             bg=BG,
             fg=FG,
@@ -20361,7 +20420,7 @@ class MidisoftStudio:
         if old is not None and old.winfo_exists():
             old.lift(); return
         items = [
-            ("Corrections \u25b8 Separate Hands\u2026", "split a piano recording into right-hand and left-hand staves hands"),
+            ("Corrections \u25b8 Separate Hands\u2026", "split a keyboard recording (piano organ accordion) into right-hand and left-hand staves hands"),
             ("Corrections \u25b8 Fix Chords\u2026", "chords too wide for one hand span fingers move note other hand"),
             ("Corrections \u25b8 Quantize\u2026", "snap notes to a grid timing rhythm"),
             ("Corrections \u25b8 Rationalize Score\u2026", "turn a recording into clean notation measures"),
