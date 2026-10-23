@@ -49,7 +49,7 @@ if _orig_toplevel_init is not None:
 _WORK_TITLES = {
     "Score Settings", "Rationalize Score", "Separate Hands", "Staff Type", "Send a Problem Report", "Remove Short Rests",
     "Quantize", "Key Signature", "LilyPond Export Options", "MIDI Output Device",
-    "Fix Chords", "Combine Tracks", "Fix Chords - hand size",
+    "Fix Chords", "Combine Tracks", "Fix Chords - hand size", "Fix Measures",
 }
 
 
@@ -9993,6 +9993,7 @@ class ScoreView(tk.Frame):
                 "dynamics",
                 "articulation",
                 "measures",
+                "time",
                 "select",
             ][idx]
             # Selection now persists across tab switches on purpose (see
@@ -10125,6 +10126,26 @@ class ScoreView(tk.Frame):
             fg="#333",
         ).pack(side=tk.LEFT, padx=8, pady=6)
 
+        # -- Tab: Move (v22ze-215) -------------------------------------------
+        t5b = tk.Frame(nb, bg=tabbg)
+        nb.add(t5b, text="Move")
+        self._move_step_var = tk.StringVar(value="16th")
+        self._move_scope_var = tk.StringVar(value="these notes only")
+        tk.Label(t5b, text="  Move selected notes by", bg=tabbg).pack(side=tk.LEFT, padx=(8, 2), pady=6)
+        ttk.Combobox(t5b, textvariable=self._move_step_var, values=list(_DUR_NAMES), width=18,
+                     state="readonly").pack(side=tk.LEFT, padx=2)
+        tk.Button(t5b, text="\u25c0 Earlier", command=lambda: self._move_selection(-1), relief=tk.FLAT,
+                  padx=6).pack(side=tk.LEFT, padx=(8, 2))
+        tk.Button(t5b, text="Later \u25b6", command=lambda: self._move_selection(1), relief=tk.FLAT,
+                  padx=6).pack(side=tk.LEFT, padx=2)
+        ttk.Combobox(t5b, textvariable=self._move_scope_var, width=32, state="readonly",
+                     values=["these notes only", "these and the rest of this staff",
+                             "these and the rest of every staff"]).pack(side=tk.LEFT, padx=(8, 2))
+        tk.Button(t5b, text="Remove Rest\u2026", command=self._remove_selected_rests, relief=tk.FLAT,
+                  padx=6).pack(side=tk.LEFT, padx=(14, 2))
+        tk.Label(t5b, textvariable=self._apply_msg, bg=tabbg, fg="#064", font=("TkDefaultFont", 8)).pack(
+            side=tk.LEFT, padx=8)
+
         # -- Tab 6: Select ---------------------------------------------------
         t6 = tk.Frame(nb, bg=tabbg)
         nb.add(t6, text="Select")
@@ -10166,7 +10187,7 @@ class ScoreView(tk.Frame):
 
         # ── Mini transport (synced to main app) ──────────────────────────────
         self._nb = nb                  # v22ze-214: editing tabs start off; Select turns them on
-        self._edit_tabs = [t1, t2, t3, t4, t5]
+        self._edit_tabs = [t1, t2, t3, t4, t5, t5b]
         for _t in (t1, t2, t3, t4):
             _b = tk.Button(_t, text="Apply to Selection", command=self._apply_selection, relief=tk.FLAT, padx=6,
                            state=tk.DISABLED)
@@ -10253,6 +10274,12 @@ class ScoreView(tk.Frame):
             "Off (usual): a short recorded note followed by silence does not\n"
             "get a string of 1/8, 1/16 and 1/32 rests.  The music is unchanged;\n"
             "this only changes what the Score draws.")
+        self._show_pedal_var = tk.BooleanVar(value=True)   # v22ze-215
+        _spb = tk.Checkbutton(tb, text="Pedal marks", variable=self._show_pedal_var, bg="#e8e8e0",
+                              command=self._draw)
+        _spb.pack(side=tk.LEFT, padx=(6, 2))
+        _tt(_spb, "Show the Ped. marks that come from the recorded sustain pedal.\n"
+                  "This only changes what the Score draws.")
         fr = tk.Frame(self, bg="#fffff8")
         fr.pack(fill=tk.BOTH, expand=True)
         self.canvas = tk.Canvas(fr, bg="#fffff8", cursor="crosshair")
@@ -12105,7 +12132,8 @@ class ScoreView(tk.Frame):
         # Draw ties for notes crossing barlines
         self._draw_ties(c, tr, tt, bt, nr, tpb, mmap, ti=ti)
         # Draw pedal marks
-        self._draw_pedal(c, tr, tt, bt, tpb, mmap)
+        if self._show_pedal_var.get():   # v22ze-215
+            self._draw_pedal(c, tr, tt, bt, tpb, mmap)
         # Draw dynamics markings (v22ze-50 fix -- see qtr.markings above)
         self._draw_dynamics(c, tr, tt, bt, tpb, mmap)
 
@@ -14539,6 +14567,114 @@ class ScoreView(tk.Frame):
         self._apply_msg.set("Applied: " + "; ".join(parts))
         self.app._refresh_views()
 
+    # ── v22ze-215: move notes in time / remove a rest ────────────────────────────────────
+    def _live_selection(self):
+        song = self.app.song
+        allnotes = {id(n): n for t in song.tracks for n in t.notes}
+        return [allnotes[id(n)] for n in self._selection if not isinstance(n, tuple) and id(n) in allnotes]
+
+    def _snapshot(self):
+        import copy as _copy
+        song = self.app.song
+        return _copy.deepcopy(song.tracks), _copy.deepcopy(song.rationalized_measure_map)
+
+    def _push_snapshot(self, desc, snap):
+        import copy as _copy
+        song = self.app.song
+        song.modified = True
+        self.app._update_title()
+        self.app._push_undo(RationalizationAction(
+            description=desc, before_tracks=snap[0], after_tracks=_copy.deepcopy(song.tracks),
+            before_map=snap[1], after_map=_copy.deepcopy(song.rationalized_measure_map)))
+
+    def _move_selection(self, sign):
+        song = self.app.song
+        sel = self._live_selection()
+        if not sel:
+            self._apply_msg.set("Select notes first.")
+            return
+        step = dur_ticks(self._move_step_var.get(), song.ticks_per_beat) or max(1, song.ticks_per_beat // 4)
+        scope = {"these notes only": "selected", "these and the rest of this staff": "track",
+                 "these and the rest of every staff": "all"}.get(self._move_scope_var.get(), "selected")
+        snap = self._snapshot()
+        r = move_notes_in_time(song, sel, sign * step, scope)
+        if not r["moved"]:
+            self._apply_msg.set("Nothing could move" + (" (a note is in the way)." if r["clamped"] else "."))
+            return
+        beats = abs(r["delta"]) / song.ticks_per_beat
+        self._push_snapshot("Move notes %s" % ("later" if r["delta"] > 0 else "earlier"), snap)
+        self._apply_msg.set("Moved %d note(s) %.2f beat %s%s" % (
+            r["moved"], beats, "later" if r["delta"] > 0 else "earlier",
+            " (stopped at the previous note)" if r["clamped"] else ""))
+        self.app._refresh_views()
+
+    def _ask_rest_mode(self, n):
+        pre = getattr(self, "_rest_choice", None)
+        if pre in ("fill", "close", "close_all"):
+            return pre
+        dlg = tk.Toplevel(self.app.root)
+        dlg.title("Remove rest")
+        dlg.transient(self.app.root)
+        out = {"v": None}
+        remember = tk.BooleanVar(value=False)
+        tk.Label(dlg, justify=tk.LEFT, padx=14, pady=10,
+                 text=("Remove %d rest(s). How should the time be taken up?\n\n"
+                       "Lengthen the note before it: the music after it stays where it is.\n"
+                       "Close the gap, this staff: the later notes of this staff move earlier.\n"
+                       "Close the gap, every staff: the later notes of both hands move earlier.") % n).pack()
+        tk.Checkbutton(dlg, text="Don't ask again this session (use my choice)", variable=remember).pack()
+        row = tk.Frame(dlg)
+        row.pack(pady=8)
+
+        def pick(v):
+            out["v"] = v
+            if v and remember.get():
+                self._rest_choice = v
+            dlg.destroy()
+        for label, v in (("Lengthen note", "fill"), ("Close, this staff", "close"),
+                         ("Close, every staff", "close_all"), ("Cancel", None)):
+            tk.Button(row, text=label, command=lambda v=v: pick(v)).pack(side=tk.LEFT, padx=4)
+        dlg.protocol("WM_DELETE_WINDOW", lambda: pick(None))
+        try:
+            dlg.grab_set()
+        except Exception:
+            pass
+        dlg.wait_window()
+        return out["v"]
+
+    def _remove_selected_rests(self):
+        song = self.app.song
+        rests = [h for h in self._selection if isinstance(h, tuple) and h and h[0] == "rest"]
+        if not rests:
+            self._apply_msg.set("Select a rest first (click it).")
+            return
+        mode = self._ask_rest_mode(len(rests))
+        if mode is None:
+            self._apply_msg.set("Cancelled; nothing changed.")
+            return
+        snap = self._snapshot()
+        done, why = 0, ""
+        seen = set()
+        for _k, ti, tick, dur in sorted(rests, key=lambda h: -h[2]):
+            gap = find_gap(song, ti, tick + 1)
+            key = (ti, gap[0] if gap else None)
+            if gap is None or key in seen:
+                continue
+            seen.add(key)
+            r = remove_rest(song, ti, tick + 1, mode)
+            if r["ok"]:
+                done += 1
+            else:
+                why = r["reason"]
+        self._selection.clear()
+        self._refresh_selection_label()
+        if not done:
+            self._apply_msg.set("Nothing changed" + (": " + why + "." if why else "."))
+            return
+        self._push_snapshot("Remove %d rest(s)" % done, snap)
+        self._apply_msg.set("Removed %d rest(s)." % done)
+        self.app._refresh_views()
+
     def _clear_selection(self):
         if not self._selection:
             return
@@ -15725,6 +15861,178 @@ def set_note_durations(song, notes, new_ticks, grow="cut", dry=False):
     return res
 
 
+# ── v22ze-215: move notes in time, remove a rest, measure report and measure fixes ─────────
+def _prev_onset_limit(song, ti, barrier):
+    prev = [n.tick for n in song.tracks[ti].notes if n.tick < barrier]
+    return (max(prev) + 1) if prev else 0
+
+
+def move_notes_in_time(song, notes, delta, scope="selected"):
+    """Move chords earlier (delta < 0) or later (delta > 0).  The rests around them simply
+    grow or shrink (a rest is the gap between notes).
+      scope "selected": only these notes;
+      scope "track"   : these notes and everything after them in the same staff;
+      scope "all"     : these notes and everything after them in every staff.
+    Moving earlier never passes an earlier note that stays behind (it stops one tick after it).
+    A real edit: the sound changes.  Returns {"moved", "delta", "clamped"}."""
+    ids = {id(n) for n in notes}
+    sel = [(ti, n) for ti, t in enumerate(song.tracks) for n in t.notes if id(n) in ids]
+    if not sel or not delta:
+        return {"moved": 0, "delta": 0, "clamped": False}
+    d = int(delta)
+    if scope == "selected":
+        d = max(d, -min(n.tick for _t, n in sel))
+        for _t, n in sel:
+            n.tick += d
+        return {"moved": len(sel), "delta": d, "clamped": d != delta}
+    if scope == "track":
+        barriers = {}
+        for ti, n in sel:
+            barriers[ti] = min(barriers.get(ti, n.tick), n.tick)
+    else:
+        g = min(n.tick for _t, n in sel)
+        barriers = {ti: g for ti in range(len(song.tracks))}
+    if d < 0:
+        for ti, b in barriers.items():
+            d = max(d, _prev_onset_limit(song, ti, b) - b)
+    if d == 0:
+        return {"moved": 0, "delta": 0, "clamped": True}
+    moved = 0
+    for ti, b in barriers.items():
+        tr = song.tracks[ti]
+        for lst in (tr.notes, getattr(tr, "events", []), getattr(tr, "markings", [])):
+            for x in lst:
+                if x.tick >= b:
+                    x.tick += d
+                    if lst is tr.notes:
+                        moved += 1
+    for tr in song.tracks:
+        tr.notes.sort(key=lambda n: n.tick)
+    return {"moved": moved, "delta": d, "clamped": d != delta}
+
+
+def find_gap(song, ti, tick):
+    """The silence in staff `ti` that contains `tick`: (start, end) with end None when nothing
+    follows; None when a note is sounding there."""
+    tr = song.tracks[ti]
+    for n in tr.notes:
+        if n.tick <= tick < n.tick + n.duration:
+            return None
+    ends = [n.tick + n.duration for n in tr.notes if n.tick + n.duration <= tick]
+    nxt = [n.tick for n in tr.notes if n.tick > tick]
+    return (max(ends) if ends else 0, min(nxt) if nxt else None)
+
+
+def _measure_end_at(song, tick):
+    import bisect
+    mm = song.get_measure_map()
+    i = bisect.bisect_right([m[1] for m in mm], tick) - 1
+    return mm[i][2] if 0 <= i < len(mm) else None
+
+
+def remove_rest(song, ti, tick, mode):
+    """Remove the whole silence in staff `ti` around `tick`.
+      "fill"      : the note(s) before it are made longer (stopping at their barline);
+      "close"     : the later notes of this staff move earlier;
+      "close_all" : the later notes of every staff move earlier (hands stay together).
+    Returns {"ok", "amount", "reason"}."""
+    gap = find_gap(song, ti, tick)
+    if gap is None:
+        return {"ok": False, "amount": 0, "reason": "a note is sounding there"}
+    g0, g1 = gap
+    tr = song.tracks[ti]
+    tol = max(1, song.ticks_per_beat // 16)
+    if mode == "fill":
+        enders = [n for n in tr.notes if abs(n.tick + n.duration - g0) <= tol and n.tick + n.duration <= tick + tol]
+        if not enders:
+            return {"ok": False, "amount": 0, "reason": "no note before the rest to lengthen"}
+        target = g1 if g1 is not None else (_measure_end_at(song, tick) or g0)
+        done = 0
+        for n in enders:
+            me = _measure_end_at(song, n.tick)
+            new_end = min(target, me) if me is not None else target
+            if new_end > n.tick + n.duration:
+                n.duration = new_end - n.tick
+                n.orig_dur = None
+                done += 1
+        return {"ok": bool(done), "amount": (target - g0), "reason": "" if done else "the note already reaches its barline"}
+    if g1 is None:
+        return {"ok": False, "amount": 0, "reason": "nothing follows this rest"}
+    first = [n for n in tr.notes if n.tick == g1]
+    r = move_notes_in_time(song, first, -(g1 - g0), "track" if mode == "close" else "all")
+    return {"ok": r["moved"] > 0, "amount": -r["delta"],
+            "reason": "" if r["moved"] else "nothing could move", "clamped": r["clamped"]}
+
+
+def measure_report(song, include_short=False):
+    """Measures where a staff's music runs past the barline ("over") or, when asked, stops
+    well short of it ("short").  Returns dicts: ti, measure (1-based), kind, ticks."""
+    import bisect
+    mm = song.get_measure_map()
+    starts = [m[1] for m in mm]
+    tpb = song.ticks_per_beat
+    out = []
+    for ti, tr in enumerate(song.tracks):
+        if any(getattr(n, "channel", 0) == 9 for n in tr.notes[:1]):
+            continue
+        latest = {}
+        for n in tr.notes:
+            i = bisect.bisect_right(starts, n.tick) - 1
+            if i < 0 or i >= len(mm):
+                continue
+            latest[i] = max(latest.get(i, mm[i][1]), n.tick + n.duration)
+        for i in sorted(latest):
+            me = mm[i][2]
+            delta = latest[i] - me
+            if delta > 0:
+                out.append({"ti": ti, "measure": i + 1, "kind": "over", "ticks": delta})
+            elif include_short and -delta >= tpb // 4:
+                out.append({"ti": ti, "measure": i + 1, "kind": "short", "ticks": -delta})
+    out.sort(key=lambda e: (e["measure"], e["ti"]))
+    return out
+
+
+def cut_at_barline(song, ti, mi):
+    """Notes of staff `ti` that start in measure `mi` (0-based) and run past its barline stop at it."""
+    mm = song.get_measure_map()
+    ms, me = mm[mi][1], mm[mi][2]
+    k = 0
+    for n in song.tracks[ti].notes:
+        if ms <= n.tick < me and n.tick + n.duration > me:
+            n.duration = me - n.tick
+            n.orig_dur = None
+            k += 1
+    return k
+
+
+def fill_to_barline(song, ti, mi):
+    """The last-sounding chord of staff `ti` in measure `mi` is lengthened up to the barline."""
+    mm = song.get_measure_map()
+    ms, me = mm[mi][1], mm[mi][2]
+    ns = [n for n in song.tracks[ti].notes if ms <= n.tick < me]
+    if not ns:
+        return 0
+    last = max(n.tick + n.duration for n in ns)
+    if last >= me:
+        return 0
+    tol = max(1, song.ticks_per_beat // 16)
+    k = 0
+    for n in ns:
+        if n.tick + n.duration >= last - tol:
+            n.duration = me - n.tick
+            n.orig_dur = None
+            k += 1
+    return k
+
+
+def move_measure_notes(song, ti, mi, delta):
+    """Move every note of staff `ti` that starts in measure `mi` by `delta` ticks."""
+    mm = song.get_measure_map()
+    ms, me = mm[mi][1], mm[mi][2]
+    ns = [n for n in song.tracks[ti].notes if ms <= n.tick < me]
+    return move_notes_in_time(song, ns, delta, "selected")
+
+
 class RationalizationAction:
     """Memento for a single rationalization edit (undo/redo)."""
 
@@ -16214,6 +16522,7 @@ class MidisoftStudio:
         em=TkPopupMenu(mb,tearoff=0); mb.add_cascade(label="Edit",menu=em)
         em.add_command(label="Undo\tCtrl+Z",command=self._undo,accelerator="Ctrl+Z")   # v22ze-209
         em.add_command(label="Redo\tCtrl+Y",command=self._redo,accelerator="Ctrl+Y")
+        em.add_command(label="Editing tabs On/Off",command=self._toggle_editing_tabs)   # v22ze-215
         em.add_separator()
         em.add_command(label="Add Track",command=self._add_track)
         em.add_command(label="Delete Track",command=self._del_track)
@@ -16230,6 +16539,7 @@ class MidisoftStudio:
         nm.add_command(label="Remove Short Rests…", command=self._remove_short_rests_dialog)   # v22ze-211
         nm.add_command(label="Clean Up Measures…", command=self._open_score_setup)
         nm.add_command(label="Fix Chords…",command=self._thin_chords)
+        nm.add_command(label="Fix Measures…",command=self._fix_measures)   # v22ze-215
         nm.add_separator()
         scm=TkPopupMenu(mb,tearoff=0); mb.add_cascade(label="Score Settings",menu=scm)
         scm.add_command(label="Score Settings…\tCtrl+G", command=self._open_score_setup,
@@ -19523,6 +19833,173 @@ class MidisoftStudio:
             messagebox.showerror("Separate Hands", f"Error: {exc}",
                                  parent=self.root)
 
+    def _toggle_editing_tabs(self):   # v22ze-215: Edit > Editing tabs On/Off
+        sv = getattr(self, "_score_view", None)
+        try:
+            ok = sv is not None and sv.winfo_exists()
+        except Exception:
+            ok = False
+        if not ok:
+            messagebox.showinfo("Editing tabs", "Open the Score (View ▸ Score View) first.", parent=self.root)
+            return
+        sv._set_edit(not sv._edit_on)
+
+    def _fix_measures(self):   # v22ze-215
+        """Fix Measures: staves whose music runs past the barline (or stops short of it),
+        measure by measure, with the neighbouring measures shown, and a few safe fixes."""
+        import copy as _copy
+        old = getattr(self, "_fixmeasures_dlg", None)
+        try:
+            if old is not None and old.winfo_exists():
+                old.lift()
+                return
+        except Exception:
+            pass
+        if not self.song.tracks or not any(t.notes for t in self.song.tracks):
+            messagebox.showinfo("Fix Measures", "Open a piece first.", parent=self.root)
+            return
+        BG, FG = "#0d1117", "#f0f6fc"
+        dlg = tk.Toplevel(self.root)
+        dlg.title("Fix Measures")
+        dlg.configure(bg=BG)
+        self._fixmeasures_dlg = dlg
+        self._work_dialogs = [w for w in getattr(self, "_work_dialogs", []) if w.winfo_exists()] + [dlg]
+        tk.Label(dlg, bg=BG, fg="#8b949e", justify="left", anchor="w", wraplength=620,
+                 text="Each line is a staff in a measure whose music runs past the barline. "
+                      "Pick a line to see that measure and its neighbours, then choose a fix. "
+                      "Every fix is one Edit ▸ Undo step."
+                 ).pack(fill="x", padx=12, pady=(10, 4))
+        short_var = tk.BooleanVar(value=False)
+        tk.Checkbutton(dlg, text="Also list measures that stop short of the barline", variable=short_var,
+                       bg=BG, fg=FG, selectcolor="#21262d", activebackground=BG, activeforeground=FG,
+                       command=lambda: refill()).pack(anchor="w", padx=12)
+        lb = tk.Listbox(dlg, bg="#161b22", fg=FG, relief=tk.FLAT, height=12, width=80, activestyle="none",
+                        selectbackground="#30363d", highlightthickness=0, exportselection=False)
+        lb.pack(fill="both", expand=True, padx=12, pady=6)
+        detail = tk.Label(dlg, bg=BG, fg=FG, justify="left", anchor="w", wraplength=620, text="")
+        detail.pack(fill="x", padx=12)
+        status = tk.Label(dlg, bg=BG, fg="#3fb950", justify="left", anchor="w", wraplength=620, text="")
+        status.pack(fill="x", padx=12, pady=(2, 4))
+        entries = []
+
+        def name(ti):
+            return (self.song.tracks[ti].name or "staff %d" % (ti + 1)).rstrip(":")
+
+        def fill_of(ti, mi):
+            mm = self.song.get_measure_map()
+            if not (0 <= mi < len(mm)):
+                return None
+            ms, me = mm[mi][1], mm[mi][2]
+            ns = [n for n in self.song.tracks[ti].notes if ms <= n.tick < me]
+            if not ns:
+                return "empty"
+            last = max(n.tick + n.duration for n in ns)
+            return "%.2f of %.2f beats" % ((last - ms) / self.song.ticks_per_beat, (me - ms) / self.song.ticks_per_beat)
+
+        def refill(keep=None):
+            lb.delete(0, "end")
+            del entries[:]
+            tpb = self.song.ticks_per_beat
+            for e in measure_report(self.song, short_var.get()):
+                entries.append(e)
+                lb.insert("end", "Measure %d · %s: %s %.2f beat%s" % (
+                    e["measure"], name(e["ti"]), "runs past the barline by" if e["kind"] == "over" else "stops short by",
+                    e["ticks"] / tpb, "" if abs(e["ticks"] / tpb - 1) < 0.005 else "s"))
+            if entries:
+                i = 0
+                if keep is not None:
+                    for k, e in enumerate(entries):
+                        if (e["measure"], e["ti"]) >= (keep[1], keep[0]):
+                            i = k
+                            break
+                lb.selection_set(i)
+                lb.see(i)
+            show()
+            status_n.set("%d line(s)" % len(entries))
+
+        status_n = tk.StringVar()
+
+        def cur():
+            sel = lb.curselection()
+            return entries[sel[0]] if sel and sel[0] < len(entries) else None
+
+        def show(*_a):
+            e = cur()
+            if e is None:
+                detail.configure(text="Nothing to fix here." if not entries else "")
+                return
+            mi = e["measure"] - 1
+            lines = []
+            for k in (mi - 1, mi, mi + 1):
+                f = fill_of(e["ti"], k)
+                if f is not None:
+                    lines.append(("▶ " if k == mi else "    ") + "Measure %d: %s" % (k + 1, f))
+            detail.configure(text=name(e["ti"]) + "\n" + "\n".join(lines))
+            try:
+                sv = self._score_view
+                if sv and sv.winfo_exists():
+                    sv._draw(cursor_tick=self.song.get_measure_map()[mi][1])
+            except Exception:
+                pass
+        lb.bind("<<ListboxSelect>>", show)
+
+        def act(label, fn):
+            e = cur()
+            if e is None:
+                return
+            before = _copy.deepcopy(self.song.tracks)
+            before_map = _copy.deepcopy(self.song.rationalized_measure_map)
+            try:
+                n = fn(e)
+            except Exception as ex:
+                status.configure(text="Could not do that: %s" % ex)
+                return
+            if not n:
+                status.configure(text="Nothing changed.")
+                return
+            self.song.modified = True
+            self._update_title()
+            self._push_undo(RationalizationAction(
+                description="%s (measure %d)" % (label, e["measure"]), before_tracks=before,
+                after_tracks=_copy.deepcopy(self.song.tracks), before_map=before_map,
+                after_map=_copy.deepcopy(self.song.rationalized_measure_map)))
+            self._refresh_views()
+            status.configure(text="%s: %s." % (label, ("%d note(s)" % n) if isinstance(n, int) else "done"))
+            refill(keep=(e["ti"], e["measure"]))
+
+        step_var = tk.StringVar(value="16th")
+        row1 = tk.Frame(dlg, bg=BG)
+        row1.pack(fill="x", padx=12, pady=2)
+        bs = dict(relief=tk.FLAT, padx=8, pady=3, bg="#21262d", fg=FG, activebackground="#30363d", activeforeground=FG)
+        tk.Button(row1, text="Cut at the barline", command=lambda: act(
+            "Cut at the barline", lambda e: cut_at_barline(self.song, e["ti"], e["measure"] - 1)), **bs).pack(side=tk.LEFT, padx=2)
+        tk.Button(row1, text="Tie over the barline", command=lambda: act(
+            "Tie over the barline", lambda e: self._tie_measure(e["measure"] - 1)), **bs).pack(side=tk.LEFT, padx=2)
+        tk.Button(row1, text="Lengthen to the barline", command=lambda: act(
+            "Lengthen to the barline", lambda e: fill_to_barline(self.song, e["ti"], e["measure"] - 1)), **bs).pack(side=tk.LEFT, padx=2)
+        row2 = tk.Frame(dlg, bg=BG)
+        row2.pack(fill="x", padx=12, pady=2)
+        tk.Label(row2, text="Move this measure's notes (this staff) by", bg=BG, fg=FG).pack(side=tk.LEFT)
+        ttk.Combobox(row2, textvariable=step_var, values=list(_DUR_NAMES), width=18, state="readonly").pack(side=tk.LEFT, padx=4)
+
+        def mv(sign):
+            st = dur_ticks(step_var.get(), self.song.ticks_per_beat) or 1
+            return lambda: act("Move notes " + ("later" if sign > 0 else "earlier"),
+                               lambda e: move_measure_notes(self.song, e["ti"], e["measure"] - 1, sign * st)["moved"])
+        tk.Button(row2, text="◀ Earlier", command=mv(-1), **bs).pack(side=tk.LEFT, padx=2)
+        tk.Button(row2, text="Later ▶", command=mv(1), **bs).pack(side=tk.LEFT, padx=2)
+        row3 = tk.Frame(dlg, bg=BG)
+        row3.pack(fill="x", padx=12, pady=(2, 10))
+        tk.Button(row3, text="Undo", command=lambda: (self._undo(), refill()), **bs).pack(side=tk.LEFT, padx=2)
+        tk.Button(row3, text="Refresh list", command=lambda: refill(), **bs).pack(side=tk.LEFT, padx=2)
+        tk.Button(row3, text="Close", command=dlg.destroy, **bs).pack(side=tk.RIGHT, padx=2)
+        tk.Label(row3, textvariable=status_n, bg=BG, fg="#8b949e").pack(side=tk.RIGHT, padx=8)
+        refill()
+
+    def _tie_measure(self, mi):   # v22ze-215: Song.fix_measure_timing ties notes across the barline
+        res = self.song.fix_measure_timing(mi)
+        return sum(1 for v in res.values() if v == "ok") if isinstance(res, dict) else 1
+
     def _thin_chords(self, opts=None):   # v22ze-204: Fix / Final tick boxes, live preview
         """Fix Chords: chords one hand cannot play, line by line.
         Fix box = the change is made in the score right now (untick = taken back).
@@ -20742,53 +21219,86 @@ class MidisoftStudio:
         tk.Button(row, text="Close", command=dlg.destroy, bg="#21262d", fg=FG,
                   relief=tk.FLAT, padx=12, pady=4).pack(side="left", padx=4)
 
-    def _where_dialog(self):   # v22ze-209
-        """Help > Where do I find...?  Type a word, see which menu has it."""
+    def _where_dialog(self):   # v22ze-209, v22ze-215: Enter / double-click opens the User Guide there
+        """Help > Where do I find...?  Type a word, see which menu has it; Enter or a
+        double-click opens the User Guide at that topic."""
         old = getattr(self, "_where_dlg", None)
         if old is not None and old.winfo_exists():
             old.lift(); return
         items = [
-            ("Corrections \u25b8 Separate Hands\u2026", "split a keyboard recording (piano organ accordion) into right-hand and left-hand staves hands"),
-            ("Corrections \u25b8 Fix Chords\u2026", "chords too wide for one hand span fingers move note other hand"),
-            ("Corrections \u25b8 Quantize\u2026", "snap notes to a grid timing rhythm"),
-            ("Corrections \u25b8 Rationalize Score\u2026", "turn a recording into clean notation measures"),
-            ("Corrections \u25b8 Remove Short Rests\u2026", "sliver rests tiny gaps eighth sixteenth rests too many rests legato"),
-            ("Corrections \u25b8 Clean Up Measures\u2026", "overflow measure notes cross the barline tidy rests"),
-            ("Corrections \u25b8 Quantization / Grace Cleanup", "grid size grace notes tiny notes"),
-            ("Score Settings \u25b8 Score Settings\u2026", "tempo bpm speed faster slower measures wanted measure length time signature key title composer"),
-            ("Score Settings \u25b8 Key Signature\u2026", "sharps flats key"),
-            ("File \u25b8 Save As\u2026", "save a copy midi file name"),
-            ("File \u25b8 Export \u25b8 \u2026", "musicxml lilypond musescore sibelius finale"),
-            ("File \u25b8 Print Score\u2026", "print paper pdf sheet music"),
-            ("Edit \u25b8 Undo / Redo", "undo redo take back"),
-            ("Edit \u25b8 Combine Tracks / Separate Channels / Add Track / Delete Track", "tracks channels instruments merge split"),
-            ("View \u25b8 Score View / Piano Roll / MIDI List / Mixer", "windows volume instruments mute solo"),
-            ("Setup \u25b8 MIDI Output Device\u2026", "sound speaker synth volume pianoteq fluidsynth"),
-            ("Help \u25b8 User Guide", "manual instructions"),
+            ("Corrections ▸ Separate Hands…", "split a keyboard recording (piano organ accordion) into right-hand and left-hand staves hands", "separate-hands-piano-organ-accordion"),
+            ("Corrections ▸ Fix Chords…", "chords too wide for one hand span fingers move note other hand", "fix-chords"),
+            ("Corrections ▸ Fix Measures…", "measure beats over under count barline overflow too long short fix", "fix-measures"),
+            ("Score editing tabs ▸ Move / Remove Rest", "move notes earlier later time rest remove close gap lengthen", "the-editing-tabs"),
+            ("Corrections ▸ Quantize…", "snap notes to a grid timing rhythm", "quantize"),
+            ("Corrections ▸ Rationalize Score…", "turn a recording into clean notation measures", "rationalize-score"),
+            ("Corrections ▸ Remove Short Rests…", "sliver rests tiny gaps eighth sixteenth rests too many rests legato", "remove-short-rests"),
+            ("Corrections ▸ Clean Up Measures…", "overflow measure notes cross the barline tidy rests", "when-the-measures-are-the-wrong-length"),
+            ("Corrections ▸ Quantization / Grace Cleanup", "grid size grace notes tiny notes", "quantize"),
+            ("Score Settings ▸ Score Settings…", "tempo bpm speed faster slower measures wanted measure length time signature key title composer", "setting-the-speed-time-key-and-title"),
+            ("Score Settings ▸ Key Signature…", "sharps flats key", "setting-the-speed-time-key-and-title"),
+            ("Score editing tabs (Select, Apply to Selection)", "edit notes length duration dotted accidental sharp flat dynamics articulation staccato apply selection select hold", "the-editing-tabs"),
+            ("File ▸ Save As…", "save a copy midi file name edited original", "the-menus"),
+            ("File ▸ Export ▸ …", "musicxml lilypond musescore sibelius finale braille", "the-menus"),
+            ("File ▸ Print Score…", "print paper pdf sheet music", "printing-a-score"),
+            ("Edit ▸ Undo / Redo", "undo redo take back", "the-menus"),
+            ("Edit ▸ Combine Tracks / Separate Channels / Add Track / Delete Track", "tracks channels instruments merge split", "the-track-list"),
+            ("View ▸ Score View / Piano Roll / MIDI List / Mixer", "windows volume instruments mute solo", "four-ways-of-looking-at-the-music"),
+            ("Setup ▸ MIDI Output Device…", "sound speaker synth volume pianoteq fluidsynth", "something-not-working"),
+            ("Help ▸ User Guide", "manual instructions", "what-this-program-does"),
         ]
         BG, FG = "#0d1117", "#f0f6fc"
         dlg = tk.Toplevel(self.root)
-        dlg.title("Where do I find\u2026?")
+        dlg.title("Where do I find…?")
         dlg.configure(bg=BG)
         self._where_dlg = dlg
-        tk.Label(dlg, text="Type a word, for example: speed, print, title, hands, key.",
+        tk.Label(dlg, text="Type a word, for example: speed, print, title, hands, key.\n"
+                           "Press Enter or double-click a line to open the User Guide there.",
                  bg=BG, fg="#8b949e", justify="left", anchor="w").pack(fill="x", padx=12, pady=(10, 4))
         var = tk.StringVar()
         ent = tk.Entry(dlg, textvariable=var, bg="#161b22", fg=FG, insertbackground=FG, relief=tk.FLAT)
         ent.pack(fill="x", padx=12, pady=(0, 6))
         lb = tk.Listbox(dlg, bg="#161b22", fg=FG, relief=tk.FLAT, height=10, activestyle="none",
-                        selectbackground="#30363d", highlightthickness=0)
-        lb.pack(fill="both", expand=True, padx=12, pady=(0, 12))
+                        selectbackground="#30363d", highlightthickness=0, exportselection=False)
+        lb.pack(fill="both", expand=True, padx=12, pady=(0, 4))
+        status = tk.Label(dlg, text="", bg=BG, fg="#3fb950", anchor="w", justify="left")
+        status.pack(fill="x", padx=12, pady=(0, 10))
+        shown = []
 
         def _fill(*_a):
             words = var.get().lower().split()
             lb.delete(0, "end")
-            for path, kw in items:
+            del shown[:]
+            for path, kw, anchor in items:
                 hay = (path + " " + kw).lower()
                 if all(w in hay for w in words):
                     lb.insert("end", path)
+                    shown.append((path, anchor))
+            if shown:
+                lb.selection_set(0)
         var.trace_add("write", _fill)
         _fill()
+
+        def _go(*_a):
+            sel = lb.curselection()
+            idx = sel[0] if sel else (0 if shown else None)
+            if idx is None:
+                return "break"
+            path, anchor = shown[idx]
+            status.configure(text="Opening the User Guide: " + anchor.replace("-", " "))
+            self._open_user_guide(anchor)
+            return "break"
+
+        def _down(_e=None):
+            if shown:
+                lb.focus_set()
+                if not lb.curselection():
+                    lb.selection_set(0)
+            return "break"
+        ent.bind("<Return>", _go)
+        ent.bind("<Down>", _down)
+        lb.bind("<Return>", _go)
+        lb.bind("<Double-Button-1>", _go)
         ent.focus_set()
 
     def _midi_info(self):
@@ -20814,8 +21324,9 @@ class MidisoftStudio:
                "to ensure only one TiMidity instance is active."
                if sys.platform.startswith("linux") else ""),parent=self.root)
 
-    def _open_user_guide(self):
+    def _open_user_guide(self, anchor=None):
         # v22ze-197: Help > User Guide - the PDF next to the program, else the online copy
+        # v22ze-215: with `anchor`, open the PDF at that section when the viewer allows it
         import subprocess, webbrowser
         name = "MIDI-Studio-User-Guide.pdf"
         here = os.path.dirname(os.path.abspath(__file__))
@@ -20826,6 +21337,14 @@ class MidisoftStudio:
             dirs.append(sys._MEIPASS)
         dirs += [here, os.path.join(here, "docs"), os.path.join(os.path.dirname(here), "docs")]
         path = next((os.path.join(d, name) for d in dirs if os.path.isfile(os.path.join(d, name))), None)
+        if path and anchor:
+            # A browser's PDF viewer understands #nameddest=; other viewers just open the guide.
+            try:
+                import pathlib
+                if webbrowser.open(pathlib.Path(path).resolve().as_uri() + "#nameddest=" + anchor):
+                    return
+            except Exception:
+                pass
         if path:
             try:
                 if sys.platform == "win32":
@@ -20837,7 +21356,8 @@ class MidisoftStudio:
                 return
             except Exception:
                 pass
-        webbrowser.open("https://github.com/winthrom/midi-studio/blob/main/docs/MIDI-Studio-User-Guide.pdf")
+        webbrowser.open("https://github.com/winthrom/midi-studio/raw/main/docs/MIDI-Studio-User-Guide.pdf"
+                        + ("#nameddest=" + anchor if anchor else ""))
 
     def _about(self):
         import webbrowser
