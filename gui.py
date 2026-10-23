@@ -9958,10 +9958,16 @@ class ScoreView(tk.Frame):
         # does -- see _on_click, which dispatches on self._active_tool.
         self._active_tool = "note_rest"  # note_rest | accidental | dynamics | articulation | select
         self._entry_mode_var = tk.StringVar(value="note")  # note | rest
-        self._dur_var = tk.StringVar(value="quarter")
-        self._accidental_var = tk.StringVar(value="sharp")
-        self._dynamic_var = tk.StringVar(value="mf")
-        self._articulation_var = tk.StringVar(value="staccato")
+        self._dur_var = tk.StringVar(value="")            # v22ze-214: no tab starts with a value
+        self._accidental_var = tk.StringVar(value="")
+        self._dynamic_var = tk.StringVar(value="")
+        self._articulation_var = tk.StringVar(value="")
+        self._add_var = tk.BooleanVar(value=False)        # "Add notes by clicking"
+        self._apply_msg = tk.StringVar(value="")
+        self._apply_btns = []
+        self._edit_on = False
+        for _v in (self._dur_var, self._accidental_var, self._dynamic_var, self._articulation_var):
+            _v.trace_add("write", lambda *a: self._update_apply_state())
         # ── Selection state (Select tool) ──────────────────────────────────
         # Notes are plain __slots__ objects with default identity-based
         # equality/hashing (no __eq__ override), so it's safe to key a set
@@ -9999,6 +10005,10 @@ class ScoreView(tk.Frame):
             if self._box_select_rect_id is not None:
                 self.canvas.delete(self._box_select_rect_id)
                 self._box_select_rect_id = None
+            if getattr(self, "_ignore_tab_event", False):   # v22ze-214
+                self._ignore_tab_event = False
+            elif self._active_tool == "select" and not self._edit_on:
+                self._set_edit(True)
 
         nb.bind("<<NotebookTabChanged>>", _on_tab_changed)
 
@@ -10017,24 +10027,12 @@ class ScoreView(tk.Frame):
         ttk.Combobox(
             t1,
             textvariable=self._dur_var,
-            values=["whole", "half", "quarter", "eighth", "16th"],
+            values=list(_DUR_NAMES),
             width=8,
             state="readonly",
         ).pack(side=tk.LEFT)
-        tk.Button(
-            t1,
-            text="Apply to Selection",
-            command=self._apply_duration_to_selection,
-            relief=tk.FLAT,
-            padx=6,
-        ).pack(side=tk.LEFT, padx=(8, 4))
-        tk.Label(
-            t1,
-            text="  Click the staff to insert. Right-click a note to delete.",
-            bg=tabbg,
-            fg="#666",
-            font=("TkDefaultFont", 8),
-        ).pack(side=tk.LEFT, padx=10)
+        tk.Checkbutton(t1, text="Add notes by clicking", variable=self._add_var, bg=tabbg).pack(
+            side=tk.LEFT, padx=(12, 2))
 
         # -- Tab 2: Accidental ------------------------------------------------
         t2 = tk.Frame(nb, bg=tabbg)
@@ -10059,7 +10057,7 @@ class ScoreView(tk.Frame):
             ).pack(side=tk.LEFT, padx=2, pady=6)
         tk.Label(
             t2,
-            text="  Click an existing note to apply.",
+            text="  Select notes, pick a value, then Apply to Selection.",
             bg=tabbg,
             fg="#666",
             font=("TkDefaultFont", 8),
@@ -10081,7 +10079,7 @@ class ScoreView(tk.Frame):
             ).pack(side=tk.LEFT, padx=1, pady=6)
         tk.Label(
             t3,
-            text="  Click below the staff to place.",
+            text="  Select notes; the mark is placed at the first selected note.",
             bg=tabbg,
             fg="#666",
             font=("TkDefaultFont", 8),
@@ -10111,7 +10109,7 @@ class ScoreView(tk.Frame):
             ).pack(side=tk.LEFT, padx=1, pady=6)
         tk.Label(
             t4,
-            text="  Click an existing note to toggle.",
+            text="  Select notes, pick a mark, then Apply (applying it again removes it).",
             bg=tabbg,
             fg="#666",
             font=("TkDefaultFont", 8),
@@ -10152,19 +10150,38 @@ class ScoreView(tk.Frame):
             t6, text="0 selected", bg=tabbg, fg="#333", font=("TkDefaultFont", 8)
         )
         self._selection_count_lbl.pack(side=tk.LEFT, padx=(12, 4))
+        self._edit_btn = tk.Button(t6, text="Turn editing off", command=lambda: self._set_edit(not self._edit_on),
+                                   relief=tk.FLAT, padx=6)
+        self._edit_btn.pack(side=tk.LEFT, padx=(8, 4))
+        self._edit_state_lbl = tk.Label(t6, text="Editing: on", bg=tabbg, fg="#333", font=("TkDefaultFont", 9, "bold"))
+        self._edit_state_lbl.pack(side=tk.LEFT, padx=4)
         tk.Label(
             t6,
             text="  Drag a box around notes to select them, or click a single "
-            "note. Shift+drag/click adds to the selection. Delete key or the "
-            "button above removes the selection.",
+            "note. Shift+drag/click adds to the selection. Esc clears. Right-click this tab for editing On/Off.",
             bg=tabbg,
             fg="#666",
             font=("TkDefaultFont", 8),
         ).pack(side=tk.LEFT, padx=10)
 
         # ── Mini transport (synced to main app) ──────────────────────────────
-        nb.select(t6)                  # v22ze-205: the usual first action is Select
-        self._active_tool = "select"
+        self._nb = nb                  # v22ze-214: editing tabs start off; Select turns them on
+        self._edit_tabs = [t1, t2, t3, t4, t5]
+        for _t in (t1, t2, t3, t4):
+            _b = tk.Button(_t, text="Apply to Selection", command=self._apply_selection, relief=tk.FLAT, padx=6,
+                           state=tk.DISABLED)
+            _b.pack(side=tk.RIGHT, padx=(4, 8))
+            self._apply_btns.append(_b)
+            tk.Label(_t, textvariable=self._apply_msg, bg=tabbg, fg="#064", font=("TkDefaultFont", 8)).pack(
+                side=tk.RIGHT, padx=6)
+        for _t, _v in ((t1, self._dur_var), (t2, self._accidental_var), (t3, self._dynamic_var),
+                       (t4, self._articulation_var)):
+            tk.Button(_t, text="Clear", command=lambda v=_v: v.set(""), relief=tk.FLAT, padx=4).pack(
+                side=tk.RIGHT, padx=2)
+        nb.bind("<Button-3>", self._tab_menu)
+        nb.bind("<Button-1>", self._tab_click, add="+")
+        self._select_tab = t6
+        self._set_edit(False)
         tk.Frame(tb, width=1, bg="#aaa").pack(side=tk.LEFT, fill=tk.Y, padx=8, pady=2)
         mbs = dict(relief=tk.FLAT, bg="#c8c8c0", padx=5, pady=1, font=("TkDefaultFont", 12))
         tk.Button(tb, text="⏮", command=self._t_rewind, **mbs).pack(side=tk.LEFT, padx=1)
@@ -14245,13 +14262,7 @@ class ScoreView(tk.Frame):
         self._draw()
 
     def _dur_to_ticks(self, name, tpb):
-        return {
-            "whole": tpb * 4,
-            "half": tpb * 2,
-            "quarter": tpb,
-            "eighth": tpb // 2,
-            "16th": tpb // 4,
-        }.get(name, tpb)
+        return dur_ticks(name, tpb) or tpb   # v22ze-214
 
     def _on_click(self, event):
         cx, cy = self._cxy(event)
@@ -14261,15 +14272,11 @@ class ScoreView(tk.Frame):
         # what a canvas click does. "measures" has no click behavior of
         # its own -- it's handled entirely through the right-click menu,
         # same as Delete/Cut measure already were.
-        if self._active_tool == "note_rest":
+        # v22ze-214: a click SELECTS (like the Select tool) on every tab; the Apply
+        # buttons act on the selection.  Only "Add notes by clicking" inserts.
+        if self._edit_on and self._active_tool == "note_rest" and self._add_var.get():
             self._click_note_rest(cx, cy)
-        elif self._active_tool == "accidental":
-            self._click_accidental(cx, cy)
-        elif self._active_tool == "dynamics":
-            self._click_dynamics(cx, cy)
-        elif self._active_tool == "articulation":
-            self._click_articulation(cx, cy)
-        elif self._active_tool == "select":
+        else:
             # Actual selection happens on release (see _on_release) once
             # we know whether this was a plain click or a drag -- just
             # record where the gesture started, and give the canvas
@@ -14278,7 +14285,7 @@ class ScoreView(tk.Frame):
             self.canvas.focus_set()
 
     def _on_drag(self, event):
-        if self._active_tool != "select" or self._box_select_start is None:
+        if self._box_select_start is None:
             return
         cx, cy = self._cxy(event)
         x0, y0 = self._box_select_start
@@ -14290,7 +14297,7 @@ class ScoreView(tk.Frame):
             self.canvas.coords(self._box_select_rect_id, x0, y0, cx, cy)
 
     def _on_release(self, event):
-        if self._active_tool != "select" or self._box_select_start is None:
+        if self._box_select_start is None:
             return
         cx, cy = self._cxy(event)
         x0, y0 = self._box_select_start
@@ -14324,6 +14331,214 @@ class ScoreView(tk.Frame):
         self._refresh_selection_label()
         self._draw()
 
+    # ── v22ze-214: editing tabs gated by Select; click selects; one Apply button ──────────
+    def _widgets_state(self, w, on):
+        for ch in w.winfo_children():
+            try:
+                if isinstance(ch, ttk.Combobox):
+                    ch.configure(state="readonly" if on else "disabled")
+                elif isinstance(ch, (tk.Radiobutton, tk.Button, tk.Checkbutton)):
+                    ch.configure(state=tk.NORMAL if on else tk.DISABLED)
+            except Exception:
+                pass
+            self._widgets_state(ch, on)
+
+    def _set_edit(self, on):
+        """Editing tabs on/off.  Select stays usable either way."""
+        nb = getattr(self, "_nb", None)
+        if nb is None:
+            return
+        self._edit_on = bool(on)
+        if not on:                     # a disabled tab cannot stay shown: Select is shown
+            try:
+                if nb.select() != str(self._select_tab):
+                    self._ignore_tab_event = True      # the event for this change must not re-enable editing
+                    nb.select(self._select_tab)
+            except Exception:
+                pass
+            self._active_tool = "select"
+        for fr in self._edit_tabs:
+            try:
+                nb.tab(fr, state="normal" if on else "disabled")
+            except Exception:
+                pass
+            self._widgets_state(fr, on)
+        self._apply_widgets_state = on
+        if not on:
+            try:
+                self._add_var.set(False)
+            except Exception:
+                pass
+        try:
+            self._edit_btn.configure(text="Turn editing off" if on else "Turn editing on")
+            self._edit_state_lbl.configure(
+                text="Editing: on" if on else "Editing: off  (click Select again, or the button, to start)")
+        except Exception:
+            pass
+        self._update_apply_state()
+
+    def _reset_editing(self):
+        """A new file (or closing the piece): editing back to the safe starting state."""
+        try:
+            self._selection.clear()
+            for v in (self._dur_var, self._accidental_var, self._dynamic_var, self._articulation_var):
+                v.set("")
+            self._apply_msg.set("")
+            self._set_edit(False)
+            self._refresh_selection_label()
+        except Exception:
+            pass
+
+    def _values_set(self):
+        return bool(self._dur_var.get() or self._accidental_var.get()
+                    or self._dynamic_var.get() or self._articulation_var.get())
+
+    def _update_apply_state(self, *_):
+        ok = bool(getattr(self, "_edit_on", False)) and bool(self._selection) and self._values_set()
+        for b in getattr(self, "_apply_btns", []):
+            try:
+                b.configure(state=tk.NORMAL if ok else tk.DISABLED)
+            except Exception:
+                pass
+
+    def _tab_click(self, event):
+        try:
+            idx = self._nb.index("@%d,%d" % (event.x, event.y))
+        except Exception:
+            return
+        if idx == len(self._nb.tabs()) - 1 and not self._edit_on:
+            self._set_edit(True)
+
+    def _tab_menu(self, event):
+        nb = self._nb
+        try:
+            idx = nb.index("@%d,%d" % (event.x, event.y))
+        except Exception:
+            return
+        if idx != len(nb.tabs()) - 1:
+            return
+        menu = TkPopupMenu(self, tearoff=0)
+        menu.add_command(label="Editing tabs: On", command=lambda: self._set_edit(True))
+        menu.add_command(label="Editing tabs: Off", command=lambda: self._set_edit(False))
+        _popup_menu_safe(menu, event.x_root, event.y_root)
+
+    def _ask_grow(self, n):
+        """A longer note would run into the next note: cut it off, hold it, or push the
+        later music later.  Returns "cut"/"hold"/"push", or None for Cancel."""
+        pre = getattr(self, "_grow_choice", None)
+        if pre in ("cut", "hold", "push"):
+            return pre
+        dlg = tk.Toplevel(self.app.root)
+        dlg.title("Longer note")
+        dlg.transient(self.app.root)
+        out = {"v": None}
+        remember = tk.BooleanVar(value=False)
+        tk.Label(dlg, justify=tk.LEFT, padx=14, pady=10,
+                 text=("%d note(s) would now run into the next note.\n\n"
+                       "Cut off: stop at the next note.\n"
+                       "Hold: keep the full length and let the other notes play over it\n"
+                       "        (a held bass note under changing chords).\n"
+                       "Push later: move the music after it later, to make room.") % n).pack()
+        tk.Checkbutton(dlg, text="Don't ask again this session (use my choice)", variable=remember).pack()
+        row = tk.Frame(dlg)
+        row.pack(pady=8)
+
+        def pick(v):
+            out["v"] = v
+            if v and remember.get():
+                self._grow_choice = v
+            dlg.destroy()
+        for label, v in (("Cut off", "cut"), ("Hold", "hold"), ("Push later", "push"), ("Cancel", None)):
+            tk.Button(row, text=label, width=10, command=lambda v=v: pick(v)).pack(side=tk.LEFT, padx=4)
+        dlg.protocol("WM_DELETE_WINDOW", lambda: pick(None))
+        try:
+            dlg.grab_set()
+        except Exception:
+            pass
+        dlg.wait_window()
+        return out["v"]
+
+    def _apply_selection(self):
+        """Apply every value that is set on the tabs to the selected notes, as ONE undo step."""
+        import copy as _copy
+        song = self.app.song
+        allnotes = {id(n): n for t in song.tracks for n in t.notes}
+        sel = [allnotes[id(n)] for n in self._selection if not isinstance(n, tuple) and id(n) in allnotes]
+        if not sel:
+            self._apply_msg.set("Select notes first.")
+            return
+        if not self._values_set():
+            self._apply_msg.set("Pick a value on a tab first.")
+            return
+        dur_name = self._dur_var.get()
+        acc = self._accidental_var.get()
+        dyn = self._dynamic_var.get()
+        art = self._articulation_var.get()
+        tpb = song.ticks_per_beat
+        grow = "cut"
+        if dur_name:
+            nt = dur_ticks(dur_name, tpb)
+            probe = set_note_durations(song, sel, nt, "cut", dry=True)
+            if probe["overflow"]:
+                grow = self._ask_grow(probe["overflow"])
+                if grow is None:
+                    self._apply_msg.set("Cancelled; nothing changed.")
+                    return
+        before = _copy.deepcopy(song.tracks)
+        before_map = _copy.deepcopy(song.rationalized_measure_map)
+        parts = []
+        if dur_name:
+            r = set_note_durations(song, sel, nt, grow)
+            s = "%d chord(s) set to %s" % (r["chords"] - r["same"], dur_name)
+            if r["capped"]:
+                s += ", %d stopped at the barline" % r["capped"]
+            if r["skipped"]:
+                s += ", %d tied note(s) skipped" % r["skipped"]
+            parts.append(s)
+        if acc:
+            use_flats = _song_uses_flats(song)
+            delta = {"double_flat": -2, "flat": -1, "natural": 0, "sharp": 1, "double_sharp": 2}[acc]
+            k = 0
+            for n in sel:
+                if getattr(n, "articulation", "") in ("tie_predecessor", "tie_continuation"):
+                    continue
+                _, cur = note_staff_pos(n, use_flats)
+                newp = max(0, min(127, (n.pitch - cur) + delta))
+                if newp != n.pitch or getattr(n, "spelling", "") != acc:
+                    n.pitch = newp
+                    n.spelling = acc
+                    k += 1
+            parts.append("%d note(s) given %s" % (k, acc.replace("_", " ")))
+        if art:
+            free = [n for n in sel if getattr(n, "articulation", "") not in
+                    ("tie_predecessor", "tie_continuation", "grace", "pedal_extended")]
+            clear = bool(free) and all(n.articulation == art for n in free)
+            for n in free:
+                n.articulation = "" if clear else art
+            parts.append("%s %s on %d note(s)" % (art, "removed" if clear else "set", len(free)))
+        if dyn:
+            firsts = {}
+            for ti, tr in enumerate(song.tracks):
+                ticks = [n.tick for n in sel if n in tr.notes]
+                if ticks:
+                    firsts[ti] = min(ticks)
+            for ti, tk in firsts.items():
+                tr = song.tracks[ti]
+                tr.markings = [e for e in tr.markings
+                               if not (e.tick == tk and isinstance(e.msg, tuple) and e.msg and e.msg[0] == "dynamic")]
+                tr.markings.append(MidiEvent(tk, ("dynamic", dyn)))
+                tr.markings.sort(key=lambda e: e.tick)
+            parts.append("%s placed in %d staff/staves" % (dyn, len(firsts)))
+        song.modified = True
+        self.app._update_title()
+        self.app._push_undo(RationalizationAction(
+            description="Apply to selection: " + "; ".join(parts), before_tracks=before,
+            after_tracks=_copy.deepcopy(song.tracks), before_map=before_map,
+            after_map=_copy.deepcopy(song.rationalized_measure_map)))
+        # the tracks object may have been replaced by undo before; the live notes were changed in place
+        self._apply_msg.set("Applied: " + "; ".join(parts))
+        self.app._refresh_views()
+
     def _clear_selection(self):
         if not self._selection:
             return
@@ -14336,6 +14551,7 @@ class ScoreView(tk.Frame):
         if lbl is not None:
             n = len(self._selection)
             lbl.configure(text=f"{n} selected")
+        self._update_apply_state()
 
     def _move_selected_staff(self, where):
         """v22ze-187: move the selected notes to the upper (right-hand) or lower
@@ -14438,13 +14654,27 @@ class ScoreView(tk.Frame):
             # intuitive interaction: turn into a rest whichever single
             # note (if any) is actually sounding at the exact clicked
             # tick, regardless of the toolbar's duration setting.
-            hit = [
-                n
-                for n in tr.notes
-                if self._display_tick(n.tick) <= tick < self._display_tick(n.tick) + n.duration
-            ]
-            if not hit:
-                return  # already silent here -- nothing to do, no undo step
+            # v22ze-214: safe Rest mode.  Use the exact click (not the 16th-grid
+            # rounding, which could land inside the NEXT note), do nothing when a
+            # drawn rest is clicked, and only act on a notehead that is really
+            # under the pointer -- with the pieces it is tied to.
+            raw = self._x_to_tick(cx)
+            under = self.canvas.find_overlapping(cx - 4, cy - 4, cx + 4, cy + 4)
+            heads = [self._note_hit_items.get(i) for i in under]
+            if any(isinstance(h, tuple) and h and h[0] == "rest" for h in heads) and not any(
+                    h is not None and not isinstance(h, tuple) for h in heads):
+                self._apply_msg.set("That is already a rest.")
+                return
+            heads = [h for h in heads if h is not None and not isinstance(h, tuple) and h in tr.notes]
+            if not heads:
+                self._apply_msg.set("Click on a note to turn it into a rest.")
+                return
+            _mp = _tie_maps(tr.notes)
+            hit = []
+            for _h in heads:
+                for _pc in _tie_chain(_mp, _h):
+                    if _pc not in hit:
+                        hit.append(_pc)
             for n in hit:
                 tr.notes.remove(n)
                 self.app._push_undo(
@@ -15401,6 +15631,98 @@ def _auto_move_between_hands(song, rh_i, lh_i, max_notes, max_span):
         return 0
     _d, added = _thin_apply(song, todo, lambda e: True)
     return added
+
+
+# ── v22ze-214: durations (dotted, double-dotted, 32nd) and "replace-and-adjust" ──────────
+_DUR_FACTORS = [
+    ("whole", 4.0), ("double-dotted half", 3.5), ("dotted half", 3.0), ("half", 2.0),
+    ("double-dotted quarter", 1.75), ("dotted quarter", 1.5), ("quarter", 1.0),
+    ("double-dotted eighth", 0.875), ("dotted eighth", 0.75), ("eighth", 0.5),
+    ("double-dotted 16th", 0.4375), ("dotted 16th", 0.375), ("16th", 0.25), ("32nd", 0.125),
+]
+_DUR_NAMES = [n for n, _f in _DUR_FACTORS]
+
+
+def dur_ticks(name, tpb):
+    """Ticks for a duration name from the Note/Rest list, or None for blank/unknown."""
+    for n, f in _DUR_FACTORS:
+        if n == name:
+            return max(1, int(round(tpb * f)))
+    return None
+
+
+def _shift_from(song, barrier, amount):
+    """Move everything at or after `barrier` later by `amount` ticks, in every track
+    (notes, raw events and markings), so the hands stay together."""
+    for tr in song.tracks:
+        for lst in (tr.notes, getattr(tr, "events", []), getattr(tr, "markings", [])):
+            for x in lst:
+                if x.tick >= barrier:
+                    x.tick += amount
+
+
+def set_note_durations(song, notes, new_ticks, grow="cut", dry=False):
+    """Give each chord in `notes` the length `new_ticks`.  A shorter note simply leaves a
+    rest behind it.  A longer note that would run into the next note (grow=):
+      "cut"  - stop at the next note;  "hold" - keep the full length (overlap);
+      "push" - move the later music later by the overflow.
+    A note never runs past the end of its own measure.  Tied pieces are skipped (they are
+    parts of one long note; change that note's length with Move/Fix Measures instead).
+    This is a real edit (the sound changes).  Returns counts; dry=True changes nothing."""
+    import bisect
+    ids = {id(n) for n in notes}
+    mm = song.get_measure_map()
+    starts = [m[1] for m in mm]
+    ends = [m[2] for m in mm]
+    res = {"chords": 0, "shorter": 0, "longer": 0, "overflow": 0, "capped": 0,
+           "skipped": 0, "same": 0, "pushed": 0}
+    pushes = []
+    for tr in song.tracks:
+        sel = [n for n in tr.notes if id(n) in ids]
+        if not sel:
+            continue
+        chords = {}
+        for n in sel:
+            if getattr(n, "articulation", "") in ("tie_predecessor", "tie_continuation"):
+                res["skipped"] += 1
+                continue
+            chords.setdefault(n.tick, []).append(n)
+        onsets = sorted({n.tick for n in tr.notes})
+        for tk in sorted(chords):
+            ch = chords[tk]
+            cap = int(new_ticks)
+            i = bisect.bisect_right(starts, tk) - 1
+            if 0 <= i < len(ends) and tk + cap > ends[i]:
+                cap = ends[i] - tk
+                res["capped"] += 1
+            if cap <= 0:
+                res["skipped"] += len(ch)
+                continue
+            old = max(n.duration for n in ch)
+            res["chords"] += 1
+            if cap == old and all(n.duration == cap for n in ch):
+                res["same"] += 1
+            elif cap < old:
+                res["shorter"] += 1
+            elif cap > old:
+                res["longer"] += 1
+                j = bisect.bisect_right(onsets, tk)
+                nxt = onsets[j] if j < len(onsets) else None
+                if nxt is not None and tk + cap > nxt:
+                    res["overflow"] += 1
+                    if grow == "cut":
+                        cap = max(old, nxt - tk)
+                    elif grow == "push":
+                        pushes.append((nxt, tk + cap - nxt))
+                        res["pushed"] += 1
+            if not dry:
+                for n in ch:
+                    n.duration = cap
+                    n.orig_dur = None      # a real edit: the saved sound follows it
+    if pushes and not dry:
+        for barrier, amount in sorted(pushes, reverse=True):
+            _shift_from(song, barrier, amount)
+    return res
 
 
 class RationalizationAction:
@@ -18236,6 +18558,11 @@ class MidisoftStudio:
 
     def _close_current(self):
         self.transport.stop()
+        try:   # v22ze-214
+            if self._score_view and self._score_view.winfo_exists():
+                self._score_view._reset_editing()
+        except Exception:
+            pass
         for w in list(self._open_windows):
             try:
                 if w.winfo_exists(): w.destroy()
@@ -18381,6 +18708,7 @@ class MidisoftStudio:
                     # there's no scrolling" when switching between scores.
                     # Passing 0 explicitly resets both to the start of
                     # the newly loaded song.
+                    self._score_view._reset_editing()   # v22ze-214
                     self._score_view._draw(cursor_tick=0)
                     # v22ze-65 fix: on the VERY FIRST file load of a fresh
                     # program session, the ScoreView's canvas was created
