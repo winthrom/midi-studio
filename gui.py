@@ -11601,12 +11601,29 @@ class ScoreView(tk.Frame):
         # Quantizing duration was the root cause of sixteenth notes appearing
         # as eighth notes on screen: a 200-tick note at 480-tick grid rounded
         # to 0 → clamped to 1 tick; a 350-tick note rounded to 480 (eighth).
-        grid = max(1, tpb // (score_div * 2))  # finer onset grid (16th default)
+        grid = max(1.0, tpb / (score_div * 2))  # finer onset grid (16th default); v22ze-217: not rounded down
         # v22ze-204: the notes of one chord (the rule Fix Chords uses) are rounded TOGETHER, so a chord
         # whose notes straddle a grid line is drawn as one chord, not split into two beats.
         _cw, _cg = _chord_win_gap(tpb)
-        for _cl in _cluster_notes(sorted(qtr.notes, key=lambda x: x.tick), _cw, _cg):
-            _t = int(round((sum(x.tick for x in _cl) / len(_cl)) / grid) * grid)
+        _cls = _cluster_notes(sorted(qtr.notes, key=lambda x: x.tick), _cw, _cg)
+        # v22ze-217: notes struck just BEFORE a beat/barline and cut off by the chord that follows are
+        # that chord's early notes (live playing), not a separate chord.  Picture only.
+        _mg = []
+        for _cl in _cls:
+            if _mg:
+                _a = _mg[-1]
+                _alast = max(x.tick for x in _a)
+                _bfirst = min(x.tick for x in _cl)
+                _gap = _bfirst - _alast
+                if (0 < _gap <= max(2, tpb // 16)
+                        and (_alast // tpb) != (_bfirst // tpb)
+                        and max(x.duration for x in _a) <= (_bfirst - min(x.tick for x in _a)) + _cw
+                        and (_bfirst - _alast) > 0):
+                    _a.extend(_cl)
+                    continue
+            _mg.append(list(_cl))
+        for _cl in _mg:
+            _t = int(round(round((sum(x.tick for x in _cl) / len(_cl)) / grid) * grid))
             for x in _cl:
                 x.tick = _t
         tr = qtr
