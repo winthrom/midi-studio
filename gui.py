@@ -9809,7 +9809,18 @@ class ScoreView(tk.Frame):
         self._flash_ticks_only = None
         self._currently_lit = {}
         self.configure(bg="#fffff8")
-        self._space = 0  # v22ze-134: extra staff spacing steps (see _apply_zoom)
+        self._space = 2  # v22ze-134: extra staff spacing steps (see _apply_zoom); v22ze-216: starts at 2
+        try:   # v22ze-216: remember Space, Zoom and Fit Width between sessions
+            _st = midi_io._load_settings()
+            _sp = _st.get("score_space")
+            if isinstance(_sp, int) and -3 <= _sp <= 12:
+                self._space = _sp
+            for _k, _a, _lo, _hi in (("score_zoom", "_zoom", 0.05, 4.0), ("score_vzoom", "_vzoom", 0.2, 2.0)):
+                _v = _st.get(_k)
+                if isinstance(_v, (int, float)) and _lo <= _v <= _hi:
+                    setattr(self, _a, float(_v))
+        except Exception:
+            pass
         self._apply_zoom()  # set self.SLG / SH / TPAD … from _vzoom
         self._build_ui()
         self._draw()
@@ -10326,6 +10337,7 @@ class ScoreView(tk.Frame):
         self._last_sr = None  # force scrollregion recalc at new zoom
         self._apply_zoom()
         self._draw(cursor_tick=self._current_cursor_tick())
+        self._save_view_prefs()
 
     def _zoom_out(self):
         self._zoom = max(0.2, self._zoom / 1.33)
@@ -10333,6 +10345,7 @@ class ScoreView(tk.Frame):
         self._last_sr = None  # force scrollregion recalc at new zoom
         self._apply_zoom()
         self._draw(cursor_tick=self._current_cursor_tick())
+        self._save_view_prefs()
 
     def _space_more(self):
         self._space = min(12, self._space + 1)
@@ -10342,10 +10355,21 @@ class ScoreView(tk.Frame):
         self._space = max(-3, self._space - 1)
         self._space_redraw()
 
+    def _save_view_prefs(self):   # v22ze-216
+        try:
+            _st = midi_io._load_settings()
+            _st["score_space"] = int(self._space)
+            _st["score_zoom"] = round(float(self._zoom), 4)
+            _st["score_vzoom"] = round(float(self._vzoom), 4)
+            midi_io._save_settings(_st)
+        except Exception:
+            pass
+
     def _space_redraw(self):
         self._last_sr = None  # force scrollregion recalc
         self._apply_zoom()
         self._draw(cursor_tick=self._current_cursor_tick())
+        self._save_view_prefs()
 
     def _n_visible_measures(self):
         """Return the number of measures currently visible across the canvas width."""
@@ -10371,6 +10395,7 @@ class ScoreView(tk.Frame):
         self._last_sr = None  # force scrollregion recalc at new zoom
         self._apply_zoom()
         self._draw(cursor_tick=self._current_cursor_tick())
+        self._save_view_prefs()
 
     def _fit_wider(self):
         """Show one more measure across the canvas (zoom out by one measure step)."""
@@ -11357,6 +11382,10 @@ class ScoreView(tk.Frame):
         lw = max(1.4, u * 0.13)
         bw = max(2.4, u * 0.30)
         col = "#111"
+        if kind in (1, 0):   # v22ze-216: sharps and naturals were 25% too big
+            lw = max(1.2, u * 0.11)
+            bw = max(2.0, u * 0.23)
+            u = u * 0.75
         if kind == 1:
             xl, xr = x - u * 0.30, x + u * 0.30
             c.create_line(xl, y - u * 0.95, xl, y + u * 1.15, fill=col, width=lw, tags="acc")
@@ -12561,6 +12590,7 @@ class ScoreView(tk.Frame):
                     offset_set.add(id(sorted_ys[idx][3]))
 
         # ── Draw ledger lines, accidentals, noteheads ────────────────────────
+        _acc_placed = []   # v22ze-216: (y, column) of the accidentals already drawn for this chord
         for pos, acc, y, n in ys:
             # v22ze-19 fix: offset noteheads must mirror to the side of the
             # stem OPPOSITE the normal notes -- not always shift right.
@@ -12623,7 +12653,11 @@ class ScoreView(tk.Frame):
             # this pass, so accidentals needed to scale up to match).
             # v22ze-184: drawn from lines, centred exactly on the notehead centre
             if show_glyph in (1, -1, 0):
-                self._draw_accidental(c, nx - nr - 10, y, show_glyph)
+                _col = 0
+                while any(cc == _col and abs(yy - y) < self.SLG * 2.1 for yy, cc in _acc_placed):
+                    _col += 1
+                _acc_placed.append((y, _col))
+                self._draw_accidental(c, nx - nr - 10 - _col * self.SLG * 1.1, y, show_glyph)
             # Notehead as proper oval (wider than tall) that doesn't touch staff lines
             # h_rad = horizontal radius (width/2), v_rad = vertical radius (height/2)
             # Scale so noteheads fit snugly between staff lines (gap of ~0.1*SLG on each side)
@@ -21285,8 +21319,14 @@ class MidisoftStudio:
             if idx is None:
                 return "break"
             path, anchor = shown[idx]
-            status.configure(text="Opening the User Guide: " + anchor.replace("-", " "))
-            self._open_user_guide(anchor)
+            what = anchor.replace("-", " ")
+            status.configure(text="Opening the User Guide: " + what)
+            res = self._open_user_guide(anchor)
+            status.configure(text={
+                "section": "Opened the User Guide at: " + what,
+                "page1": "The User Guide opened at the first page. Use its Contents to find: " + what,
+                "online": "Opened the online User Guide. Use its Contents to find: " + what,
+            }.get(res, "I could not open the User Guide (MIDI-Studio-User-Guide.pdf in the docs folder)."))
             return "break"
 
         def _down(_e=None):
@@ -21326,8 +21366,10 @@ class MidisoftStudio:
 
     def _open_user_guide(self, anchor=None):
         # v22ze-197: Help > User Guide - the PDF next to the program, else the online copy
-        # v22ze-215: with `anchor`, open the PDF at that section when the viewer allows it
-        import subprocess, webbrowser
+        # v22ze-216: with `anchor`, open the PDF in a web browser at that section.  (The system's
+        # "open" command treats ...pdf#section as a file name and silently does nothing.)
+        # Returns "section", "page1", "online" or "none".
+        import subprocess, webbrowser, shutil, pathlib
         name = "MIDI-Studio-User-Guide.pdf"
         here = os.path.dirname(os.path.abspath(__file__))
         dirs = []
@@ -21337,12 +21379,52 @@ class MidisoftStudio:
             dirs.append(sys._MEIPASS)
         dirs += [here, os.path.join(here, "docs"), os.path.join(os.path.dirname(here), "docs")]
         path = next((os.path.join(d, name) for d in dirs if os.path.isfile(os.path.join(d, name))), None)
+
+        def clean_env():   # an AppImage must not hand its own libraries to the browser it starts
+            env = dict(os.environ)
+            app = env.get("APPDIR", "")
+            for k in ("LD_LIBRARY_PATH", "LD_PRELOAD", "PYTHONHOME", "PYTHONPATH", "QT_PLUGIN_PATH"):
+                v = env.get(k)
+                if v and app:
+                    keep = [p for p in v.split(os.pathsep) if p and not p.startswith(app)]
+                    if keep:
+                        env[k] = os.pathsep.join(keep)
+                    else:
+                        env.pop(k, None)
+            return env
+
+        def launch(cmd):
+            subprocess.Popen(cmd, env=clean_env(), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                             stdin=subprocess.DEVNULL, start_new_session=True)
+
         if path and anchor:
-            # A browser's PDF viewer understands #nameddest=; other viewers just open the guide.
+            url = pathlib.Path(path).resolve().as_uri() + "#nameddest=" + anchor
             try:
-                import pathlib
-                if webbrowser.open(pathlib.Path(path).resolve().as_uri() + "#nameddest=" + anchor):
-                    return
+                if sys.platform.startswith("linux"):
+                    names = []
+                    try:
+                        d = subprocess.run(["xdg-settings", "get", "default-web-browser"], capture_output=True,
+                                           text=True, timeout=3, env=clean_env()).stdout.strip()
+                        base = d[:-8] if d.endswith(".desktop") else d
+                        names += [base, base.split(".")[-1], base.split("_")[0]]
+                    except Exception:
+                        pass
+                    names += ["firefox", "google-chrome", "google-chrome-stable", "chromium", "chromium-browser",
+                              "brave-browser", "brave", "microsoft-edge", "microsoft-edge-stable", "vivaldi",
+                              "vivaldi-stable", "opera", "librewolf"]
+                    for nm in names:
+                        exe = shutil.which(nm) if nm else None
+                        if exe:
+                            launch([exe, url])
+                            return "section"
+                elif sys.platform == "darwin":
+                    for app in ("Google Chrome", "Firefox", "Microsoft Edge", "Brave Browser", "Safari"):
+                        if os.path.isdir("/Applications/%s.app" % app):
+                            launch(["open", "-a", app, url])
+                            return "section"
+                else:
+                    if webbrowser.open(url):
+                        return "section"
             except Exception:
                 pass
         if path:
@@ -21350,14 +21432,17 @@ class MidisoftStudio:
                 if sys.platform == "win32":
                     os.startfile(path)
                 elif sys.platform == "darwin":
-                    subprocess.Popen(["open", path])
+                    launch(["open", path])
                 else:
-                    subprocess.Popen(["xdg-open", path])
-                return
+                    launch(["xdg-open", path])
+                return "page1"
             except Exception:
                 pass
-        webbrowser.open("https://github.com/winthrom/midi-studio/raw/main/docs/MIDI-Studio-User-Guide.pdf"
-                        + ("#nameddest=" + anchor if anchor else ""))
+        try:
+            webbrowser.open("https://github.com/winthrom/midi-studio/blob/main/docs/MIDI-Studio-User-Guide.pdf")
+            return "online"
+        except Exception:
+            return "none"
 
     def _about(self):
         import webbrowser
