@@ -15676,10 +15676,9 @@ def draw_bass_clef(c, x, f_y, u, col="#111", tags=""):
     _draw_clef_shape(c, _CLEF_BASS, x, f_y, u, col, tags)
 
 
-# Linux draws the clef characters well; Windows (and probably Mac) fonts lack them.  Set
-# MIDI_STUDIO_VECTOR_CLEFS=1 to force the drawn clefs, =0 to force the characters.
-_VECTOR_CLEFS = {"1": True, "0": False}.get(os.environ.get("MIDI_STUDIO_VECTOR_CLEFS", ""),
-                                            not sys.platform.startswith("linux"))
+# v22ze-221: the drawn clefs are used everywhere, so the score looks the same on every computer
+# (Windows fonts have no clef characters).  MIDI_STUDIO_VECTOR_CLEFS=0 brings back the font clefs, for testing.
+_VECTOR_CLEFS = os.environ.get("MIDI_STUDIO_VECTOR_CLEFS", "") != "0"
 
 
 def _chord_win_gap(tpb):   # v22ze-204: ONE rule for "one chord", used by Fix Chords and the Score
