@@ -63,3 +63,31 @@ jobs:
         with:
           name: MIDI-Studio-macos-arm64
           path: MIDI-Studio-macos-arm64.zip
+
+  publish-test:
+    # a public download for testers without a GitHub login; not for tagged releases
+    needs: apple-silicon
+    if: ${{ github.ref_type == 'branch' && needs.apple-silicon.result == 'success' }}
+    runs-on: ubuntu-24.04
+    continue-on-error: true
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: MIDI-Studio-macos-arm64
+          path: dl
+      - name: Update the rolling "mac-test" pre-release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ls -l dl
+          test -f dl/MIDI-Studio-macos-arm64.zip
+          NOTES="Mac test build (Apple Silicon, experimental) from commit ${GITHUB_SHA::7}, $(date -u +%Y-%m-%d). This page is replaced by each newer good Mac build. Open the zip and read START HERE: the first start needs a one-time approval in System Settings > Privacy & Security. Please report problems with Help > Send a Problem Report."
+          if gh release view mac-test --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release edit mac-test --repo "$GITHUB_REPOSITORY" --prerelease --notes "$NOTES"
+          else
+            gh release create mac-test --repo "$GITHUB_REPOSITORY" --prerelease --target "$GITHUB_SHA" \
+              --title "Mac test build (rolling)" --notes "$NOTES"
+          fi
+          gh release upload mac-test dl/MIDI-Studio-macos-arm64.zip --repo "$GITHUB_REPOSITORY" --clobber
