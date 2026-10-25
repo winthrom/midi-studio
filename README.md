@@ -11,3 +11,9 @@ Latest test build (no account needed):
 
 Windows: unzip the whole folder and run MIDI-Studio.exe. Windows will probably show "Windows protected your PC" (the program is not code-signed, so the publisher is unknown): click the small, faint "More info" link, then "Run anyway".
 Linux: make the file runnable (chmod +x MIDI-Studio-x86_64.AppImage), then double-click it.
+
+## Licence and trademarks
+
+The program is released under the [MIT licence](LICENSE). The Lions name and emblem, and other
+organisations' names and logos, are **not** covered by it and may not be used in forks or modified
+copies: see [TRADEMARKS.md](TRADEMARKS.md).
