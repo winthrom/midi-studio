@@ -82,7 +82,7 @@ jobs:
           choco install innosetup -y --no-progress
           $iscc = Join-Path ${env:ProgramFiles(x86)} "Inno Setup 6\ISCC.exe"
           if (-not (Test-Path $iscc)) { throw "Inno Setup compiler not found at $iscc" }
-          $ver = (Select-String -Path sys_platform.py -Pattern 'APP_VERSION = "([^"]+)"').Matches[0].Groups[1].Value
+          $ver = (Select-String -Path sys_platform.py -Pattern 'APP_RELEASE = "([^"]+)"').Matches[0].Groups[1].Value
           $out = Join-Path (Get-Location).Path "installer-out"
           New-Item -ItemType Directory -Force -Path $out | Out-Null
           & $iscc "/DMyAppVersion=$ver" "/O$out" packaging/windows/midi-studio.iss

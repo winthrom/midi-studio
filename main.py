@@ -90,6 +90,11 @@ def main():
         # Centres on the main window's monitor; stays until dismissed.
         SplashScreen(root, app)
 
+        try:   # v22ze-218: update check, once a day, in the background
+            root.after(6000, app._check_updates_auto)
+        except Exception:
+            pass
+
         # Run the event loop
         root.mainloop()
 

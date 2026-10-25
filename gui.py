@@ -271,10 +271,13 @@ from midi_io import (
 from sys_platform import (
     APP_FULL_NAME,
     APP_TIMESTAMP,
+    APP_RELEASE,
     APP_TITLE,
     APP_VERSION,
     LIONS_DONATE_URL,
     LIONS_WEBSITE_URL,
+    fetch_latest_release,
+    update_is_newer,
 )
 
 
@@ -412,7 +415,7 @@ def _tlog_open():
         _TLOG["fh"] = open(os.path.join(d, name), "a", encoding="utf-8", buffering=1)
         _TLOG["fh"].write(__import__("json").dumps({
             "t": time.strftime("%Y-%m-%d %H:%M:%S"), "e": "session_start",
-            "app": APP_VERSION, "os": platform.platform(), "python": platform.python_version()}) + chr(10))
+            "app": APP_VERSION, "release": APP_RELEASE, "os": platform.platform(), "python": platform.python_version()}) + chr(10))
         import atexit
         atexit.register(lambda: _tlog("session_end"))
     except Exception:
@@ -3010,7 +3013,7 @@ class Song:
         try:   # v22ze-213: say what this file is
             tt.append(mido.MetaMessage(
                 "text", time=0,
-                text="Saved by MIDI Studio " + str(APP_VERSION)
+                text="Saved by MIDI Studio " + str(APP_RELEASE) + " (build " + str(APP_VERSION) + ")"
                 + ("; notes lengthened as the score shows" if match_score else "; sound as recorded")))
         except Exception:
             pass
@@ -9363,7 +9366,7 @@ class SplashScreen(tk.Toplevel):
 
         tk.Label(
             inner,
-            text=f"Version {APP_VERSION}  ·  Python / tkinter / mido",
+            text=f"Version {APP_RELEASE} (build {APP_VERSION})  ·  Python / tkinter / mido",
             bg=BG,
             fg=GREEN,
             font=("TkDefaultFont", 9),
@@ -16666,6 +16669,11 @@ class MidisoftStudio:
         tlm.add_radiobutton(label="Off",value=0,variable=self._tlog_var,
                             command=lambda: _tlog_set_enabled(False))
         tlm.add_command(label="Show the log folder",command=self._show_log_folder)
+        self._upd_var=tk.IntVar(value=1 if self._update_check_enabled() else 0)   # v22ze-218
+        hm.add_command(label="Check for Updates…",command=lambda: self._check_updates(manual=True))
+        ucm=TkPopupMenu(hm,tearoff=0); hm.add_cascade(label="Update check at startup",menu=ucm)
+        ucm.add_radiobutton(label="On (once a day, notifies only)",value=1,variable=self._upd_var,command=self._set_update_check)
+        ucm.add_radiobutton(label="Off",value=0,variable=self._upd_var,command=self._set_update_check)
         hm.add_command(label="About…",command=self._about)
         binds=[("<Control-n>",self._new),("<Control-o>",self._open),("<Control-s>",self._save),
                ("<Control-1>",self._open_score_view),("<Control-2>",self._open_piano_roll),
@@ -21237,7 +21245,7 @@ class MidisoftStudio:
                 with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as z:
                     z.writestr("description.txt", txt.get("1.0", "end").strip() + chr(10))
                     info = [
-                        "MIDI Studio " + str(APP_VERSION),
+                        "MIDI Studio " + str(APP_RELEASE) + " (build " + str(APP_VERSION) + ")",
                         "System: " + platform.platform(),
                         "Python: " + platform.python_version(),
                         "Tk: " + str(self.root.tk.call("info", "patchlevel")),
@@ -21461,10 +21469,83 @@ class MidisoftStudio:
         except Exception:
             return "none"
 
+    # ── v22ze-218: update check (notify only; reads GitHub's public release info, sends nothing) ──
+    def _update_check_enabled(self):
+        try:
+            return bool(midi_io._load_settings().get("update_check", True))
+        except Exception:
+            return True
+
+    def _set_update_check(self):
+        try:
+            st = midi_io._load_settings()
+            st["update_check"] = bool(self._upd_var.get())
+            midi_io._save_settings(st)
+        except Exception:
+            pass
+
+    def _check_updates_auto(self):
+        """At startup: at most once a day, in the background, and quiet unless there is news."""
+        try:
+            st = midi_io._load_settings()
+            if not st.get("update_check", True):
+                return
+            if time.time() - float(st.get("update_last", 0) or 0) < 86400:
+                return
+        except Exception:
+            return
+        self._check_updates(manual=False)
+
+    def _check_updates(self, manual=True):
+        def work():
+            try:
+                info = fetch_latest_release()
+                err = None
+            except Exception as e:
+                info, err = None, str(e)
+            try:
+                self.root.after(0, lambda: self._update_result(info, err, manual))
+            except Exception:
+                pass
+        threading.Thread(target=work, daemon=True).start()
+
+    def _update_result(self, info, err, manual):
+        try:
+            if info is None:
+                if manual:
+                    messagebox.showinfo("Check for Updates",
+                                        "Could not reach the update server (" + str(err) + ").\n\nYou can look "
+                                        "yourself at:\nhttps://github.com/winthrom/midi-studio/releases/latest",
+                                        parent=self.root)
+                return
+            st = midi_io._load_settings()
+            st["update_last"] = time.time()
+            newer = update_is_newer(info["version"], APP_RELEASE)
+            if newer and not manual and st.get("update_seen") == info["tag"]:
+                midi_io._save_settings(st)   # already told them about this one
+                return
+            if newer:
+                st["update_seen"] = info["tag"]
+            midi_io._save_settings(st)
+            if newer:
+                if messagebox.askyesno(
+                        "A newer MIDI Studio is available",
+                        f"Version {info['version']} is available (you have {APP_RELEASE}).\n\n"
+                        "Open the download page now?\n"
+                        "(Your pieces and settings are kept when you install the new version.)",
+                        parent=self.root):
+                    import webbrowser
+                    webbrowser.open(info["url"])
+            elif manual:
+                messagebox.showinfo("Check for Updates",
+                                    f"You have the newest version ({APP_RELEASE}).", parent=self.root)
+        except Exception:
+            pass
+
     def _about(self):
         import webbrowser
         dlg = tk.Toplevel(self.root)
-        dlg.title(f"About  v{APP_VERSION}")
+        dlg.title(f"About  v{APP_RELEASE}")
         dlg.resizable(False, False)
         dlg.configure(bg="#0d1117")
         dlg.grab_set()
@@ -21476,7 +21557,7 @@ class MidisoftStudio:
                  font=("TkDefaultFont", 18, "bold")).pack(pady=(24, 4))
         tk.Label(dlg, text="Work-Alike — No code from the original",
                  bg=BG, fg=MUTED, font=("TkDefaultFont", 9)).pack()
-        tk.Label(dlg, text=f"Version {APP_VERSION}   ·   {APP_TIMESTAMP}",
+        tk.Label(dlg, text=f"Version {APP_RELEASE} (build {APP_VERSION})   ·   {APP_TIMESTAMP}",
                  bg=BG, fg="#3fb950", font=("TkDefaultFont", 9)).pack(pady=(4, 14))
 
         tk.Frame(dlg, bg="#21262d", height=1).pack(fill=tk.X, padx=28)
