@@ -24,6 +24,17 @@ dylibbundler -of -b -cd -x "$LIB/$(basename "$SRC")" -d "$LIB" -p @loader_path/
 # the program looks for libfluidsynth*.dylib in lib/
 ls -l "$LIB"
 
+# each library's own name tag must point into this folder too (dylibbundler leaves the one we gave it alone)
+for f in "$LIB"/*.dylib; do
+    install_name_tool -id "@loader_path/$(basename "$f")" "$f"
+done
+# also make the usual short name available (libfluidsynth.3.dylib), which other libraries may ask for
+for f in "$LIB"/libfluidsynth.*.*.dylib; do
+    [ -e "$f" ] || continue
+    short="$(basename "$f" | sed -E 's/^(libfluidsynth\.[0-9]+)\..*/\1.dylib/')"
+    [ -e "$LIB/$short" ] || cp "$f" "$LIB/$short" && install_name_tool -id "@loader_path/$short" "$LIB/$short"
+done
+
 # every library must now refer only to the system or to its own folder
 bad=0
 for f in "$LIB"/*.dylib; do
