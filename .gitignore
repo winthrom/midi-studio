@@ -235,3 +235,6 @@ archive/builds/
 !docs/
 !docs/*.pdf
 !docs/*.docx
+archive/patches/
+archive/notes/
+archive/cleanup-*/

@@ -44,6 +44,7 @@ Requires:
 import argparse
 import os
 import sys
+import time
 import wave
 
 import fluidsynth
@@ -79,9 +80,9 @@ def play_live(soundfont_path, driver=None):
     print(f"Playing middle C (pitch {MIDDLE_C}) via live audio driver "
           f"({driver or 'platform default'}) ...")
     synth.noteon(0, MIDDLE_C, VELOCITY)
-    fluidsynth.time.sleep(NOTE_SECONDS)
+    time.sleep(NOTE_SECONDS)
     synth.noteoff(0, MIDDLE_C)
-    fluidsynth.time.sleep(RELEASE_TAIL_SECONDS)  # let the release tail ring out
+    time.sleep(RELEASE_TAIL_SECONDS)  # let the release tail ring out
 
     synth.delete()
     print("Done. If you didn't hear anything, check the --driver argument "
