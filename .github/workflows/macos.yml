@@ -1,0 +1,65 @@
+name: macOS
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+  workflow_call:
+
+jobs:
+  apple-silicon:
+    runs-on: macos-14
+    # experimental: a failure here is visible in the log but does not turn the commit red
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Unit tests
+        run: |
+          python -m pip install mido
+          python test_audio_backend.py
+          python test_app_resources.py
+
+      - name: Fetch payload (FluidSynth libraries + soundfont)
+        run: bash packaging/macos/fetch_payload.sh
+
+      - name: Build (PyInstaller)
+        run: bash packaging/macos/build_macos.sh
+
+      - name: Selftest the built app
+        run: |
+          out="$(dist/macos/MIDI-Studio.app/Contents/MacOS/MIDI-Studio-selftest 2>&1)" || { echo "$out"; echo "selftest reported FAIL"; exit 1; }
+          echo "$out"
+          for need in "[OK  ] bundled libfluidsynth" "[OK  ] pyfluidsynth + libfluidsynth loads" "[OK  ] bundled soundfont" "[OK  ] soundfont loads"; do
+            echo "$out" | grep -qF "$need" || { echo "selftest is missing: $need"; exit 1; }
+          done
+
+      - name: Zip (app + START HERE note + guide)
+        run: |
+          mkdir -p stage/MIDI-Studio
+          ditto dist/macos/MIDI-Studio.app stage/MIDI-Studio/MIDI-Studio.app
+          cp docs/MIDI-Studio-User-Guide.pdf stage/MIDI-Studio/
+          cat > "stage/MIDI-Studio/START HERE.txt" <<'TXT'
+          MIDI Studio for Mac (Apple Silicon: M1 or newer) - EXPERIMENTAL
+
+          1. Drag MIDI-Studio.app into your Applications folder.
+          2. Double-click it. macOS will say it cannot verify the app, because this free program is not
+             signed with an Apple developer account. That is expected.
+          3. Open System Settings > Privacy & Security, scroll down to the message about MIDI-Studio,
+             click "Open Anyway", and confirm. You only need to do this once.
+             (Terminal alternative: xattr -dr com.apple.quarantine /Applications/MIDI-Studio.app )
+
+          The User Guide (MIDI-Studio-User-Guide.pdf) is in this folder too.
+          Please tell me what does not work: Help > Send a Problem Report, then email the file.
+          TXT
+          (cd stage && ditto -c -k --keepParent MIDI-Studio ../MIDI-Studio-macos-arm64.zip)
+          ls -l MIDI-Studio-macos-arm64.zip
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: MIDI-Studio-macos-arm64
+          path: MIDI-Studio-macos-arm64.zip

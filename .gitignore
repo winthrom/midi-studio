@@ -238,3 +238,5 @@ archive/builds/
 archive/patches/
 archive/notes/
 archive/cleanup-*/
+packaging/macos/payload/lib/*
+packaging/macos/payload/sound/*

@@ -12,8 +12,13 @@ jobs:
   linux:
     uses: ./.github/workflows/linux.yml
 
+  macos:
+    uses: ./.github/workflows/macos.yml
+
   publish:
-    needs: [windows, linux]
+    needs: [windows, linux, macos]
+    # a failed Mac build must not hold back the Windows and Linux release
+    if: ${{ !cancelled() && needs.windows.result == 'success' && needs.linux.result == 'success' }}
     runs-on: ubuntu-24.04
     permissions:
       contents: write
@@ -31,6 +36,12 @@ jobs:
         run: |
           ls -l dl
           BASE="https://github.com/$GITHUB_REPOSITORY/releases/download/$GITHUB_REF_NAME"
+          MACFILE=""
+          MACLINE="- **Mac:** not available in this release."
+          if [ -f dl/MIDI-Studio-macos-arm64.zip ]; then
+            MACFILE="dl/MIDI-Studio-macos-arm64.zip"
+            MACLINE="- **Mac, Apple Silicon (M1 or newer), experimental:** [MIDI-Studio-macos-arm64.zip]($BASE/MIDI-Studio-macos-arm64.zip). Open the zip and read START HERE: the first start needs a one-time approval in System Settings > Privacy & Security. Intel Macs are not supported yet."
+          fi
           cat > notes.md <<EOF
           Test build $GITHUB_REF_NAME. Download the file for your computer:
 
@@ -39,7 +50,7 @@ jobs:
           - **Linux (64-bit):** [MIDI-Studio-x86_64.AppImage]($BASE/MIDI-Studio-x86_64.AppImage)
           - **Linux menu entry (optional):** [install-linux.sh]($BASE/install-linux.sh) and [uninstall-linux.sh]($BASE/uninstall-linux.sh); run with `bash install-linux.sh`
           - **User Guide (PDF):** [MIDI-Studio-User-Guide.pdf]($BASE/MIDI-Studio-User-Guide.pdf)
-          - **Mac:** not available yet.
+          $MACLINE
 
           **Windows, easiest:** download MIDI-Studio-Setup.exe and double-click it. It installs for your user only (no administrator password) and can put an icon on your desktop. Windows will probably show a window titled "Windows protected your PC" because this program is not code-signed (it says the publisher is unknown). Click the small "More info" link, then "Run anyway".
           
@@ -54,5 +65,5 @@ jobs:
             --repo "$GITHUB_REPOSITORY" \
             --title "MIDI Studio $GITHUB_REF_NAME" \
             --notes-file notes.md \
-            dl/MIDI-Studio-Setup.exe dl/MIDI-Studio-windows-x64.zip dl/MIDI-Studio-x86_64.AppImage \
+            dl/MIDI-Studio-Setup.exe dl/MIDI-Studio-windows-x64.zip dl/MIDI-Studio-x86_64.AppImage $MACFILE \
             docs/MIDI-Studio-User-Guide.pdf packaging/linux/install-linux.sh packaging/linux/uninstall-linux.sh
