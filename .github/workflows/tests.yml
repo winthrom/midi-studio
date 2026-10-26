@@ -9,6 +9,7 @@ on:
 jobs:
   test:
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
     # Ubuntu is the real check.  macOS (Phase 3) and Windows are experimental:
     # they are run and reported, but a failure there does not fail the run.
     continue-on-error: ${{ matrix.os != 'ubuntu-24.04' }}
@@ -26,11 +27,14 @@ jobs:
       with:
         python-version: ${{ matrix.python-version }}
 
-    - name: Install system dependencies (Ubuntu)
+    - name: Install system dependencies (Ubuntu)   # v22ze-230: only what the unit tests need
       if: runner.os == 'Linux'
+      env:
+        DEBIAN_FRONTEND: noninteractive
+        NEEDRESTART_MODE: a
       run: |
         sudo apt-get update
-        sudo apt-get install -y python3-tk timidity fluidsynth fluid-soundfont-gm portaudio19-dev || sudo apt-get install -y python3-tk timidity fluidsynth fluid-soundfont-gm libportaudio2-dev || true
+        sudo -E timeout 480 apt-get install -y --no-install-recommends python3-tk || true
 
     - name: Install system dependencies (macOS)
       if: runner.os == 'macOS'
