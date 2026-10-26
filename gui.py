@@ -5691,7 +5691,7 @@ class Song:
 
         return out
 
-    def to_ly(self, path, show_bar_numbers=True, staff_size=16):
+    def to_ly(self, path, show_bar_numbers=True, staff_size=16, short_rests=False):
         r"""Export to LilyPond 2.26+ format.
         Design decisions:
             * Uses \\absolute pitch mode — no relative-interval arithmetic errors.
@@ -6004,6 +6004,14 @@ class Song:
                 notes, prefer_lh_octaves=getattr(self, "prefer_lh_octaves", True)
             )
 
+        # v22ze-232: same rule as the screen -- gaps shorter than this are not printed as rests.
+        _min_rest = (tpb // 8) if short_rests else tpb
+
+        def spacer_seq(ticks):
+            # invisible skip(s) of the given length (rest_seq tokens with 'r' -> 's')
+            toks, used = rest_seq(ticks)
+            return ['s' + t[1:] for t in toks], used
+
         def build_measure_str(notes_in_meas, cursor_start, measure_tpm):
             """Grid-based measure builder — guarantees clean standard note values.
 
@@ -6067,7 +6075,8 @@ class Song:
                 # Rest gap before this chord (always on-grid)
                 if tick > cursor:
                     gap = tick - cursor
-                    for rs in rest_seq(gap)[0]:
+                    _seq = spacer_seq(gap)[0] if gap < _min_rest else rest_seq(gap)[0]
+                    for rs in _seq:
                         mstr.append(rs)
                         mstr_kind.append("rest")
                     cursor = tick
@@ -6127,6 +6136,12 @@ class Song:
                 # token and the cursor advance from the same number, means
                 # the two can never again disagree.
                 chosen = best_dur_le(chosen) or chosen
+                _perf_chosen = chosen   # staccato test uses the length before stretching
+
+                # v22ze-232: like the screen, a tiny gap after the note is not a rest --
+                # write the note out to the next onset instead.
+                if 0 < available - chosen < _min_rest:
+                    chosen = max(chosen, best_dur_le(available) or chosen)
 
                 chord_notes = thin_chord(sorted(chord, key=lambda n: n.pitch))
                 ds = dur_str(chosen)
@@ -6138,7 +6153,7 @@ class Song:
                     for n in chord_notes
                     if (
                         getattr(n, "articulation", "") == "staccato"
-                        or (n.duration < chosen * 0.75 and chosen <= tpb // 2)
+                        or (n.duration < _perf_chosen * 0.75 and _perf_chosen <= tpb // 2)
                     )
                 )
                 stac_sfx = "-." if stac_count > len(chord_notes) / 2 else ""
@@ -6165,7 +6180,10 @@ class Song:
 
             # ── Fill tail with rests ─────────────────────────────────────────
             if cursor < budget:
-                _tail_rests, _tail_consumed = rest_seq(budget - cursor)
+                if budget - cursor < _min_rest:
+                    _tail_rests, _tail_consumed = spacer_seq(budget - cursor)
+                else:
+                    _tail_rests, _tail_consumed = rest_seq(budget - cursor)
                 for rs in _tail_rests:
                     mstr.append(rs)
                     mstr_kind.append("rest")
@@ -6181,6 +6199,62 @@ class Song:
                 # while the written .ly line for that measure summed to a
                 # correct, full 1920 ticks (...ending in a clean r2).
                 cursor += _tail_consumed
+
+            # v22ze-232: make the WRITTEN bar add up exactly.  Tick maths with a ticks-per-beat that is not
+            # a multiple of 16 can leave a bar one 64th too long or too short; LilyPond then prints bar-check
+            # warnings.  Count what is actually written (in 64ths), merge neighbouring skips, and fix the end.
+            _U = [(64, "1"), (48, "2."), (32, "2"), (24, "4."), (16, "4"), (12, "8."),
+                  (8, "8"), (6, "16."), (4, "16"), (3, "32."), (2, "32"), (1, "64")]
+            import re as _re
+            _TOK = _re.compile(r"^(<[^>]*>|[a-gsr][a-z]*[,']*)(\d+)(\.?)(.*)$")
+            def _units(tok):
+                m = _TOK.match(tok)
+                if not m:
+                    return 0
+                u = 64 // int(m.group(2))
+                return u + u // 2 if m.group(3) else u
+            def _skips(u):
+                out = []
+                for v, d in _U:
+                    while u >= v:
+                        out.append("s" + d)
+                        u -= v
+                return out
+            try:
+                _target = int(round(budget * 64.0 / (tpb * 4)))
+                _merged, _mk, _run = [], [], 0
+                for _t, _k in zip(mstr, mstr_kind):
+                    if _t.startswith("s") and _TOK.match(_t):
+                        _run += _units(_t)
+                        continue
+                    if _run:
+                        for _s in _skips(_run):
+                            _merged.append(_s); _mk.append("rest")
+                        _run = 0
+                    _merged.append(_t); _mk.append(_k)
+                if _run:
+                    for _s in _skips(_run):
+                        _merged.append(_s); _mk.append("rest")
+                mstr, mstr_kind = _merged, _mk
+                _have = sum(_units(_t) for _t in mstr)
+                if _have > _target:
+                    _ex = _have - _target
+                    for _i in range(len(mstr) - 1, -1, -1):
+                        _m = _TOK.match(mstr[_i])
+                        if not _m:
+                            continue
+                        _u = _units(mstr[_i])
+                        _keep = max(1, _u - _ex)
+                        _d = next(d for v, d in _U if v <= _keep)
+                        _v = next(v for v, d in _U if v <= _keep)
+                        mstr[_i] = _m.group(1) + _d + _m.group(4)
+                        _have -= (_u - _v)
+                        break
+                if _have < _target:
+                    for _s in _skips(_target - _have):
+                        mstr.append(_s); mstr_kind.append("rest")
+            except Exception as _e:
+                print(f"[ly] bar reconcile skipped: {_e}")
 
             # Diagnostic: first 12 measures only
             try:
@@ -6628,7 +6702,7 @@ class Song:
                             (
                                 i
                                 for i, t in enumerate(tokens)
-                                if t and not t.startswith("r") and not t.startswith("<")
+                                if t and not t.startswith("r") and not t.startswith("s") and not t.startswith("<")
                             ),
                             None,
                         )
@@ -19347,7 +19421,7 @@ class MidisoftStudio:
         try:
             with tempfile.TemporaryDirectory() as tmpdir:
                 ly_path = os.path.join(tmpdir, "score.ly")
-                self.song.to_ly(ly_path)   # same generator PDF export uses
+                self.song.to_ly(ly_path, short_rests=self._short_rests_var.get())   # same generator PDF export uses
                 with open(ly_path, encoding="utf-8") as f:
                     ly_text = f.read()
             # Local-only substitutions -- see docstrings. Only affect this
@@ -19514,7 +19588,8 @@ class MidisoftStudio:
                 _src = self.song   # already swapped to rationalized version when active
                 _src.to_ly(path,
                            show_bar_numbers=show_bar_numbers,
-                           staff_size=staff_size)
+                           staff_size=staff_size,
+                           short_rests=self._short_rests_var.get())
                 messagebox.showinfo("Exported",
                     f"Saved {os.path.basename(path)}\n\n"
                     f"Compile to PDF with:\n  lilypond {os.path.basename(path)!r}",
@@ -19544,7 +19619,7 @@ class MidisoftStudio:
             pdf_path = os.path.join(tmpdir, "score.pdf")
             self.song.to_ly(ly_path,
                             show_bar_numbers=show_bar_numbers,
-                            staff_size=staff_size)  # uses active song
+                            staff_size=staff_size, short_rests=self._short_rests_var.get())  # uses active song
         except Exception as exc:
             messagebox.showerror("Print Error", str(exc), parent=self.root)
             return
