@@ -7,7 +7,7 @@ setup(
     description="A Synthesizer in the Spirit of MidiSoft Studio4",
     author="Michael Winthrop",
     author_email="michael.f.winthrop@gmail.com",
-    license="MIT",
+    license="GPL-3.0-or-later",
     packages=find_packages(),
     install_requires=[
         "mido>=1.2.0",

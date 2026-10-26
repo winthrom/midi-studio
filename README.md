@@ -14,6 +14,8 @@ Linux: make the file runnable (chmod +x MIDI-Studio-x86_64.AppImage), then doubl
 
 ## Licence and trademarks
 
-The program is released under the [MIT licence](LICENSE). The Lions name and emblem, and other
-organisations' names and logos, are **not** covered by it and may not be used in forks or modified
+The program is free software under the [GNU General Public License, version 3 or later](LICENSE):
+you may use, change and share it, and anyone who passes on a changed version must pass on its source
+under the same licence. (Releases up to v0.3.3 were published under the MIT licence.) The Lions name
+and emblem, and other organisations' names and logos, are **not** covered by it and may not be used in forks or modified
 copies: see [TRADEMARKS.md](TRADEMARKS.md).
