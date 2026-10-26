@@ -6200,7 +6200,7 @@ class Song:
                 # correct, full 1920 ticks (...ending in a clean r2).
                 cursor += _tail_consumed
 
-            # v22ze-232: make the WRITTEN bar add up exactly.  Tick maths with a ticks-per-beat that is not
+            # v22ze-233 bar fix: make the WRITTEN bar add up exactly.  Tick maths with a ticks-per-beat that is not
             # a multiple of 16 can leave a bar one 64th too long or too short; LilyPond then prints bar-check
             # warnings.  Count what is actually written (in 64ths), merge neighbouring skips, and fix the end.
             _U = [(64, "1"), (48, "2."), (32, "2"), (24, "4."), (16, "4"), (12, "8."),
@@ -6222,37 +6222,72 @@ class Song:
                 return out
             try:
                 _target = int(round(budget * 64.0 / (tpb * 4)))
+                # 1. neighbouring skips are merged; tiny ones (a 16th or less) are removed
                 _merged, _mk, _run = [], [], 0
+                def _flush(_run):
+                    if _run <= 4:
+                        return
+                    for _s in _skips(_run):
+                        _merged.append(_s); _mk.append("rest")
                 for _t, _k in zip(mstr, mstr_kind):
                     if _t.startswith("s") and _TOK.match(_t):
                         _run += _units(_t)
                         continue
-                    if _run:
-                        for _s in _skips(_run):
-                            _merged.append(_s); _mk.append("rest")
-                        _run = 0
+                    _flush(_run); _run = 0
                     _merged.append(_t); _mk.append(_k)
-                if _run:
-                    for _s in _skips(_run):
-                        _merged.append(_s); _mk.append("rest")
+                _flush(_run)
                 mstr, mstr_kind = _merged, _mk
-                _have = sum(_units(_t) for _t in mstr)
-                if _have > _target:
-                    _ex = _have - _target
+                _STD = [1, 2, 3, 4, 6, 8, 12, 16, 24, 32, 48, 64]
+                _DUR = {v: d for v, d in _U}
+                def _set(_i, _v):
+                    _m = _TOK.match(mstr[_i])
+                    mstr[_i] = _m.group(1) + _DUR[_v] + _m.group(4)
+                def _is_note(_t):
+                    _m = _TOK.match(_t)
+                    return bool(_m) and _m.group(1)[0] not in "rs"
+                _need = _target - sum(_units(_t) for _t in mstr)
+                # 2. too short: lengthen the shortest notes one standard step at a time
+                #    (a 16th becomes a dotted 16th, and so on), so the bar is full.
+                _guard = 0
+                while _need > 0 and _guard < 200:
+                    _guard += 1
+                    _cand = sorted((_units(_t), _i) for _i, _t in enumerate(mstr) if _is_note(_t))
+                    _done = False
+                    for _u, _i in _cand:
+                        _up = [v for v in _STD if v > _u and v - _u <= _need]
+                        if _up:
+                            _set(_i, min(_up)); _need -= min(_up) - _u; _done = True
+                            break
+                    if not _done:
+                        break
+                # 3. too long: take the dot off the shortest dotted notes, then shorten the shortest
+                while _need < 0 and _guard < 400:
+                    _guard += 1
+                    _cand = sorted((_units(_t), _i) for _i, _t in enumerate(mstr) if _is_note(_t))
+                    _done = False
+                    for _u, _i in _cand:
+                        _dn = [v for v in _STD if v < _u and _u - v <= -_need]
+                        if _dn:
+                            _set(_i, max(_dn)); _need += _u - max(_dn); _done = True
+                            break
+                    if not _done:
+                        break
+                # 4. anything left over becomes an invisible skip at the end of the bar
+                if _need > 0:
+                    for _s in _skips(_need):
+                        mstr.append(_s); mstr_kind.append("rest")
+                elif _need < 0:
+                    _ex = -_need
                     for _i in range(len(mstr) - 1, -1, -1):
-                        _m = _TOK.match(mstr[_i])
-                        if not _m:
+                        if not _TOK.match(mstr[_i]):
                             continue
                         _u = _units(mstr[_i])
                         _keep = max(1, _u - _ex)
-                        _d = next(d for v, d in _U if v <= _keep)
-                        _v = next(v for v, d in _U if v <= _keep)
-                        mstr[_i] = _m.group(1) + _d + _m.group(4)
-                        _have -= (_u - _v)
-                        break
-                if _have < _target:
-                    for _s in _skips(_target - _have):
-                        mstr.append(_s); mstr_kind.append("rest")
+                        _v = max(v for v in _STD if v <= _keep)
+                        _set(_i, _v)
+                        _ex -= _u - _v
+                        if _ex <= 0:
+                            break
             except Exception as _e:
                 print(f"[ly] bar reconcile skipped: {_e}")
 
@@ -19421,7 +19456,7 @@ class MidisoftStudio:
         try:
             with tempfile.TemporaryDirectory() as tmpdir:
                 ly_path = os.path.join(tmpdir, "score.ly")
-                self.song.to_ly(ly_path, short_rests=self._short_rests_var.get())   # same generator PDF export uses
+                self.song.to_ly(ly_path, short_rests=bool(getattr(self, '_short_rests_var', None) and self._short_rests_var.get()))   # same generator PDF export uses
                 with open(ly_path, encoding="utf-8") as f:
                     ly_text = f.read()
             # Local-only substitutions -- see docstrings. Only affect this
@@ -19589,7 +19624,7 @@ class MidisoftStudio:
                 _src.to_ly(path,
                            show_bar_numbers=show_bar_numbers,
                            staff_size=staff_size,
-                           short_rests=self._short_rests_var.get())
+                           short_rests=bool(getattr(self, '_short_rests_var', None) and self._short_rests_var.get()))
                 messagebox.showinfo("Exported",
                     f"Saved {os.path.basename(path)}\n\n"
                     f"Compile to PDF with:\n  lilypond {os.path.basename(path)!r}",
@@ -19619,7 +19654,7 @@ class MidisoftStudio:
             pdf_path = os.path.join(tmpdir, "score.pdf")
             self.song.to_ly(ly_path,
                             show_bar_numbers=show_bar_numbers,
-                            staff_size=staff_size, short_rests=self._short_rests_var.get())  # uses active song
+                            staff_size=staff_size, short_rests=bool(getattr(self, '_short_rests_var', None) and self._short_rests_var.get()))  # uses active song
         except Exception as exc:
             messagebox.showerror("Print Error", str(exc), parent=self.root)
             return
