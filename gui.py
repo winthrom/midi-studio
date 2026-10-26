@@ -12991,7 +12991,9 @@ class ScoreView(tk.Frame):
                     if cur:
                         prev_beat = int(cur[-1].tick // tpb)
                         prev_meas = int(cur[-1].tick // tpm)
-                        if prev_meas != meas or prev_beat != beat or len(cur) >= MAX_BEAM:
+                        # v22ze-228: a note whose stem points the other way cannot share this beam
+                        if (prev_meas != meas or prev_beat != beat or len(cur) >= MAX_BEAM
+                                or cur[-1].stem_up != s.stem_up):
                             groups.append(cur)
                             cur = []
                     cur.append(s)
