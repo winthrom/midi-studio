@@ -6773,7 +6773,12 @@ class Song:
                 if num != prev_num or den != prev_den:
                     W(f, f"  \\time {num}/{den}")
                     prev_num, prev_den = num, den
-                mn = [n for n in notes if ms <= n.tick < me]
+                # v22ze-236: a note within half a grid step BEFORE the barline belongs to the next bar
+                # (it is rounded there), so both hands put it in the same place.
+                _hg = max(1, tpb // NOTATION_DIVISION) // 2
+                _lo = ms if m_idx == mmap[0][0] else ms - _hg
+                _hi = me if m_idx == mmap[-1][0] else me - _hg
+                mn = [n for n in notes if _lo <= n.tick < _hi]
                 mstr = build_measure_str(mn, ms, tpm)
 
                 if use_dynamics and mn and m_idx in vel_by_meas:
