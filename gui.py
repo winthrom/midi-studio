@@ -1529,6 +1529,63 @@ def _make_scrollable(toplevel, bg="#0d1117"):
     return inner
 
 
+def _fix_musicxml_split_chords(xml_doc):
+    """v22ze-235: undo python-ly's split of a chord that ends a bar.
+
+    python-ly closes a bar after the FIRST note of a chord that completes the bar and writes the rest of the
+    chord (flagged <chord/>) at the start of the next bar.  Move those orphaned chord notes back to the end of
+    the previous bar (same hand/voice section), after the note they belong to; drop a bar that ends up empty.
+    """
+    root = xml_doc.tree.getroot()
+    moved = 0
+    for part in root.findall("part"):
+        measures = part.findall("measure")
+        for mi in range(1, len(measures)):
+            cur, prev = measures[mi], measures[mi - 1]
+
+            def sections(m):
+                secs, s = [], []
+                for el in list(m):
+                    if el.tag == "backup":
+                        secs.append(s); s = []
+                    else:
+                        s.append(el)
+                secs.append(s)
+                return secs
+
+            csecs, psecs = sections(cur), sections(prev)
+            for si, sec in enumerate(csecs):
+                if si >= len(psecs):
+                    break
+                lead = []
+                for el in sec:
+                    if el.tag == "note":
+                        if el.find("chord") is not None:
+                            lead.append(el)
+                            continue
+                        break
+                if not lead:
+                    continue
+                pnotes = [el for el in psecs[si] if el.tag == "note"]
+                if not pnotes:
+                    continue
+                anchor = pnotes[-1]
+                for el in lead:
+                    cur.remove(el)
+                    pos = list(prev).index(anchor)
+                    prev.insert(pos + 1, el)
+                    anchor = el
+                    moved += 1
+        # remove bars left with no notes at all (only the very last bar can end up like this)
+        while measures and not measures[-1].findall("note") and len(measures) > 1:
+            last = measures[-1]
+            if last.find("forward") is not None or last.find("attributes") is not None:
+                break
+            part.remove(last)
+            measures.pop()
+    return moved
+
+
 def _backfill_musicxml_staff_tags(xml_doc):
     """Explicitly stamp <staff> on every note in an ly.musicxml document,
     instead of relying on the implicit "inherit from the chord's first
@@ -19480,6 +19537,7 @@ class MidisoftStudio:
             # riskier alternative of trying to upgrade the DOCTYPE to a
             # newer DTD this library's output isn't verified to satisfy.
             xml_doc.tree.getroot().set("version", "2.0")
+            _fix_musicxml_split_chords(xml_doc)   # v22ze-235
             _backfill_musicxml_staff_tags(xml_doc)
             xml_doc.write(path)
         except Exception as e:
