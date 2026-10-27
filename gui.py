@@ -9524,6 +9524,9 @@ class SplashScreen(tk.Toplevel):
             lk.bind("<Enter>", lambda e, w=lk: w.configure(fg="#79c0ff"))
             lk.bind("<Leave>", lambda e, w=lk: w.configure(fg=BLUE))
 
+        tk.Label(inner, text="Contains MIDI Studio code by Michael Winthrop for the Sterling Lions Club, Virginia, USA.\nsee: https://github.com/winthrom/midi-studio", bg=BG, fg=MUTED,
+                 font=("TkDefaultFont", 7), justify=tk.CENTER).pack(pady=(8, 0))
+
         tk.Frame(inner, bg=BDCOL, height=1).pack(fill=tk.X, pady=(16, 8))
 
         # v22ze-111 fix: welcome-screen MIDI status also recognizes built-in FluidSynth (see _play()).
@@ -21790,6 +21793,8 @@ class MidisoftStudio:
             "Original inspiration: MidiSoft Studio4 © 1991–1995 MidiSoft\n"
             "Corporation, created by Raymond Bily\n"
             "Developed by Michael F. Winthrop in collaboration with Claude Sonnet 4.6\n"
+            "Contains MIDI Studio code by Michael Winthrop for the Sterling Lions Club, Virginia, USA.\n"
+            "see: https://github.com/winthrom/midi-studio\n"
             "Free software: GNU General Public License, version 3 or later (see LICENSE).\n"
             "Includes python-ly (GPL), FluidSynth (LGPL), MuseScore General sounds (MIT),\n"
             "Bravura clef shapes (SIL Open Font License) and certifi (MPL 2.0).\n\n"

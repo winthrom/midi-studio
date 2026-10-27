@@ -1,6 +1,13 @@
 # midi-studio
 MIDI notation editor and synthesizer inspired by MidiSoft Studio for Windows
 
+## Supporting the Sterling Lions Club
+
+MIDI Studio is free, and is developed for the Sterling Lions Club, Virginia, USA.
+Donations are gratefully accepted: [make a donation](https://e-clubhouse.org/sites/sterlingva/page-10.php).
+
+Contains MIDI Studio code by Michael Winthrop for the Sterling Lions Club, Virginia, USA. see: https://github.com/winthrom/midi-studio
+
 ## Download
 
 Latest test build (no account needed):
