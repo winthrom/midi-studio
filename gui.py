@@ -6116,95 +6116,68 @@ class Song:
                 else:
                     groups.append((q, [n]))
 
-            # ── Step 3 & 4: build token list ──────────────────────────────────
+            # ── Step 3 & 4: build token list (v22ze-237: absolute positions) ──────
+            # v22ze-237: every note is placed at its exact 64th-note position inside the bar.  Before, the bar
+            # was written by adding up tick lengths one after another; a ticks-per-beat that is not a multiple
+            # of 16 made the written length drift from the real position, the bar was corrected only at its end,
+            # and the two hands could end up a 16th or more apart.  Now the position (in 64ths) of each chord is
+            # worked out from its snapped tick, gaps and lengths are written in whole 64ths, and nothing moves.
             mstr = []
-            # v22ze: parallel list, same length as mstr, classifying each
-            # token as 'staccato' / 'note' / 'rest' -- used below to find
-            # runs of 2+ consecutive staccato notes with no intervening
-            # rest, for the portato slur heuristic (staccato dot AND a
-            # phrase slur together, as seen in the published score).
             mstr_kind = []
-            cursor = 0  # ticks consumed in this measure
+            _UU = [(64, "1"), (48, "2."), (32, "2"), (24, "4."), (16, "4"), (12, "8."),
+                   (8, "8"), (6, "16."), (4, "16"), (3, "32."), (2, "32"), (1, "64")]
+            _UDUR = {v: d for v, d in _UU}
+            _T2U = 64.0 / (4 * tpb)          # ticks -> 64ths
+            _target_u = max(1, int(round(budget * _T2U)))
+            _min_u = max(1, int(round(_min_rest * _T2U)))
 
+            def _u_floor(u):
+                for v, d in _UU:
+                    if v <= u:
+                        return v
+                return 0
+
+            def _u_tokens(u, kind):
+                out = []
+                while u > 0:
+                    v = _u_floor(u)
+                    out.append(kind + _UDUR[v])
+                    u -= v
+                return out
+
+            def _gap(u):
+                # a gap shorter than the minimum rest is not drawn: an invisible skip keeps the place
+                kind = "s" if u < _min_u else "r"
+                for tok in _u_tokens(u, kind):
+                    mstr.append(tok)
+                    mstr_kind.append("rest")
+
+            cur_u = 0
             for i, (tick, chord) in enumerate(groups):
                 next_tick = groups[i + 1][0] if i + 1 < len(groups) else budget
-
-                # Rest gap before this chord (always on-grid)
-                if tick > cursor:
-                    gap = tick - cursor
-                    _seq = spacer_seq(gap)[0] if gap < _min_rest else rest_seq(gap)[0]
-                    for rs in _seq:
-                        mstr.append(rs)
-                        mstr_kind.append("rest")
-                    cursor = tick
-                elif tick < cursor:
-                    # Overlap: this chord's snapped tick falls inside the previous
-                    # note — skip it to avoid double-filling.
-                    continue
-
-                # Note duration: snap from raw duration (v22r) — available
-                # is a hard cap only, not a selection criterion.  Any gap
-                # between chosen and next onset becomes an explicit rest.
+                on_u = min(_target_u - 1, int(round(tick * _T2U)))
+                next_u = _target_u if i + 1 >= len(groups) else int(round(next_tick * _T2U))
+                if on_u < cur_u:
+                    continue          # overlaps the previous chord: skip, as before
+                if on_u > cur_u:
+                    _gap(on_u - cur_u)
+                    cur_u = on_u
                 available = next_tick - tick
-                if available <= 0:
+                avail_u = next_u - on_u
+                if avail_u <= 0:
                     continue
                 raw_dur = max(n.duration for n in chord)
                 chosen = snap_note(raw_dur, available)
                 if chosen <= 0:
-                    # v22zd: fall back to `available` itself, not a fixed
-                    # `grid` unit.  best_dur_le(available) can now return 0
-                    # when available is smaller than the shortest notatable
-                    # value (a 64th note) -- see best_dur_le's docstring.
-                    # The old "or grid" fallback could then set chosen to a
-                    # FULL grid unit (e.g. 120 ticks) even when available
-                    # was only a few ticks, reintroducing the exact
-                    # overshoot this fix is meant to eliminate.  Falling
-                    # back to `available` guarantees chosen never exceeds
-                    # the space actually left in the measure.
                     chosen = best_dur_le(available) or available
-
-                # v22ze fix: `chosen` may not itself be a standard notatable
-                # duration -- e.g. when capped by `available` to an odd
-                # multiple of the grid such as 360 or 600 ticks (values
-                # excluded from the note vocabulary by the "no sub-quarter
-                # dotted values" rule below).  dur_str() picks the NEAREST
-                # standard duration by absolute distance, which can round
-                # UP past `chosen` -- e.g. dur_str(360) returns "4" (a
-                # 480-tick quarter note) because 480 and 240 are equidistant
-                # and 480 sorts first in the table.  The written note then
-                # represents MORE ticks than were ever budgeted, even though
-                # `cursor` below is bumped using the correctly-capped
-                # `chosen` -- a silent mismatch between what's accounted
-                # for internally and what's actually printed to the file.
-                # This is invisible to the [measure] diagnostic a few
-                # screens down, because that diagnostic sums `chosen`, not
-                # the written token -- which is exactly why every diagnostic
-                # log ever captured for this bug showed delta <= 0 (only
-                # ever undershoot) while LilyPond's own bar-checker, reading
-                # the actual written notation, reported real overshoot.
-                # Confirmed via direct instrumentation: every occurrence of
-                # chosen in {360, 600, 840, ...} (available capped to an
-                # odd multiple of the 16th-note grid) produced a written
-                # duration exactly 120 ticks (1/16 of a 4/4 measure) larger
-                # than `chosen`, matching the "+2/32 per measure" overshoot
-                # pattern originally observed in C1Prelude5-v22zd.ly.
-                # Flooring `chosen` down to the nearest standard value
-                # at-or-below itself, BEFORE deriving both the LilyPond
-                # token and the cursor advance from the same number, means
-                # the two can never again disagree.
                 chosen = best_dur_le(chosen) or chosen
                 _perf_chosen = chosen   # staccato test uses the length before stretching
-
-                # v22ze-232: like the screen, a tiny gap after the note is not a rest --
-                # write the note out to the next onset instead.
-                if 0 < available - chosen < _min_rest:
-                    chosen = max(chosen, best_dur_le(available) or chosen)
-
+                ch_u = _u_floor(min(int(round(chosen * _T2U)), avail_u)) or 1
+                # like the screen: a tiny gap after the note is not a rest -- write the note on to the next onset
+                if 0 < avail_u - ch_u < _min_u:
+                    ch_u = max(ch_u, _u_floor(avail_u))
                 chord_notes = thin_chord(sorted(chord, key=lambda n: n.pitch))
-                ds = dur_str(chosen)
-                # Staccato: note is marked staccato by bake_to_score(), OR
-                # the raw performed duration is < 75% of the snapped value
-                # (catches notes not yet baked but clearly short).
+                ds = _UDUR[ch_u]
                 stac_count = sum(
                     1
                     for n in chord_notes
@@ -6220,42 +6193,13 @@ class Song:
                     pitches = " ".join(pitch_ly(n) for n in chord_notes)
                     mstr.append("<" + pitches + ">" + ds + stac_sfx)
                 mstr_kind.append("staccato" if stac_sfx else "note")
+                cur_u = on_u + ch_u
 
-                cursor = tick + chosen
-
-                # v22zb: REMOVED a redundant "fill gap to next chord" block
-                # that used to sit here.  It emitted a rest for
-                # (next_tick - cursor) WITHOUT advancing cursor to match —
-                # so the very same gap got filled a SECOND time, either by
-                # the top-of-loop "if tick > cursor" check on the next
-                # iteration, or by the tail-fill step below for the last
-                # chord in a measure.  Confirmed by hand: a measure that
-                # should sum to exactly 32/32 (4/4) was instead summing to
-                # 47/32 — a 15/32 excess LilyPond's own bar-checker caught
-                # directly.  The top-of-loop mechanism alone already fills
-                # every such gap correctly; no separate block was needed.
-
-            # ── Fill tail with rests ─────────────────────────────────────────
-            if cursor < budget:
-                if budget - cursor < _min_rest:
-                    _tail_rests, _tail_consumed = spacer_seq(budget - cursor)
-                else:
-                    _tail_rests, _tail_consumed = rest_seq(budget - cursor)
-                for rs in _tail_rests:
-                    mstr.append(rs)
-                    mstr_kind.append("rest")
-                # v22ze fix: advance cursor by what rest_seq actually wrote,
-                # not just leave it where the last note ended. Previously
-                # `cursor` was never updated here, so the diagnostic below
-                # (and anything else inspecting cursor after this point)
-                # under-reported a measure as short by however much tail
-                # rest content was appended, even when that content was
-                # written to the file correctly and the measure was, in
-                # fact, complete. Confirmed via a real repro: measure #2
-                # of a live session reported "actual=960 delta=-960" here
-                # while the written .ly line for that measure summed to a
-                # correct, full 1920 ticks (...ending in a clean r2).
-                cursor += _tail_consumed
+            # ── Fill the tail of the bar ──────────────────────────────
+            if cur_u < _target_u:
+                _gap(_target_u - cur_u)
+                cur_u = _target_u
+            cursor = budget if cur_u == _target_u else int(cur_u / _T2U)
 
             # v22ze-233 bar fix: make the WRITTEN bar add up exactly.  Tick maths with a ticks-per-beat that is not
             # a multiple of 16 can leave a bar one 64th too long or too short; LilyPond then prints bar-check
@@ -6280,9 +6224,10 @@ class Song:
             try:
                 _target = int(round(budget * 64.0 / (tpb * 4)))
                 # 1. neighbouring skips are merged; tiny ones (a 16th or less) are removed
+                _tiny = 0 if sum(_units(_t) for _t in mstr) == _target else 4
                 _merged, _mk, _run = [], [], 0
                 def _flush(_run):
-                    if _run <= 4:
+                    if _run <= _tiny:
                         return
                     for _s in _skips(_run):
                         _merged.append(_s); _mk.append("rest")
