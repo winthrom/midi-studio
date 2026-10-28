@@ -5541,7 +5541,11 @@ class Song:
 
             for _mi, ms, me, _num, _den, tpm in mmap:
                 # Notes whose onset falls in this measure
-                meas_notes = [n for n in tr.notes if ms <= n.tick < me]
+                # v22ze-238: a note within half a grid step BEFORE the barline belongs to the next bar
+                _hg = grid // 2
+                _lo = ms if _mi == mmap[0][0] else ms - _hg
+                _hi = me if _mi == mmap[-1][0] else me - _hg
+                meas_notes = [n for n in tr.notes if _lo <= n.tick < _hi]
                 if not meas_notes:
                     continue
 
@@ -5569,7 +5573,7 @@ class Song:
                 # EXCEPTION: notes marked articulation='grace' are preserved
                 # regardless of duration — they will be rendered as small
                 # prefatory noteheads before the beat.
-                min_dur = _gt
+                min_dur = max(2, tpb // 64)   # v22ze-238: was grace_ticks (a 32nd): that deleted 31% of a staccato piece
                 _TIE_TAGS = ("tie_predecessor", "tie_continuation")  # v22ze-104
                 snapped = [
                     (q, n)
