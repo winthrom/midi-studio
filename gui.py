@@ -5631,6 +5631,11 @@ class Song:
                         # intact here; Step 5 is responsible for
                         # clearing it (only on the orphan fallback path,
                         # where no predecessor was found to merge into).
+                        # v22ze-240: the score gets the tidied length; the SOUND stays as recorded
+                        if (getattr(n, "articulation", "") not in ("tie_predecessor", "tie_continuation")
+                                and getattr(nc, "orig_dur", None) is None
+                                and nc.duration != n.duration):
+                            nc.orig_dur = n.duration
                         if is_staccato and nc.articulation == "":
                             nc.articulation = "staccato"
                         baked_notes.append(nc)
