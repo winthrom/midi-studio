@@ -8486,8 +8486,8 @@ class MidiListView(tk.Toplevel):
         Sortable by column.  Read-only.
     """
 
-    COLS = ("Measure", "Tick", "Pitch", "Note", "Velocity", "Duration", "Channel")
-    EV_COLS = ("Tick", "Type", "Channel", "Detail")
+    COLS = ("Measure", "Beat", "Tick", "Pitch", "Note", "Velocity", "Duration", "Channel")   # v22ze-239: Beat
+    EV_COLS = ("Measure", "Beat", "Tick", "Type", "Channel", "Detail")
 
     def __init__(self, parent, app, track_idx):
         super().__init__(parent)
@@ -8514,6 +8514,7 @@ class MidiListView(tk.Toplevel):
 
         tk.Button(tb, text="Delete Selected", command=self._delete_sel).pack(side=tk.LEFT, padx=2)
         tk.Button(tb, text="Refresh", command=self._reload).pack(side=tk.LEFT, padx=2)
+        tk.Button(tb, text="Save List\u2026", command=self._save_list).pack(side=tk.LEFT, padx=2)   # v22ze-239
         self._show_bar = tk.BooleanVar(value=True)
         tk.Checkbutton(
             tb, text="Show measure", variable=self._show_bar, command=self._apply_bar_column
@@ -8534,7 +8535,7 @@ class MidiListView(tk.Toplevel):
         self.tree = ttk.Treeview(
             notes_frame, columns=self.COLS, show="headings", selectmode="extended"
         )
-        col_widths = [72, 70, 50, 60, 70, 70, 60]
+        col_widths = [72, 56, 70, 50, 60, 70, 70, 60]
         for col, w in zip(self.COLS, col_widths):
             self.tree.heading(col, text=col, command=lambda c=col: self._sort(c))
             self.tree.column(col, width=w, anchor="center")
@@ -8552,7 +8553,7 @@ class MidiListView(tk.Toplevel):
         self.ev_tree = ttk.Treeview(
             ev_frame, columns=self.EV_COLS, show="headings", selectmode="browse"
         )
-        ev_widths = [70, 140, 60, 360]
+        ev_widths = [64, 56, 70, 140, 60, 320]
         for col, w in zip(self.EV_COLS, ev_widths):
             self.ev_tree.heading(col, text=col, command=lambda c=col: self._sort_events(c))
             self.ev_tree.column(col, width=w, anchor="center" if col != "Detail" else "w")
@@ -8602,6 +8603,58 @@ class MidiListView(tk.Toplevel):
         except Exception:
             pass
 
+    def _beat_of(self, starts, mmap, tick):
+        """v22ze-239: beat within the bar (1 = first beat), to two decimals."""
+        import bisect as _bisect
+        if not starts:
+            return ""
+        i = max(0, _bisect.bisect_right(starts, tick) - 1)
+        den = mmap[i][4] if len(mmap[i]) > 4 and mmap[i][4] else 4
+        beat_len = self.app.song.ticks_per_beat * 4.0 / den
+        return round((tick - mmap[i][1]) / beat_len + 1, 2)
+
+    def _save_list(self):
+        """v22ze-239: save every note and raw event of every track as one CSV file."""
+        import csv
+        song = self.app.song
+        if not song.tracks:
+            messagebox.showinfo("Save List", "No tracks.", parent=self)
+            return
+        path = filedialog.asksaveasfilename(
+            parent=self, title="Save List", defaultextension=".csv",
+            filetypes=[("CSV (spreadsheet)", "*.csv"), ("All", "*.*")])
+        if not path:
+            return
+        keep = self.track_idx
+        rows = []
+        try:
+            for ti, tr in enumerate(song.tracks):
+                self.track_idx = ti
+                self._populate()
+                self._populate_events()
+                for iid in self.tree.get_children():
+                    v = self.tree.item(iid, "values")
+                    rows.append((ti, int(v[2]), 1, [tr.name, "Note", v[0], v[1], v[2], v[3], v[4], v[5], v[6], v[7], "", ""]))
+                for iid in self.ev_tree.get_children():
+                    v = self.ev_tree.item(iid, "values")
+                    if not v[2] and not v[0]:
+                        continue    # the "(no raw events)" placeholder
+                    rows.append((ti, int(v[2]), 0, [tr.name, "Event", v[0], v[1], v[2], "", "", "", "", v[4], v[3], v[5]]))
+            rows.sort(key=lambda r: (r[0], r[1], r[2]))
+            with open(path, "w", newline="", encoding="utf-8-sig") as f:
+                w = csv.writer(f)
+                w.writerow(["Track", "Kind", "Measure", "Beat", "Tick", "Pitch", "Note", "Velocity",
+                            "Duration", "Channel", "Event type", "Detail"])
+                for r in rows:
+                    w.writerow(r[3])
+            messagebox.showinfo("Save List", f"Saved {len(rows)} rows to:\n{path}", parent=self)
+        except Exception as exc:
+            messagebox.showerror("Save List", str(exc), parent=self)
+        finally:
+            self.track_idx = keep
+            self._populate()
+            self._populate_events()
+
     def _bar_of(self, starts, mmap, tick):
         import bisect as _bisect
 
@@ -8625,6 +8678,7 @@ class MidiListView(tk.Toplevel):
                 iid=str(i),
                 values=(
                     self._bar_of(_starts, _mmap, n.tick),
+                    self._beat_of(_starts, _mmap, n.tick),
                     n.tick,
                     n.pitch,
                     note_name(n.pitch),
@@ -8638,6 +8692,7 @@ class MidiListView(tk.Toplevel):
         tr = self.app.song.tracks[self.track_idx]
         m = {
             "Measure": "tick",
+            "Beat": "tick",
             "Tick": "tick",
             "Pitch": "pitch",
             "Velocity": "velocity",
@@ -8682,8 +8737,13 @@ class MidiListView(tk.Toplevel):
         """Reload Raw Events tab from track.events, decoded to readable form."""
         self.ev_tree.delete(*self.ev_tree.get_children())
         tr = self.app.song.tracks[self.track_idx]
+        try:
+            _mmap = self.app.song.get_measure_map()
+            _starts = [m[1] for m in _mmap]
+        except Exception:
+            _mmap, _starts = [], []
         if not tr.events:
-            self.ev_tree.insert("", tk.END, values=("", "(no raw events)", "", ""))
+            self.ev_tree.insert("", tk.END, values=("", "", "", "(no raw events)", "", ""))
             return
         for i, ev in enumerate(sorted(tr.events, key=lambda e: e.tick)):
             msg = ev.msg
@@ -8726,11 +8786,15 @@ class MidiListView(tk.Toplevel):
             else:
                 raw = str(msg)
                 detail = raw[raw.find(" ") + 1 :] if " " in raw else raw
-            self.ev_tree.insert("", tk.END, iid=f"ev{i}", values=(ev.tick, mtype, ch, detail))
+            self.ev_tree.insert("", tk.END, iid=f"ev{i}", values=(self._bar_of(_starts, _mmap, ev.tick),
+                                                                    self._beat_of(_starts, _mmap, ev.tick),
+                                                                    ev.tick, mtype, ch, detail))
 
     def _sort_events(self, col):
         tr = self.app.song.tracks[self.track_idx]
         key = {
+            "Measure": lambda e: e.tick,
+            "Beat": lambda e: e.tick,
             "Tick": lambda e: e.tick,
             "Type": lambda e: getattr(e.msg, "type", ""),
             "Channel": lambda e: getattr(e.msg, "channel", -1),

@@ -11,10 +11,10 @@ import time
 from datetime import datetime
 
 # Application identity (update APP_VERSION each release)
-APP_VERSION = "22ze-238"
+APP_VERSION = "22ze-239"
 APP_RELEASE = "0.4.0-dev"
 APP_FULL_NAME = "Midi-Studio — a Synthesizer in the Spirit of MidiSoft Studio4"
-APP_TIMESTAMP = "2026-10-27"  # build date (was: launch time)
+APP_TIMESTAMP = "2026-10-28"  # build date (was: launch time)
 APP_TITLE = f"{APP_FULL_NAME}  —  v{APP_RELEASE} (build {APP_VERSION})  {APP_TIMESTAMP}"
 
 # v22ze-218: APP_RELEASE (above) is the number users see and tags are named after; "-dev" while the
