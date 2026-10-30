@@ -30,3 +30,27 @@ def _urlopen(url, *args, **kwargs):
 
 
 urllib.request.urlopen = _urlopen
+
+
+# appimagetool (continuous build of 2026-10-29) refuses an AppDir whose folders are mode 0700, and python-appimage
+# builds the AppDir that way.  Make the AppDir readable by everyone (what the tool asks for, and what users of the
+# AppImage need) just before appimagetool runs.  The command is left as it was otherwise.
+import shlex as _shlex
+import subprocess as _subprocess
+
+_RealPopen = _subprocess.Popen
+
+
+class _PopenReadableAppDir(_RealPopen):
+    def __init__(self, args, *a, **kw):
+        if isinstance(args, str) and "--no-appstream" in args:
+            try:
+                toks = _shlex.split(args)
+                d = _shlex.quote(toks[toks.index("--no-appstream") + 1])
+                args = "chmod -R a+rX %s; chmod a+rx %s/AppRun 2>/dev/null; %s" % (d, d, args)
+            except Exception:
+                pass
+        super().__init__(args, *a, **kw)
+
+
+_subprocess.Popen = _PopenReadableAppDir
