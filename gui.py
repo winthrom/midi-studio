@@ -1586,6 +1586,60 @@ def _fix_musicxml_split_chords(xml_doc):
     return moved
 
 
+def _fix_musicxml_stray_chord_notes(xml_doc):
+    """v22ze-241: put a stray chord note back with its own chord.
+
+    python-ly sometimes writes the top note of the last chord of a hand right after the OTHER hand's last
+    note (flagged <chord/>), so a reader attaches it to the wrong hand and the bar looks too long.  Find
+    each chord note whose staff/voice differs from the note before it and move it to the end of the last
+    chord of its own staff/voice in the same bar -- only when that chord has the same length.  Notes are
+    only moved; none is added, removed or retimed.  Returns the number moved.
+    """
+    root = xml_doc.tree.getroot()
+    moved = 0
+    for part in root.findall("part"):
+        for m in part.findall("measure"):
+            els = list(m)
+            cur = None
+            stray = []
+            for e in els:
+                if e.tag == "backup":
+                    cur = None
+                elif e.tag == "note":
+                    k = (e.findtext("staff"), e.findtext("voice"))
+                    if e.find("chord") is not None:
+                        if cur is not None and k != cur:
+                            stray.append(e)
+                    else:
+                        cur = k
+                elif e.tag == "forward":
+                    cur = None
+            for s in stray:
+                k = (s.findtext("staff"), s.findtext("voice"))
+                last = None
+                for e in list(m):
+                    if e is s or e.tag != "note":
+                        continue
+                    if (e.findtext("staff"), e.findtext("voice")) == k:
+                        last = e
+                if last is None or last.find("rest") is not None:
+                    continue
+                # the chord the stray note belongs to = the last non-chord note of this voice + its chord notes
+                lst = [e for e in m if e is not s and e.tag == "note"
+                       and (e.findtext("staff"), e.findtext("voice")) == k]
+                head = None
+                for e in lst:
+                    if e.find("chord") is None:
+                        head = e
+                if head is None or head.findtext("duration") != s.findtext("duration"):
+                    continue
+                m.remove(s)
+                pos = list(m).index(lst[-1])
+                m.insert(pos + 1, s)
+                moved += 1
+    return moved
+
+
 def _backfill_musicxml_staff_tags(xml_doc):
     """Explicitly stamp <staff> on every note in an ly.musicxml document,
     instead of relying on the implicit "inherit from the chord's first
@@ -19562,6 +19616,7 @@ class MidisoftStudio:
             xml_doc.tree.getroot().set("version", "2.0")
             _fix_musicxml_split_chords(xml_doc)   # v22ze-235
             _backfill_musicxml_staff_tags(xml_doc)
+            _fix_musicxml_stray_chord_notes(xml_doc)   # v22ze-241
             xml_doc.write(path)
         except Exception as e:
             messagebox.showerror("MusicXML Export Failed", str(e), parent=self.root)
