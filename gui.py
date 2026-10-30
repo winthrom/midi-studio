@@ -1640,6 +1640,134 @@ def _fix_musicxml_stray_chord_notes(xml_doc):
     return moved
 
 
+def _musicxml_true_ties(song):
+    """v22ze-242: {(measure index, midi pitch)} of notes split at a barline: a tie_predecessor whose
+    tie_continuation (same pitch) starts the next bar.  The ties MusicXML must carry."""
+    import bisect as _bs
+    out = set()
+    try:
+        mmap = song.get_measure_map()
+        starts = [m[1] for m in mmap]
+        for tr in song.tracks:
+            cont = {}
+            for n in tr.notes:
+                if getattr(n, "articulation", "") == "tie_continuation":
+                    cont.setdefault(n.pitch, []).append(n.tick)
+            for n in tr.notes:
+                if getattr(n, "articulation", "") != "tie_predecessor":
+                    continue
+                mi = _bs.bisect_right(starts, n.tick) - 1
+                if mi < 0 or mi + 1 >= len(starts):
+                    continue
+                if any(abs(t - starts[mi + 1]) <= max(2, song.ticks_per_beat // 16) for t in cont.get(n.pitch, [])):
+                    out.add((mi, n.pitch))
+    except Exception:
+        return set()
+    return out
+
+
+def _fix_musicxml_ties(xml_doc, true_ties):
+    """v22ze-242: python-ly ties EVERY note of a chord when one note of it has a tie.  At a barline that
+    would tie a repeated chord note that the score does not tie (and lose a strike), so a tie that crosses
+    a barline is kept only where the score has a note split at that barline (see _musicxml_true_ties); the
+    others are removed, with their other half.  Ties inside a bar are left as written.  Returns the number
+    of ties removed."""
+    root = xml_doc.tree.getroot()
+    steps = {"C": 0, "D": 2, "E": 4, "F": 5, "G": 7, "A": 9, "B": 11}
+
+    def midi(e):
+        p = e.find("pitch")
+        if p is None:
+            return None
+        return 12 * (int(p.findtext("octave")) + 1) + steps[p.findtext("step")] + int(float(p.findtext("alter") or 0))
+
+    def layout(m):
+        pos = last = 0
+        out = []
+        for e in m:
+            if e.tag == "backup":
+                pos -= int(e.findtext("duration"))
+            elif e.tag == "forward":
+                pos += int(e.findtext("duration"))
+            elif e.tag == "note":
+                d = int(e.findtext("duration") or 0)
+                ch = e.find("chord") is not None
+                s = last if ch else pos
+                if not ch:
+                    last = pos
+                    pos += d
+                out.append((e, s, d, e.findtext("staff"), e.findtext("voice")))
+        return out
+
+    def drop(e, kind):
+        for t in list(e.findall("tie")):
+            if t.get("type") == kind:
+                e.remove(t)
+        nt = e.find("notations")
+        if nt is not None:
+            for t in list(nt):
+                if t.tag == "tied" and t.get("type") == kind:
+                    nt.remove(t)
+            if len(nt) == 0:
+                e.remove(nt)
+
+    removed = 0
+    for part in root.findall("part"):
+        measures = part.findall("measure")
+        div = 1
+        bar_len = []
+        for m in measures:
+            a = m.find("attributes")
+            if a is not None and a.find("divisions") is not None:
+                div = int(a.find("divisions").text)
+            bar_len.append(div * 4)
+        for mi, m in enumerate(measures[:-1]):
+            nxt = None
+            for (e, s, d, st, vo) in layout(m):
+                if e.find("rest") is not None or s + d != bar_len[mi]:
+                    continue
+                if not any(t.get("type") == "start" for t in e.findall("tie")):
+                    continue
+                p = midi(e)
+                if (mi, p) in true_ties:
+                    continue
+                drop(e, "start")
+                removed += 1
+                if nxt is None:
+                    nxt = layout(measures[mi + 1])
+                for x in nxt:
+                    if x[1] == 0 and x[3] == st and x[4] == vo and midi(x[0]) == p:
+                        drop(x[0], "stop")
+    # every tie must now join two notes: a start needs a stop on the NEXT note of that pitch in the same
+    # staff and voice, and a stop needs a start before it.  Anything else is removed.
+    seqs = {}
+    for part in root.findall("part"):
+        for m in part.findall("measure"):
+            for (e, s, d, st, vo) in layout(m):
+                if e.find("rest") is None:
+                    seqs.setdefault((part.get("id"), st, vo), []).append(e)
+    for notes in seqs.values():
+        opened = {}
+        for e in notes:
+            p = midi(e)
+            kinds = [t.get("type") for t in e.findall("tie")]
+            if p in opened:
+                if "stop" in kinds:
+                    del opened[p]
+                else:
+                    drop(opened.pop(p), "start")
+                    removed += 1
+            elif "stop" in kinds:
+                drop(e, "stop")
+                removed += 1
+            if "start" in kinds:
+                opened[p] = e
+        for e in opened.values():
+            drop(e, "start")
+            removed += 1
+    return removed
+
+
 def _backfill_musicxml_staff_tags(xml_doc):
     """Explicitly stamp <staff> on every note in an ly.musicxml document,
     instead of relying on the implicit "inherit from the chord's first
@@ -6147,6 +6275,14 @@ class Song:
 
             grid = max(1, tpb // NOTATION_DIVISION)  # user-selectable notation grid
             budget = int(measure_tpm)
+            # v22ze-242: the second piece of a split note is a strike only if the first piece is written tied to
+            # it; otherwise (the first piece was cut short by a later chord) it is not written, like any other
+            # note that is still sounding
+            _tp = getattr(build_measure_str, "tied_prev", set())
+            notes_in_meas = [n for n in notes_in_meas
+                             if not (getattr(n, "articulation", "") == "tie_continuation"
+                                     and n.pitch not in _tp and int(n.tick) - cursor_start < grid)]
+            build_measure_str.tied_out = set()
 
             # ── Step 1: snap note positions to grid ───────────────────────────
             snapped_notes = []
@@ -6250,13 +6386,33 @@ class Song:
                     )
                 )
                 stac_sfx = "-." if stac_count > len(chord_notes) / 2 else ""
-                if len(chord_notes) == 1:
-                    mstr.append(pitch_ly(chord_notes[0]) + ds + stac_sfx)
-                else:
-                    pitches = " ".join(pitch_ly(n) for n in chord_notes)
-                    mstr.append("<" + pitches + ">" + ds + stac_sfx)
-                mstr_kind.append("staccato" if stac_sfx else "note")
-                cur_u = on_u + ch_u
+                # v22ze-242: the first piece of a note split at a barline is tied to its second piece.  A chord
+                # holding such a note, last in the bar, is written on to the barline (in tied pieces if the
+                # length is not one standard value), so no rest or gap sits between the two pieces.
+                _cont = getattr(build_measure_str, "cont", ())
+                _to_bar = i + 1 >= len(groups)
+                def _tie(n):
+                    if _to_bar and getattr(n, "articulation", "") == "tie_predecessor" and n.pitch in _cont:
+                        build_measure_str.tied_out.add(n.pitch)
+                        return "~"
+                    return ""
+                _pieces = [ch_u]
+                if any(_tie(n) for n in chord_notes) and _to_bar and avail_u > ch_u:
+                    _pieces, _rem = [], avail_u
+                    while _rem > 0:
+                        _v = _u_floor(_rem)
+                        _pieces.append(_v)
+                        _rem -= _v
+                for _pi, _pv in enumerate(_pieces):
+                    _lastp = _pi == len(_pieces) - 1
+                    _sfx = stac_sfx if _pi == 0 else ""
+                    if len(chord_notes) == 1:
+                        mstr.append(pitch_ly(chord_notes[0]) + _UDUR[_pv] + _sfx + (_tie(chord_notes[0]) if _lastp else "~"))
+                    else:
+                        pitches = " ".join(pitch_ly(n) + (_tie(n) if _lastp else "~") for n in chord_notes)
+                        mstr.append("<" + pitches + ">" + _UDUR[_pv] + _sfx)
+                    mstr_kind.append("staccato" if _sfx else "note")
+                cur_u = on_u + sum(_pieces)
 
             # ── Fill the tail of the bar ──────────────────────────────
             if cur_u < _target_u:
@@ -6787,6 +6943,12 @@ class Song:
                 _lo = ms if m_idx == mmap[0][0] else ms - _hg
                 _hi = me if m_idx == mmap[-1][0] else me - _hg
                 mn = [n for n in notes if _lo <= n.tick < _hi]
+                # v22ze-242: pitches whose second piece starts the next bar (for the ties)
+                build_measure_str.tied_prev = (getattr(build_measure_str, "tied_out", set())
+                                               if m_idx != mmap[0][0] else set())
+                build_measure_str.cont = {n.pitch for n in notes
+                                          if getattr(n, "articulation", "") == "tie_continuation"
+                                          and me <= n.tick < me + max(1, tpb // NOTATION_DIVISION)}
                 mstr = build_measure_str(mn, ms, tpm)
 
                 if use_dynamics and mn and m_idx in vel_by_meas:
@@ -19617,6 +19779,7 @@ class MidisoftStudio:
             _fix_musicxml_split_chords(xml_doc)   # v22ze-235
             _backfill_musicxml_staff_tags(xml_doc)
             _fix_musicxml_stray_chord_notes(xml_doc)   # v22ze-241
+            _fix_musicxml_ties(xml_doc, _musicxml_true_ties(self.song))   # v22ze-242
             xml_doc.write(path)
         except Exception as e:
             messagebox.showerror("MusicXML Export Failed", str(e), parent=self.root)
