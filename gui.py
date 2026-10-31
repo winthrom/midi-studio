@@ -12534,7 +12534,10 @@ class ScoreView(tk.Frame):
         self._draw_beams(c, stems, tpb, song)
         self._draw_ottava(c, _ottava_runs)  # v22ze-147
         # Draw ties for notes crossing barlines
-        self._draw_ties(c, tr, tt, bt, nr, tpb, mmap, ti=ti)
+        self._draw_ties(c, tr, tt, bt, nr, tpb, mmap, ti=ti,
+                        hand_of={id(_n): _ft for _en, _ft, _v2 in entries for _n in _en},
+                        bass_treble_measures=bass_treble_measures,
+                        treble_bass_measures=treble_bass_measures)   # v22ze-243
         # Draw pedal marks
         if self._show_pedal_var.get():   # v22ze-215
             self._draw_pedal(c, tr, tt, bt, tpb, mmap)
@@ -14066,7 +14069,8 @@ class ScoreView(tk.Frame):
             # Short vertical tick marking the release.
             c.create_line(x1, ped_y - _tick_h, x1, ped_y + _tick_h, fill=_ped_fill, width=2)
 
-    def _draw_ties(self, c, tr, tt, bt, nr, tpb, mmap, ti=0):
+    def _draw_ties(self, c, tr, tt, bt, nr, tpb, mmap, ti=0, hand_of=None,
+                   bass_treble_measures=None, treble_bass_measures=None):   # v22ze-243
         """Draw tie arcs for notes whose duration crosses a barline."""
         fe = self._fe()
         # Max tie = 2 measures (longer = recording artifact)
@@ -14114,7 +14118,14 @@ class ScoreView(tk.Frame):
             pos, _ = note_staff_pos(note, _song_uses_flats(self.app.song))
             tracks = self.app.song.tracks
             use_treble = pos >= 2
-            if use_treble:
+            _ft = hand_of.get(id(note)) if hand_of else None   # v22ze-243: the hand the note head is drawn in
+            if _ft is not None:
+                _sp2y, _topy, _b1, _b2, _b3, _b4, use_treble = self._clef_branch_for_chord(
+                    [note], tt, bt, mmap, _ft, bass_treble_measures or set(), treble_bass_measures,
+                    _song_uses_flats(self.app.song))
+                y = _sp2y(pos, _topy)
+                tie_above = pos >= 5.5
+            elif use_treble:
                 y = self._sp_to_y_treble(pos, self._treble_top(ti, tracks))
                 tie_above = pos >= 5.5
             else:
@@ -14124,8 +14135,10 @@ class ScoreView(tk.Frame):
                 y = self._sp_to_y_bass(pos, bt_y)
                 tie_above = pos >= 5.5
 
-            x1 = int(self._tick_to_x(note.tick)) + nr + 2
-            x2 = int(self._tick_to_x(cont_note.tick)) - nr - 2
+            # v22ze-243: from the edge of the first note head to the edge of the second (the old end point was
+            # two head-widths short, so a tie between notes a 16th apart came out 3 pixels wide)
+            x1 = int(self._tick_to_x(note.tick)) + nr + 2 + int(nr * 0.9)
+            x2 = int(self._tick_to_x(cont_note.tick)) + nr + 2 - int(nr * 0.9)
             if x2 <= x1:
                 continue
 
