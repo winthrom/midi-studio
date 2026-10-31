@@ -2696,6 +2696,42 @@ def _build_measure_map_core(tpb, sigs, total):
     return measures
 
 
+def _strike_slots(song, grid, tpb):
+    """v22ze-247: {id(note): slot tick} -- one slot for every strike, shared by both hands.
+
+    Notes (any hand) that start within half a grid step of the first note of a group are one strike and
+    get one slot (the group's average rounded to the grid).  A pitch already in the group starts a new
+    strike.  A strike just before a barline: up to half a 1/32 before it -> the next bar's first slot;
+    farther before it -> the last 1/32 slot of its own bar (patch 245).  Nothing here changes any note.
+    """
+    out = {}
+    try:
+        mmap = song.get_measure_map()
+    except Exception:
+        return out
+    bars = {int(m[1]) for m in mmap[1:]}
+    g = float(max(1, grid))
+    fine = max(1.0, min(g, tpb / 8.0))
+    win = max(1.0, min(g / 2.0, tpb / 8.0))
+    notes = [n for tr in song.tracks if getattr(tr, "channel", 0) != 9 for n in tr.notes]
+    notes.sort(key=lambda n: n.tick)
+    groups = []
+    for n in notes:
+        if groups and n.tick - groups[-1][0].tick < win and all(x.pitch != n.pitch for x in groups[-1]):
+            groups[-1].append(n)
+        else:
+            groups.append([n])
+    for gr in groups:
+        mean = sum(x.tick for x in gr) / float(len(gr))
+        s = round(mean / g) * g
+        if int(round(s)) in bars and mean < s - fine / 2.0:
+            s -= fine
+        s = max(0, int(round(s)))
+        for x in gr:
+            out[id(x)] = s
+    return out
+
+
 def remove_short_rests(song, thresh, m_from=None, m_to=None, dry=False):   # v22ze-211, 212
     """Close every gap shorter than `thresh` ticks between a note's end and the next onset (per track)
     by lengthening the note(s) that end at the gap.  The recorded SOUND is kept (orig_dur).  A gap that
@@ -5833,6 +5869,7 @@ class Song:
             return max(candidates) if candidates else 0
 
         grid = max(1, tpb // NOTATION_DIVISION)
+        _slots247 = _strike_slots(self, grid, tpb)   # v22ze-247: one slot per strike, both hands
 
         # ── Build the new Song shell ──────────────────────────────────────────
         out = Song()
@@ -5867,7 +5904,7 @@ class Song:
                 _hg = max(1, _fine // 2)
                 _lo = ms if _mi == mmap[0][0] else ms - _hg
                 _hi = me if _mi == mmap[-1][0] else me - _hg
-                meas_notes = [n for n in tr.notes if _lo <= n.tick < _hi]
+                meas_notes = [n for n in tr.notes if ms <= _slots247.get(id(n), n.tick) < me]   # v22ze-247
                 if not meas_notes:
                     continue
 
@@ -5888,6 +5925,9 @@ class Song:
                         q = budget - _fine
                     else:
                         q = max(0, min(budget - grid, q))
+                    _s247 = _slots247.get(id(n))
+                    if _s247 is not None:                  # v22ze-247
+                        q = max(0, min(budget - _fine, _s247 - ms))
                     snapped.append((q, n))
                 snapped.sort(key=lambda x: x[0])
 
@@ -6447,6 +6487,9 @@ class Song:
                     q = budget - min(grid, max(1, tpb // 8))
                 else:
                     q = max(0, min(budget - grid, q))  # clamp inside measure
+                _s247 = _ly_slots.get(id(n))
+                if _s247 is not None:                  # v22ze-247
+                    q = max(0, min(budget - min(grid, max(1, tpb // 8)), _s247 - cursor_start))
                 snapped_notes.append((q, n))
 
             snapped_notes.sort(key=lambda x: x[0])
@@ -7011,6 +7054,8 @@ class Song:
                     lvl[m_idx] = min(lvl[m_idx - 1], lvl[m_idx + 1])
             return lvl
 
+        _ly_slots = _strike_slots(self, max(1, tpb // NOTATION_DIVISION), tpb)   # v22ze-247
+
         def write_voice(f, vn, notes, clef_name, mmap, density_map=None, emit_spacing=False):
             """Write a single \\absolute voice variable with per-measure time sigs.
 
@@ -7086,7 +7131,7 @@ class Song:
                 _hg = max(1, min(max(1, tpb // NOTATION_DIVISION), max(1, tpb // 8)) // 2)   # v22ze-245
                 _lo = ms if m_idx == mmap[0][0] else ms - _hg
                 _hi = me if m_idx == mmap[-1][0] else me - _hg
-                mn = [n for n in notes if _lo <= n.tick < _hi]
+                mn = [n for n in notes if ms <= _ly_slots.get(id(n), n.tick) < me]   # v22ze-247
                 # v22ze-242: pitches whose second piece starts the next bar (for the ties)
                 build_measure_str.tied_prev = (getattr(build_measure_str, "tied_out", set())
                                                if m_idx != mmap[0][0] else set())
@@ -12144,6 +12189,7 @@ class ScoreView(tk.Frame):
         # that chord's early notes (live playing), not a separate chord.  Picture only.
         _bar_starts_245 = {int(_m[1]) for _m in mmap[1:]}
         _fine_245 = max(1.0, min(grid, tpb / 8.0))
+        _sl247 = _strike_slots(song, grid, tpb)   # v22ze-247: one slot per strike, both hands
         _mg = []
         for _cl in _cls:
             if _mg:
@@ -12163,6 +12209,10 @@ class ScoreView(tk.Frame):
             _t = int(round(round(_mean / grid) * grid))
             if _t in _bar_starts_245 and _mean < _t - _fine_245 / 2.0:   # v22ze-245: nearest slot
                 _t = int(round(_t - _fine_245))
+            _sv = [_sl247.get(id(getattr(x, "_orig", x))) for x in _cl]   # v22ze-247
+            _sv = [v for v in _sv if v is not None]
+            if _sv:
+                _t = max(set(_sv), key=lambda v: (_sv.count(v), v))
             for x in _cl:
                 x.tick = _t
         tr = qtr
