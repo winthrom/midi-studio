@@ -8,7 +8,7 @@ on:
 
 jobs:
   apple-silicon:
-    runs-on: macos-14
+    runs-on: macos-15
     # experimental: a failure here is visible in the log but does not turn the commit red
     continue-on-error: true
     steps:
