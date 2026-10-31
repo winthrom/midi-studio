@@ -2739,9 +2739,20 @@ def remove_short_rests(song, thresh, m_from=None, m_to=None, dry=False):   # v22
                                     e.orig_dur = e.duration        # the sound stays as recorded
                                 if k == 1:
                                     b = starts[mn]
+                                    # v22ze-246: the next strike of this hand is at the barline -> stop there;
+                                    # otherwise tie over, with the new-bar part rounded DOWN to a standard value
+                                    _half = max(1, (song.ticks_per_beat // NOTATION_DIVISION) // 2)
+                                    _u = 0
+                                    for _v in (64, 48, 32, 24, 16, 12, 8, 6, 4, 3, 2, 1):
+                                        if _v * song.ticks_per_beat / 16.0 <= (n.tick - b):
+                                            _u = _v
+                                            break
+                                    if n.tick - b <= _half or _u == 0:
+                                        e.duration = b - e.tick
+                                        continue
                                     cont = _cp.copy(e)
                                     cont.tick = b
-                                    cont.duration = n.tick - b
+                                    cont.duration = int(round(_u * song.ticks_per_beat / 16.0))
                                     cont.articulation = "tie_continuation"
                                     cont.orig_dur = None
                                     e.duration = b - e.tick
