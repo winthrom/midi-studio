@@ -2723,7 +2723,11 @@ def _strike_slots(song, grid, tpb):
             groups.append([n])
     for gr in groups:
         mean = sum(x.tick for x in gr) / float(len(gr))
-        s = round(mean / g) * g
+        _lo = int(mean // g) * g            # v22ze-247b: the slot that moves the strike's notes least
+        _hi = _lo + g
+        _tk = [x.tick for x in gr]
+        _dl, _dh = max(abs(_lo - t) for t in _tk), max(abs(_hi - t) for t in _tk)
+        s = _lo if (_dl, abs(_lo - mean)) <= (_dh, abs(_hi - mean)) else _hi
         if int(round(s)) in bars and mean < s - fine / 2.0:
             s -= fine
         s = max(0, int(round(s)))
@@ -12214,6 +12218,8 @@ class ScoreView(tk.Frame):
             if _sv:
                 _t = max(set(_sv), key=lambda v: (_sv.count(v), v))
             for x in _cl:
+                if getattr(x, "articulation", "") == "tie_predecessor":   # v22ze-247b: keep its end at the barline
+                    x.duration = max(1, int(x.tick + x.duration - _t))
                 x.tick = _t
         tr = qtr
 
