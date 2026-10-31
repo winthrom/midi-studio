@@ -1768,6 +1768,69 @@ def _fix_musicxml_ties(xml_doc, true_ties):
     return removed
 
 
+def _fix_musicxml_octave_shift(xml_doc):
+    """v22ze-245: write the notes under an 8va/15ma mark at their WRITTEN pitch.
+
+    python-ly writes the sounding pitch and also an <octave-shift> mark; a reader then adds the shift
+    again, so every note under the mark played an octave (or two) too high.  Under a "down" mark the
+    written note is 12 (or 24) semitones below the sound, under "up" above it.  Each note under a mark
+    is moved by that amount, so the sound is the original; the mark stays.  The mark is repeated on every
+    chord note by python-ly; the repeats are dropped.  A stop mark is written without its size, because
+    MuseScore 3 ignores the whole 8va otherwise.  Returns the number of notes changed.
+    """
+    root = xml_doc.tree.getroot()
+    changed = 0
+    for part in root.findall("part"):
+        state = {}
+        for m in part.findall("measure"):
+            els = list(m)
+            for i, e in enumerate(els):
+                if e.tag == "direction":
+                    shifts = [o for o in e.iter("octave-shift")]
+                    if not shifts:
+                        continue
+                    nxt = None
+                    if shifts[0].get("type") == "stop":
+                        # a stop is written after the last note of the staff it ends
+                        for f in reversed(els[:i]):
+                            if f.tag == "note":
+                                nxt = f
+                                break
+                    if nxt is None:
+                        for f in els[i + 1:]:
+                            if f.tag == "note":
+                                nxt = f
+                                break
+                    st = nxt.findtext("staff") if nxt is not None else None
+                    st = st or "1"
+                    o = shifts[0]
+                    if o.get("type") == "stop" and "size" in o.attrib:
+                        del o.attrib["size"]     # MuseScore 3 drops the whole 8va when its stop carries a size
+                    new = None if o.get("type") == "stop" else (o.get("type"), o.get("size"))
+                    if new is not None and state.get(st) == new:
+                        m.remove(e)          # repeat of a mark already running
+                        continue
+                    state[st] = new
+                    if e.find("staff") is None:
+                        pos = 0
+                        for k, ch in enumerate(list(e)):
+                            if ch.tag in ("direction-type", "offset", "footnote", "level", "voice"):
+                                pos = k + 1
+                        se = type(e)("staff")
+                        se.text = st
+                        e.insert(pos, se)
+                elif e.tag == "note":
+                    sh = state.get(e.findtext("staff") or "1")
+                    pi = e.find("pitch")
+                    if sh is None or pi is None:
+                        continue
+                    n = 2 if sh[1] == "15" else 1
+                    oc = pi.find("octave")
+                    oc.text = str(int(oc.text) + (-n if sh[0] == "down" else n))
+                    changed += 1
+    return changed
+
+
 def _add_musicxml_velocity(xml_doc, song):
     """v22ze-244: give every note of a python-ly MusicXML document its recorded MIDI velocity, as the
     MusicXML note attribute dynamics (percent of the default forte, which is velocity 90 = 100).  MuseScore
@@ -5789,7 +5852,8 @@ class Song:
             for _mi, ms, me, _num, _den, tpm in mmap:
                 # Notes whose onset falls in this measure
                 # v22ze-238: a note within half a grid step BEFORE the barline belongs to the next bar
-                _hg = grid // 2
+                _fine = min(grid, max(1, tpb // 8))   # v22ze-245: a 1/32
+                _hg = max(1, _fine // 2)
                 _lo = ms if _mi == mmap[0][0] else ms - _hg
                 _hi = me if _mi == mmap[-1][0] else me - _hg
                 meas_notes = [n for n in tr.notes if _lo <= n.tick < _hi]
@@ -5809,7 +5873,10 @@ class Song:
                         q = qrel
                     else:
                         q = qrel
-                    q = max(0, min(budget - grid, q))
+                    if qrel >= budget:      # v22ze-245: stays in this bar, in the last 1/32 slot
+                        q = budget - _fine
+                    else:
+                        q = max(0, min(budget - grid, q))
                     snapped.append((q, n))
                 snapped.sort(key=lambda x: x[0])
 
@@ -6365,7 +6432,10 @@ class Song:
                 # deliberately, not left as dead code.
                 q = qraw
 
-                q = max(0, min(budget - grid, q))  # clamp inside measure
+                if qraw >= budget:     # v22ze-245: stays in this bar, in the last 1/32 slot
+                    q = budget - min(grid, max(1, tpb // 8))
+                else:
+                    q = max(0, min(budget - grid, q))  # clamp inside measure
                 snapped_notes.append((q, n))
 
             snapped_notes.sort(key=lambda x: x[0])
@@ -7002,7 +7072,7 @@ class Song:
                     prev_num, prev_den = num, den
                 # v22ze-236: a note within half a grid step BEFORE the barline belongs to the next bar
                 # (it is rounded there), so both hands put it in the same place.
-                _hg = max(1, tpb // NOTATION_DIVISION) // 2
+                _hg = max(1, min(max(1, tpb // NOTATION_DIVISION), max(1, tpb // 8)) // 2)   # v22ze-245
                 _lo = ms if m_idx == mmap[0][0] else ms - _hg
                 _hi = me if m_idx == mmap[-1][0] else me - _hg
                 mn = [n for n in notes if _lo <= n.tick < _hi]
@@ -12061,6 +12131,8 @@ class ScoreView(tk.Frame):
         _cls = _cluster_notes(sorted(qtr.notes, key=lambda x: x.tick), _cw, _cg)
         # v22ze-217: notes struck just BEFORE a beat/barline and cut off by the chord that follows are
         # that chord's early notes (live playing), not a separate chord.  Picture only.
+        _bar_starts_245 = {int(_m[1]) for _m in mmap[1:]}
+        _fine_245 = max(1.0, min(grid, tpb / 8.0))
         _mg = []
         for _cl in _cls:
             if _mg:
@@ -12076,7 +12148,10 @@ class ScoreView(tk.Frame):
                     continue
             _mg.append(list(_cl))
         for _cl in _mg:
-            _t = int(round(round((sum(x.tick for x in _cl) / len(_cl)) / grid) * grid))
+            _mean = sum(x.tick for x in _cl) / len(_cl)
+            _t = int(round(round(_mean / grid) * grid))
+            if _t in _bar_starts_245 and _mean < _t - _fine_245 / 2.0:   # v22ze-245: nearest slot
+                _t = int(round(_t - _fine_245))
             for x in _cl:
                 x.tick = _t
         tr = qtr
@@ -19857,6 +19932,7 @@ class MidisoftStudio:
             _fix_musicxml_stray_chord_notes(xml_doc)   # v22ze-241
             _fix_musicxml_ties(xml_doc, _musicxml_true_ties(self.song))   # v22ze-242
             _add_musicxml_velocity(xml_doc, self.song)   # v22ze-244
+            _fix_musicxml_octave_shift(xml_doc)   # v22ze-245
             xml_doc.write(path)
         except Exception as e:
             messagebox.showerror("MusicXML Export Failed", str(e), parent=self.root)
