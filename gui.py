@@ -1768,6 +1768,71 @@ def _fix_musicxml_ties(xml_doc, true_ties):
     return removed
 
 
+def _add_musicxml_velocity(xml_doc, song):
+    """v22ze-244: give every note of a python-ly MusicXML document its recorded MIDI velocity, as the
+    MusicXML note attribute dynamics (percent of the default forte, which is velocity 90 = 100).  MuseScore
+    plays the note at that velocity.  Each XML note is matched to the song note of the same pitch nearest
+    its place in the bar (within half a beat); a note with no match, and the second piece of a tied note,
+    get no attribute.  Returns (notes given a velocity, notes without a match)."""
+    root = xml_doc.tree.getroot()
+    steps = {"C": 0, "D": 2, "E": 4, "F": 5, "G": 7, "A": 9, "B": 11}
+    mmap = song.get_measure_map()
+    by_pitch = {}
+    for tr in song.tracks:
+        if getattr(tr, "channel", 0) == 9:
+            continue
+        for n in tr.notes:
+            if getattr(n, "articulation", "") == "tie_continuation":
+                continue
+            by_pitch.setdefault(n.pitch, []).append([n.tick, n.velocity, False])
+    for v in by_pitch.values():
+        v.sort(key=lambda x: x[0])
+    tol = max(1, song.ticks_per_beat // 2)
+    given = unmatched = 0
+    for part in root.findall("part"):
+        div = 1
+        for mi, m in enumerate(part.findall("measure")):
+            a = m.find("attributes")
+            if a is not None and a.find("divisions") is not None:
+                div = int(a.find("divisions").text)
+            if mi >= len(mmap):
+                break
+            ms, me, num, den = mmap[mi][1], mmap[mi][2], mmap[mi][3], mmap[mi][4]
+            bar_div = max(1, div * 4 * num / den)
+            pos = last = 0
+            for e in m:
+                if e.tag == "backup":
+                    pos -= int(e.findtext("duration"))
+                elif e.tag == "forward":
+                    pos += int(e.findtext("duration"))
+                elif e.tag == "note":
+                    d = int(e.findtext("duration") or 0)
+                    ch = e.find("chord") is not None
+                    s = last if ch else pos
+                    if not ch:
+                        last = pos
+                        pos += d
+                    p = e.find("pitch")
+                    if p is None or any(t.get("type") == "stop" for t in e.findall("tie")):
+                        continue
+                    midi = (12 * (int(p.findtext("octave")) + 1) + steps[p.findtext("step")]
+                            + int(float(p.findtext("alter") or 0)))
+                    target = ms + s * (me - ms) / bar_div
+                    best = None
+                    for cand in by_pitch.get(midi, []):
+                        if cand[2] or abs(cand[0] - target) > tol:
+                            continue
+                        if best is None or abs(cand[0] - target) < abs(best[0] - target):
+                            best = cand
+                    if best is None:
+                        unmatched += 1
+                        continue
+                    best[2] = True
+                    e.set("dynamics", "%.1f" % (best[1] / 0.9))
+                    given += 1
+    return given, unmatched
+
+
 def _backfill_musicxml_staff_tags(xml_doc):
     """Explicitly stamp <staff> on every note in an ly.musicxml document,
     instead of relying on the implicit "inherit from the chord's first
@@ -6227,11 +6292,9 @@ class Song:
 
         def thin_chord(notes, max_notes=6):
             # Keep outer voices if chord has too many notes.
-            if len(notes) <= max_notes:
-                return notes
-            notes_s = sorted(notes, key=lambda n: n.pitch)
-            keep = max_notes // 2
-            return notes_s[:keep] + notes_s[-keep:]
+            # v22ze-244: every note is written.  A rolled chord of more than 6 notes in one hand used to lose its
+            # middle notes here, silently.  "Fix Chords" is the tool that thins chords, when the user asks.
+            return notes
 
         # ── dynamic piano split ───────────────────────────────────────────────
         # v22ze-27 fix (housekeeping item 8): find_split_pitch used to be
@@ -19793,6 +19856,7 @@ class MidisoftStudio:
             _backfill_musicxml_staff_tags(xml_doc)
             _fix_musicxml_stray_chord_notes(xml_doc)   # v22ze-241
             _fix_musicxml_ties(xml_doc, _musicxml_true_ties(self.song))   # v22ze-242
+            _add_musicxml_velocity(xml_doc, self.song)   # v22ze-244
             xml_doc.write(path)
         except Exception as e:
             messagebox.showerror("MusicXML Export Failed", str(e), parent=self.root)
