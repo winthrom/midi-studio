@@ -2696,6 +2696,98 @@ def _build_measure_map_core(tpb, sigs, total):
     return measures
 
 
+_DYN_EDGES = [(25, "ppp"), (41, "pp"), (57, "p"), (73, "mp"), (89, "mf"), (105, "f"), (121, "ff"), (128, "fff")]
+
+
+def _dyn_index(v):   # v22ze-248
+    for i, (e, _nm) in enumerate(_DYN_EDGES):
+        if v < e:
+            return i
+    return len(_DYN_EDGES) - 1
+
+
+def _auto_dynamic_marks(notes, mmap, soft_cut=20):
+    """v22ze-248: {bar index: (dynamic name or None, "<" / ">" / None)} from the recorded velocities.
+
+    Fixed bands (ppp under 25, pp 25-40, p 41-56, mp 57-72, mf 73-88, f 89-104, ff 105-120, fff 121+) applied
+    to the median velocity of each bar; very soft touches (soft_cut and below) and tie pieces are left out.
+    A new mark only when the level moves clearly out of the current band, and a hairpin instead of the
+    in-between marks when it rises or falls steadily over 3 or more marks.  Looks at the notes only."""
+    import bisect as _bs
+    import statistics as _st
+    starts = [m[1] for m in mmap]
+    per = {}
+    for n in notes:
+        if n.velocity > soft_cut and getattr(n, "articulation", "") != "tie_continuation":
+            b = _bs.bisect_right(starts, n.tick) - 1
+            if b >= 0:
+                per.setdefault(mmap[b][0], []).append(n.velocity)
+    marks, cur = [], None
+    for bar in sorted(per):
+        lv = _st.median(per[bar])
+        i = _dyn_index(lv)
+        if cur is None:
+            cur = i
+            marks.append([bar, i])
+        elif i != cur:
+            lo = _DYN_EDGES[cur - 1][0] if cur > 0 else 0
+            hi = _DYN_EDGES[cur][0]
+            if lv < lo - 4 or lv >= hi + 4:
+                cur = i
+                marks.append([bar, i])
+    out = {}
+    k = 0
+    while k < len(marks):
+        j, d = k, 0
+        while j + 1 < len(marks) and marks[j + 1][0] - marks[j][0] <= 2:
+            sd = 1 if marks[j + 1][1] > marks[j][1] else -1
+            if d and sd != d:
+                break
+            d = sd
+            j += 1
+        if j - k >= 2:
+            out[marks[k][0]] = (_DYN_EDGES[marks[k][1]][1], "<" if d > 0 else ">")
+            out[marks[j][0]] = (_DYN_EDGES[marks[j][1]][1], None)
+            k = j + 1
+        else:
+            out[marks[k][0]] = (_DYN_EDGES[marks[k][1]][1], None)
+            k += 1
+    return out
+
+
+def _soft_notes(song, cutoff=20, ratio=3.0, hood=3):
+    """v22ze-248: [(track, note, neighbour median)] -- single notes (not chord notes) of velocity `cutoff` or
+    less whose neighbouring strikes (3 before, 3 after, same track) have a median at least `ratio` times
+    louder.  A quiet passage is never flagged as a group.  Looks at the notes only; changes nothing."""
+    import statistics as _st
+    out = []
+    for tr in song.tracks:
+        if getattr(tr, "channel", 0) == 9:
+            continue
+        ns = sorted((n for n in tr.notes if getattr(n, "articulation", "") != "tie_continuation"),
+                    key=lambda n: n.tick)
+        groups = []
+        for n in ns:
+            if groups and n.tick - groups[-1][-1].tick <= 60:
+                groups[-1].append(n)
+            else:
+                groups.append([n])
+        gmax = [max(x.velocity for x in g) for g in groups]
+        for i, g in enumerate(groups):
+            if len(g) != 1:
+                continue
+            n = g[0]
+            if n.velocity <= 0 or n.velocity > cutoff:
+                continue
+            nb = [gmax[j] for j in range(max(0, i - hood), min(len(groups), i + hood + 1)) if j != i]
+            if len(nb) < 2:
+                continue
+            med = _st.median(nb)
+            if med >= ratio * max(1, n.velocity):
+                out.append((tr, n, med))
+    return out
+
+
 def _strike_slots(song, grid, tpb):
     """v22ze-247: {id(note): slot tick} -- one slot for every strike, shared by both hands.
 
@@ -7104,6 +7196,10 @@ class Song:
             min_vel, max_vel, mean_vel, vel_by_meas = analyze_velocity(notes)
             use_dynamics = (max_vel - min_vel) > 20
             prev_dyn = None
+            _auto_marks = {}   # v22ze-248: {bar: LilyPond text of its dynamic mark / hairpin}
+            if use_dynamics:
+                for _b, (_nm, _hp) in _auto_dynamic_marks(notes, mmap).items():
+                    _auto_marks[_b] = ("\\" + _nm if _nm else "") + ("\\<" if _hp == "<" else "\\>" if _hp == ">" else "")
             _ott_levels = _ly_ottava_levels(notes, mmap, clef_name, clef_enter_at, clef_revert_at)
             _ott_now = 0
             prev_num, prev_den = None, None  # force \time on first measure
@@ -7144,42 +7240,17 @@ class Song:
                                           and me <= n.tick < me + max(1, tpb // NOTATION_DIVISION)}
                 mstr = build_measure_str(mn, ms, tpm)
 
-                if use_dynamics and mn and m_idx in vel_by_meas:
-                    cur_vel = vel_by_meas[m_idx]
-                    dyn = velocity_to_dynamic(cur_vel, min_vel, max_vel)
-                    # Detect crescendo / diminuendo trends across measures
-                    next_vel = vel_by_meas.get(m_idx + 1)
-                    prev_vel = vel_by_meas.get(m_idx - 1)
-                    trend_sfx = ""
-                    if next_vel is not None and prev_vel is not None:
-                        if next_vel - cur_vel > 8 and cur_vel - prev_vel > 8:
-                            trend_sfx = r"\<"  # clear crescendo
-                        elif cur_vel - next_vel > 8 and prev_vel - cur_vel > 8:
-                            trend_sfx = r"\>"  # clear diminuendo
-                    if dyn != prev_dyn or trend_sfx:
-                        tokens = mstr.split()
-                        first_note_idx = next(
-                            (
-                                i
-                                for i, t in enumerate(tokens)
-                                if t and not t.startswith("r") and not t.startswith("s") and not t.startswith("<")
-                            ),
-                            None,
-                        )
-                        if first_note_idx is None:
-                            first_note_idx = next(
-                                (i for i, t in enumerate(tokens) if t and t.startswith("<")),
-                                None,
-                            )
-                        if first_note_idx is not None:
-                            mark = ""
-                            if dyn != prev_dyn:
-                                mark += dyn
-                                prev_dyn = dyn
-                            if trend_sfx:
-                                mark += trend_sfx
-                            tokens[first_note_idx] = tokens[first_note_idx] + mark
-                            mstr = " ".join(tokens)
+                _dm = _auto_marks.get(m_idx) if use_dynamics else None   # v22ze-248
+                if _dm and mn:
+                    tokens = mstr.split()
+                    first_note_idx = next(
+                        (i for i, t in enumerate(tokens)
+                         if t and not t.startswith("r") and not t.startswith("s") and not t.startswith("<")), None)
+                    if first_note_idx is None:
+                        first_note_idx = next((i for i, t in enumerate(tokens) if t and t.startswith("<")), None)
+                    if first_note_idx is not None:
+                        tokens[first_note_idx] = tokens[first_note_idx] + _dm
+                        mstr = " ".join(tokens)
 
                 W(f, "  " + mstr + " |")
             if _ott_now:
@@ -10889,6 +10960,14 @@ class ScoreView(tk.Frame):
             "Off (usual): a short recorded note followed by silence does not\n"
             "get a string of 1/8, 1/16 and 1/32 rests.  The music is unchanged;\n"
             "this only changes what the Score draws.")
+        self._soft_ids = set()   # v22ze-248
+        self._flag_soft_var = tk.BooleanVar(value=False)
+        _sfb = tk.Checkbutton(tb, text="Soft notes", variable=self._flag_soft_var, bg="#e8e8e0",
+                              command=self._draw)
+        _sfb.pack(side=tk.LEFT, padx=(6, 2))
+        _tt(_sfb, "Show in red the single notes played so softly they are hardly heard.\n"
+                  "Off (usual).  This only changes what the Score draws; Corrections > Soft Notes\n"
+                  "can delete or raise them.")
         self._show_pedal_var = tk.BooleanVar(value=True)   # v22ze-215
         _spb = tk.Checkbutton(tb, text="Pedal marks", variable=self._show_pedal_var, bg="#e8e8e0",
                               command=self._draw)
@@ -12131,6 +12210,9 @@ class ScoreView(tk.Frame):
 
     def _draw_chords(self, c, tr, tt, bt, nr, song, nm, mmap, ti=0):
         tpb = song.ticks_per_beat
+        self._soft_ids = ({id(_sn) for _st, _sn, _sm in _soft_notes(song, int(getattr(self.app, "_soft_cut", 20)),
+                                                                  float(getattr(self.app, "_soft_ratio", 3.0)))}
+                          if self._flag_soft_var.get() else set())   # v22ze-248
 
         # Score-only quantization copy (does not modify song data)
         class _TmpTrack:
@@ -12748,6 +12830,7 @@ class ScoreView(tk.Frame):
             self._draw_pedal(c, tr, tt, bt, tpb, mmap)
         # Draw dynamics markings (v22ze-50 fix -- see qtr.markings above)
         self._draw_dynamics(c, tr, tt, bt, tpb, mmap)
+        self._draw_auto_dynamics(c, tr, tt, bt, mmap)   # v22ze-248
 
     def _apply_ottava(self, entries, mmap, bass_treble_measures, treble_bass_measures, use_flats, tt, bt):
         """v22ze-147: find runs of chords sitting far above the staff and lower
@@ -13255,6 +13338,8 @@ class ScoreView(tk.Frame):
             outline_col = "black"
             if is_grace:
                 fill_col = outline_col = "#444444"
+            if self._soft_ids and id(getattr(n, "_orig", n)) in self._soft_ids:   # v22ze-248: very soft single note
+                fill_col = outline_col = "#d00000"
             # Selection highlight (Select tool): identity-based membership,
             # since MidiNote has no custom __eq__ -- see _selection's
             # declaration in __init__ for why that's safe to rely on.
@@ -14170,6 +14255,43 @@ class ScoreView(tk.Frame):
                 anchor="w",
                 tags="dynamic_mark",
             )
+
+    def _draw_auto_dynamics(self, c, tr, tt, bt, mmap):   # v22ze-248
+        """Grey dynamic marks and hairpins from the recorded velocity (see _auto_dynamic_marks)."""
+        import bisect as _bs
+        notes = [n for n in tr.notes if n.velocity > 0]
+        if not notes or max(n.velocity for n in notes) - min(n.velocity for n in notes) <= 20:
+            return
+        marks = _auto_dynamic_marks(notes, mmap)
+        if not marks:
+            return
+        starts = [m[1] for m in mmap]
+        manual = set()
+        for ev in (getattr(tr, "markings", None) or []):
+            msg = getattr(ev, "msg", None)
+            if isinstance(msg, tuple) and len(msg) == 2 and msg[0] == "dynamic":
+                manual.add(mmap[max(0, _bs.bisect_right(starts, ev.tick) - 1)][0])
+        y = ((tt + self.SH + bt) / 2.0) if bt is not None else (tt + self.SH + self.SLG * 1.6)
+        bars = sorted(marks)
+        pos = {m[0]: m[1] for m in mmap}
+        for k, bar in enumerate(bars):
+            nm_, hp = marks[bar]
+            if bar in manual:
+                continue
+            x0 = self._tick_to_x(pos[bar])
+            c.create_text(x0, y, text=nm_, font=("serif", max(9, int(self.SLG * 1.6)), "bold italic"),
+                          fill="#555", anchor="w", tags="auto_dyn")
+            if hp and k + 1 < len(bars):
+                x1 = self._tick_to_x(pos[bars[k + 1]]) - 4
+                xa = x0 + int(self.SLG * 2.6)
+                h = self.SLG * 0.6
+                if x1 > xa + 6:
+                    if hp == "<":
+                        c.create_line(xa, y, x1, y - h, fill="#555", tags="auto_dyn")
+                        c.create_line(xa, y, x1, y + h, fill="#555", tags="auto_dyn")
+                    else:
+                        c.create_line(xa, y - h, x1, y, fill="#555", tags="auto_dyn")
+                        c.create_line(xa, y + h, x1, y, fill="#555", tags="auto_dyn")
 
     def _draw_pedal(self, c, tr, tt, bt, tpb, mmap):
         """Draw sustain-pedal marks below the bass staff.
@@ -17287,7 +17409,8 @@ class MidisoftStudio:
         xm=TkPopupMenu(fm,tearoff=0); fm.add_cascade(label="Export",menu=xm)   # v22ze-209
         xm.add_command(label="MusicXML (.musicxml)…",
                        command=self._export_musicxml,
-                       tooltip="MuseScore/Sibelius/Finale can read this")
+                       tooltip="MuseScore/Sibelius/Finale can read this.  Braille music software that reads MusicXML"
+                               " should work too (probable, not tested).")
         xm.add_command(label="Open in MuseScore (via MIDI)…",command=self._open_in_musescore)
         xm.add_command(label="LilyPond (.ly)…",command=self._export_ly)
         fm.add_command(label="Print Score (via LilyPond)…",command=self._print_score)
@@ -17314,6 +17437,7 @@ class MidisoftStudio:
         nm.add_command(label="Clean Up Measures…", command=self._open_score_setup)
         nm.add_command(label="Fix Chords…",command=self._thin_chords)
         nm.add_command(label="Fix Measures…",command=self._fix_measures)   # v22ze-215
+        nm.add_command(label="Soft Notes…",command=self._soft_notes_dialog)   # v22ze-248
         nm.add_separator()
         scm=TkPopupMenu(mb,tearoff=0); mb.add_cascade(label="Score Settings",menu=scm)
         scm.add_command(label="Score Settings…\tCtrl+G", command=self._open_score_setup,
@@ -21920,6 +22044,114 @@ class MidisoftStudio:
                   padx=12, pady=4).pack(side="left", padx=4)
         tk.Button(brow, text="Close", command=dlg.destroy, bg="#21262d", fg=FG, relief=tk.FLAT,
                   padx=12, pady=4).pack(side="left", padx=4)
+
+    def _soft_notes_apply(self, mode, cutoff, ratio):   # v22ze-248
+        import copy as _copy
+        song = self.song
+        fl = _soft_notes(song, cutoff, ratio)
+        if not fl:
+            return 0
+        before_tracks = _copy.deepcopy(song.tracks)
+        before_map = _copy.deepcopy(song.rationalized_measure_map)
+        for tr, n, med in fl:
+            pieces = [n] + [x for x in tr.notes if x is not n
+                            and getattr(x, "articulation", "") == "tie_continuation"
+                            and x.pitch == n.pitch and x.tick == n.tick + n.duration]
+            if mode == "delete":
+                ids = {id(p) for p in pieces}
+                tr.notes = [x for x in tr.notes if id(x) not in ids]
+            else:
+                for p in pieces:
+                    p.velocity = max(p.velocity, int(round(med * 0.6)))
+        song.modified = True
+        self._update_title()
+        self._push_undo(RationalizationAction(
+            description="Delete soft notes" if mode == "delete" else "Raise soft notes",
+            before_tracks=before_tracks, after_tracks=_copy.deepcopy(song.tracks),
+            before_map=before_map, after_map=_copy.deepcopy(song.rationalized_measure_map)))
+        self._refresh_track_list()
+        self._soft_redraw()
+        return len(fl)
+
+    def _soft_redraw(self):
+        try:
+            sv = self._score_view
+            if sv is not None and sv.winfo_exists():
+                sv._score_dirty = True
+                sv._draw()
+        except Exception:
+            pass
+
+    def _soft_notes_dialog(self):   # v22ze-248
+        old = getattr(self, "_soft_dlg", None)
+        if old is not None and old.winfo_exists():
+            old.lift(); return
+        BG, FG, MUTED = "#0d1117", "#f0f6fc", "#8b949e"
+        dlg = tk.Toplevel(self.root)
+        dlg.title("Soft Notes")
+        dlg.configure(bg=BG)
+        self._soft_dlg = dlg
+        try:
+            self._work_dialogs = [w for w in getattr(self, "_work_dialogs", []) if w.winfo_exists()] + [dlg]
+        except Exception:
+            pass
+        tk.Label(dlg, text="Finds single notes (not part of a chord) played so softly they are hardly heard, "
+                           "while the notes around them are several times louder: usually a key touched by "
+                           "accident. Nothing changes unless you press Delete or Raise; Undo restores them. "
+                           "Raise changes the sound; Delete removes the note from the sound and the score.",
+                 bg=BG, fg=MUTED, justify="left", anchor="w", wraplength=460).pack(fill="x", padx=12, pady=(10, 6))
+        cut = tk.IntVar(value=int(getattr(self, "_soft_cut", 20)))
+        rat = tk.DoubleVar(value=float(getattr(self, "_soft_ratio", 3.0)))
+        row = tk.Frame(dlg, bg=BG); row.pack(fill="x", padx=12, pady=2)
+        sbk = dict(bg="#161b22", fg=FG, buttonbackground="#30363d", relief=tk.FLAT, width=5)
+        tk.Label(row, text="Velocity at or below:", bg=BG, fg=FG).pack(side="left")
+        tk.Spinbox(row, from_=1, to=60, textvariable=cut, **sbk).pack(side="left", padx=4)
+        tk.Label(row, text="Neighbours louder by at least:", bg=BG, fg=FG).pack(side="left", padx=(10, 0))
+        tk.Spinbox(row, from_=1.5, to=10, increment=0.5, textvariable=rat, **sbk).pack(side="left", padx=4)
+        msg = tk.StringVar(value="")
+        tk.Label(dlg, textvariable=msg, bg=BG, fg="#3fb950", justify="left", anchor="w",
+                 wraplength=460).pack(fill="x", padx=12, pady=(6, 0))
+
+        def _vals():
+            try:
+                c_, r_ = int(cut.get()), float(rat.get())
+            except Exception:
+                return None
+            self._soft_cut, self._soft_ratio = c_, r_
+            return c_, r_
+
+        def _preview(*_x):
+            v = _vals()
+            if v is None:
+                msg.set(""); return
+            n = len(_soft_notes(self.song, v[0], v[1]))
+            msg.set(str(n) + " soft note" + ("" if n == 1 else "s") + " found.")
+            self._soft_redraw()
+        for v_ in (cut, rat):
+            v_.trace_add("write", _preview)
+
+        def _show():
+            try:
+                self._score_view._flag_soft_var.set(True)
+            except Exception:
+                pass
+            _preview()
+
+        def _act(mode):
+            v = _vals()
+            if v is None:
+                return
+            n = self._soft_notes_apply(mode, v[0], v[1])
+            msg.set(("Deleted " if mode == "delete" else "Raised ") + str(n) + " soft note" + ("" if n == 1 else "s")
+                    + ". Edit > Undo restores them.")
+        brow = tk.Frame(dlg, bg=BG); brow.pack(pady=(6, 10))
+        for txt, cmd, col in (("Show in red", _show, "#1f6feb"),
+                              ("Delete them", lambda: _act("delete"), "#da3633"),
+                              ("Raise them", lambda: _act("raise"), "#238636"),
+                              ("Close", dlg.destroy, "#21262d")):
+            tk.Button(brow, text=txt, command=cmd, bg=col, fg="white", relief=tk.FLAT,
+                      padx=12, pady=4).pack(side="left", padx=4)
+        _show()
 
     def _show_log_folder(self):   # v22ze-210
         import subprocess
