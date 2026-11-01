@@ -16159,6 +16159,28 @@ import copy as _copy
 
 
 # v22ze-171: chord thinning (used by Edit > Fix Chords...)
+_FC_OPTS = {"thumb": True}   # v22ze-249: Fix Chords option "thumb on two neighbouring keys"
+_WHITE_PC = {0, 2, 4, 5, 7, 9, 11}
+
+
+def _thumb_pair_ok(c, hand):
+    """v22ze-249: True when the thumb end of chord c (sorted pitches) is two neighbouring keys of the SAME colour
+    (1 or 2 semitones apart): right hand = the two lowest notes, left hand = the two highest."""
+    if len(c) < 2:
+        return False
+    a, b = (c[0], c[1]) if hand == "R" else (c[-2], c[-1])
+    return (b - a) in (1, 2) and ((a % 12 in _WHITE_PC) == (b % 12 in _WHITE_PC))
+
+
+def _fits_n(c, hand, max_notes):
+    """v22ze-249: can one hand play these notes at once (the count only; the stretch is checked elsewhere)?
+    More than max_notes is allowed by exactly one note when the thumb covers two neighbouring keys."""
+    c = sorted(set(c))
+    if len(c) <= max_notes:
+        return True
+    return bool(_FC_OPTS.get("thumb") and max_notes >= 5 and len(c) == max_notes + 1 and _thumb_pair_ok(c, hand))
+
+
 def _thin_hand_chord(pitches, hand, max_notes, max_span):
     """Return the set of pitches to leave out so one hand can play the chord.
     hand 'R': the top note is kept (melody); hand 'L': the bottom note is kept (bass)."""
@@ -16174,7 +16196,7 @@ def _thin_hand_chord(pitches, hand, max_notes, max_span):
     removed |= set(c) - set(keep)
     c = keep
     # 2. fingers: leave out octave doublings first, then middle notes
-    while len(c) > max_notes:
+    while not _fits_n(c, hand, max_notes):   # v22ze-249
         inner = c[1:-1]
         if not inner:   # v22ze-198: only two notes left (a hand limited to one finger)
             r = c[0] if hand == "R" else c[-1]
@@ -16235,8 +16257,8 @@ def _min_transfer(ps, other, hand, max_notes, max_span, prefer=()):   # v22ze-20
         for S in _it.combinations(order, k):
             keep = [p for p in ps if p not in S]
             tgt = sorted(set(other) | set(S))
-            if (keep and len(keep) <= max_notes and max(keep) - min(keep) <= max_span
-                    and len(tgt) <= max_notes and max(tgt) - min(tgt) <= max_span):
+            if (keep and _fits_n(keep, hand, max_notes) and max(keep) - min(keep) <= max_span
+                    and _fits_n(tgt, "L" if hand == "R" else "R", max_notes) and max(tgt) - min(tgt) <= max_span):   # v22ze-249
                 return sorted(S)
     return None
 
@@ -16490,7 +16512,7 @@ def _thin_plan(song, rh_i, lh_i, max_notes, max_span, win=20, avoid_rolls=False)
                 continue
             flagged[ti].append(g[0].tick)
             _span = ps[-1] - ps[0]
-            _rollable = len(ps) <= max_notes and max_span < _span <= _ROLL_MAX_SPAN  # v22ze-183
+            _rollable = _fits_n(ps, hand, max_notes) and max_span < _span <= _ROLL_MAX_SPAN  # v22ze-183, 249
             if _rollable and all(getattr(n, "roll_id", None) for n in g):
                 continue    # already marked with a roll sign
             keys = {}
@@ -16509,7 +16531,7 @@ def _thin_plan(song, rh_i, lh_i, max_notes, max_span, win=20, avoid_rolls=False)
                     actions[p] = "delete"   # the other hand already plays this pitch
                     continue
                 cand = cur | {p}
-                if len(cand) <= max_notes and max(cand) - min(cand) <= max_span:
+                if _fits_n(sorted(cand), "L" if hand == "R" else "R", max_notes) and max(cand) - min(cand) <= max_span:   # v22ze-249
                     actions[p] = "move"
                     cur = cand
                 else:
@@ -16545,7 +16567,7 @@ def _thin_plan(song, rh_i, lh_i, max_notes, max_span, win=20, avoid_rolls=False)
             i = j + 1
             ps = sorted({n.pitch for n in ch})
             if (len(ps) < 4 or ch[-1].tick - ch[0].tick <= win
-                    or not (len(ps) > max_notes or ps[-1] - ps[0] > max_span)):
+                    or not (not _fits_n(ps, hand, max_notes) or ps[-1] - ps[0] > max_span)):   # v22ze-249
                 continue
             if any(ch[0].tick <= ft <= ch[-1].tick for ft in flagged[ti]):
                 continue    # a chord inside it is already listed
@@ -20609,6 +20631,7 @@ class MidisoftStudio:
             try:
                 result[0] = (int(span_var.get()), int(notes_var.get()))
                 if thin:
+                    _FC_OPTS["thumb"] = bool(thumb_var.get())   # v22ze-249
                     self._fc_avoid_rolls = bool(avoid_var.get())   # v22ze-201
             except Exception:
                 result[0] = (12, 5)
@@ -20620,7 +20643,17 @@ class MidisoftStudio:
                            activebackground=BG, activeforeground=FG).grid(
                 row=5, column=0, columnspan=2, padx=16, pady=(10, 0), sticky="w")
         bfrm = tk.Frame(dlg, bg=BG)
-        bfrm.grid(row=6, column=0, columnspan=2, pady=(14, 14))
+        bfrm.grid(row=8, column=0, columnspan=2, pady=(14, 14))
+        if thin:   # v22ze-249
+            thumb_var = tk.BooleanVar(value=_FC_OPTS.get("thumb", True))
+            tk.Checkbutton(dlg, text="Thumb on two neighbouring keys counts as one finger",
+                           variable=thumb_var, bg=BG, fg=FG, selectcolor="#21262d",
+                           activebackground=BG, activeforeground=FG).grid(
+                row=6, column=0, columnspan=2, padx=16, pady=(6, 0), sticky="w")
+            tk.Label(dlg, text="Still fits 5 fingers: B-C, E-F, C-D, D-E, F-G, G-A, A-B and C#-D#, F#-G#, G#-A# (not C-C# or C#-D),\nat the thumb end of the hand.  A 6th note is then allowed.", bg=BG, fg=MUTED,
+                     font=("TkDefaultFont", 8), justify=tk.LEFT).grid(row=7, column=0, columnspan=2, padx=16, sticky="w")
+        else:
+            thumb_var = None
         bs = dict(relief=tk.FLAT, padx=14, pady=5, bg="#21262d", fg=FG,
                   activebackground="#30363d", activeforeground=FG)
         tk.Button(bfrm, text="Continue" if thin else "Separate", command=_ok, **bs).pack(side=tk.LEFT, padx=6)
@@ -21033,8 +21066,9 @@ class MidisoftStudio:
         sel = [0]
         rows = []   # per plan entry: dict(frame, label, result, fixv, finv, fixcb, fincb, mb)
 
-        def _fits(L):
-            return (not L) or (len(L) <= max_notes and L[-1] - L[0] <= max_span)
+        def _fits(L, hnd=None):
+            return (not L) or ((_fits_n(L, hnd, max_notes) if hnd else len(L) <= max_notes)
+                               and L[-1] - L[0] <= max_span)   # v22ze-249
 
         def _timing(e):
             offs = sorted(((min(e["keys"].get(p) or [e["tick"]]) - e["tick"]), p) for p in e["ps"])
@@ -21072,16 +21106,17 @@ class MidisoftStudio:
                 return ("no legal move found: no note can go to the other hand", False)
             head = ", ".join(acts)
             _changing = any(e["actions"].get(p) in ("move", "delete") for p in e["rem"])
-            if _fits(mine) and _fits(oth) and not _changing:
+            _oh = "L" if e["hand"] == "R" else "R"   # v22ze-249
+            if _fits(mine, e["hand"]) and _fits(oth, _oh) and not _changing:
                 return ("no change needed: both hands can already play this", True)
-            if _fits(mine) and _fits(oth):
+            if _fits(mine, e["hand"]) and _fits(oth, _oh):
                 return (f"{head}   \u2192 {hn} {len(mine)} note{'s' if len(mine) != 1 else ''}, "
                         f"{other} {len(oth)}: both hands can play it", True)
-            if not _fits(mine):
+            if not _fits(mine, e["hand"]):
                 who, L = hn, mine
             else:
                 who, L = other, oth
-            if len(L) > max_notes:
+            if not _fits_n(L, (e["hand"] if who == hn else _oh), max_notes):
                 why = f"still too many notes: {who} has {len(L)} (limit {max_notes})"
             else:
                 why = f"still too wide: {who} spans {L[-1] - L[0]} semitones (limit {max_span})"
@@ -21479,7 +21514,7 @@ class MidisoftStudio:
                             ex["rem"] = sorted(ex["rem"] + [p])
                         if p not in ex["actions"]:
                             cand = cur | {p}
-                            if _fits(sorted(cand)):
+                            if _fits(sorted(cand), "L" if hand == "R" else "R"):
                                 ex["actions"][p] = "move"
                                 cur = cand
                             else:
@@ -21500,7 +21535,7 @@ class MidisoftStudio:
                     actions, cur = {}, set(other)
                     for p in rem:
                         cand = cur | {p}
-                        if _fits(sorted(cand)):
+                        if _fits(sorted(cand), "L" if hand == "R" else "R"):
                             actions[p] = "move"
                             cur = cand
                         else:
