@@ -16181,6 +16181,193 @@ def _fits_n(c, hand, max_notes):
     return bool(_FC_OPTS.get("thumb") and max_notes >= 5 and len(c) == max_notes + 1 and _thumb_pair_ok(c, hand))
 
 
+def _easy_strikes(song, win=40):
+    """v22ze-250: every note of both hands as strikes: [(tick, [(track index, note), ...])], notes within `win` ticks together."""
+    items = []
+    for ti, tr in enumerate(song.tracks):
+        if getattr(tr, "channel", 0) == 9:
+            continue
+        for n in tr.notes:
+            if getattr(n, "articulation", "") == "tie_continuation":
+                continue
+            items.append((n.tick, ti, n))
+    items.sort(key=lambda x: (x[0], x[2].pitch))
+    out = []
+    for t, ti, n in items:
+        if out and t - out[-1][0] <= win:
+            out[-1][1].append((ti, n))
+        else:
+            out.append((t, [(ti, n)]))
+    return out
+
+
+def _easy_best_band(strikes, width=9):
+    """The pitch band (lowest pitch b, covering b..b+width) that most strikes touch.  Returns (b, coverage, band notes)."""
+    ps = [n.pitch for _t, g in strikes for _ti, n in g]
+    if not ps:
+        return None
+    best = None
+    for b in range(max(0, min(ps) - width), max(ps) + 1):
+        cov = sum(1 for _t, g in strikes if any(b <= n.pitch <= b + width for _ti, n in g))
+        cnt = sum(1 for _t, g in strikes for _ti, n in g if b <= n.pitch <= b + width)
+        key = (cov, -abs(cnt - cov))
+        if best is None or key > best[0]:
+            best = (key, b, cov, cnt)
+    return best[1], best[2] / float(len(strikes)), best[3]
+
+
+def _easy_passages(song, rh_i, lh_i, max_notes, max_span, min_notes=8):
+    """v22ze-250: find hand-over-hand passages: a narrow band of notes repeated or trilled across a bar or more
+    (the figure) with other notes (the melody) going above AND below it.  Returns plan entries (nothing is changed)."""
+    import bisect as _bs
+    import statistics as _st
+    tpb = song.ticks_per_beat
+    mmap = song.get_measure_map()
+    starts = [m[1] for m in mmap]
+    tpm = mmap[0][5] if mmap else tpb * 4
+    S = _easy_strikes(song)
+    if len(S) < min_notes:
+        return []
+    ticks = [s[0] for s in S]
+    width = 9
+    ok = []   # windows that look like the pattern: (i0, i1, band)
+    step = max(1, tpm // 2)
+    t = ticks[0]
+    while t <= ticks[-1]:
+        i0 = _bs.bisect_left(ticks, t)
+        i1 = _bs.bisect_left(ticks, t + tpm)
+        win = S[i0:i1]
+        t += step
+        if len(win) < min_notes:
+            continue
+        bb = _easy_best_band(win, width)
+        if bb is None:
+            continue
+        b, cov, cnt = bb
+        top = b + width
+        per = [sum(1 for _ti, n in g if b <= n.pitch <= top) for _t, g in win]
+        per = [x for x in per if x]
+        above = sum(1 for _t, g in win for _ti, n in g if n.pitch > top)
+        below = sum(1 for _t, g in win for _ti, n in g if n.pitch < b)
+        dist = len({n.pitch for _t, g in win for _ti, n in g if b <= n.pitch <= top})
+        tot = sum(len(g) for _t, g in win)
+        # a figure is a THIN line (one or two notes per strike) of a few pitches repeated over and over,
+        # with a melody that goes both above and below it -- not ordinary chordal writing
+        if (cov >= 0.75 and cnt >= max(min_notes, 12) and per and _st.median(per) <= 2 and dist <= 4
+                and cnt >= 3 * dist and tot <= 2.5 * len(win)
+                and above >= 2 and below >= 2):
+            ok.append((i0, i1, b))
+    runs = []
+    for i0, i1, b in ok:
+        if runs and i0 <= runs[-1][1] and abs(b - runs[-1][2]) <= 3:
+            runs[-1][1] = max(runs[-1][1], i1)
+        else:
+            runs.append([i0, i1, b])
+    plan = []
+    for i0, i1, b0 in runs:
+        win = S[i0:i1]
+        b, cov, cnt = _easy_best_band(win, width)
+        top = b + width
+        _has = [k for k, (_t, g) in enumerate(win) if any(b <= n.pitch <= top for _ti, n in g)]
+        win = win[_has[0]:_has[-1] + 1]   # only from the first to the last strike that has the figure
+        figure, melody = [], []
+        for _t, g in win:
+            for ti, n in g:
+                (figure if b <= n.pitch <= top else melody).append((ti, n))
+        bad = None
+        for _t, g in win:   # can each hand play what it would get at every strike?
+            fg = sorted({n.pitch for _ti, n in g if b <= n.pitch <= top})
+            mg = sorted({n.pitch for _ti, n in g if not (b <= n.pitch <= top)})
+            for who, c in (("figure", fg), ("melody", mg)):
+                if c and (not _fits_n(c, "R", max_notes) and not _fits_n(c, "L", max_notes) or c[-1] - c[0] > max_span):
+                    bad = "a %s chord is too big for one hand" % who
+                    break
+            if bad:
+                break
+        t0, t1 = win[0][0], win[-1][0]
+        if t1 - t0 < tpm * 1.5 or bad:   # a figure goes on for a bar and a half or more; a chord too big is not offered
+            continue
+        # crossings: melody notes of one hand-side of the band at times when the band is also sounding
+        # who plays what now
+        def _share(ns, ti_):
+            return sum(1 for ti, _n in ns if ti == ti_) / float(len(ns)) if ns else 0.0
+        cur_fig = rh_i if _share(figure, rh_i) >= 0.5 else lh_i
+        cost = {}
+        pre = [g for g in S[max(0, i0 - 6):i0]]
+        post = [g for g in S[i1:i1 + 6]]
+        sec = (song.tempo if song.tempo > 0 else 500000) / 1e6 / tpb
+        for fig_hand in (rh_i, lh_i):
+            mel_hand = lh_i if fig_hand == rh_i else rh_i
+            fl = [n.pitch for _ti, n in figure[-3:]]
+            ml = [n.pitch for _ti, n in melody[-3:]]
+            f0 = [n.pitch for _ti, n in figure[:3]]
+            m0 = [n.pitch for _ti, n in melody[:3]]
+            pos_end = {fig_hand: sum(fl) / len(fl), mel_hand: sum(ml) / len(ml)} if fl and ml else {}
+            pos_start = {fig_hand: sum(f0) / len(f0), mel_hand: sum(m0) / len(m0)} if f0 and m0 else {}
+            c = 0.0
+            for hand_ti in (rh_i, lh_i):
+                for after, seq, pos in ((True, post, pos_end), (False, pre, pos_start)):
+                    if hand_ti not in pos:
+                        continue
+                    for _t, g in (seq if after else seq[::-1]):
+                        ns = [n.pitch for ti, n in g if ti == hand_ti]
+                        if not ns:
+                            continue
+                        gap = (_t - t1 if after else t0 - _t) * sec
+                        c += max(0.0, abs(pos[hand_ti] - sum(ns) / len(ns)) - 6) / (1.0 + 4.0 * gap)
+                        break
+            cost[fig_hand] = c + (0.0 if fig_hand == cur_fig else 3.0)   # keep the hand that has it, when close
+        fig_hand = min(cost, key=lambda k: (cost[k], k != cur_fig))
+        mel_hand = lh_i if fig_hand == rh_i else rh_i
+        bar0 = max(0, _bs.bisect_right(starts, t0) - 1) + 1
+        bar1 = max(0, _bs.bisect_right(starts, t1) - 1) + 1
+        crossings = 0
+        for _t, g in win:
+            fp = [n.pitch for _ti, n in g if b <= n.pitch <= top]
+            mp = [n.pitch for _ti, n in g if not (b <= n.pitch <= top)]
+            if fp and mp and ((mel_hand == lh_i and max(mp) > min(fp)) or (mel_hand == rh_i and min(mp) < max(fp))):
+                crossings += 1
+        plan.append(dict(kind="over", bar=bar0, bar_to=bar1, tick=t0, tick_to=t1, band=(b, top),
+                         figure=[(ti, n) for ti, n in figure], melody=[(ti, n) for ti, n in melody],
+                         cur_fig=cur_fig, fig_hand=fig_hand, mel_hand=mel_hand, cost=dict(cost),
+                         crossings=crossings, bad=bad, rh_i=rh_i, lh_i=lh_i, state="pending"))
+    return plan
+
+
+def _easy_apply(song, plan, include):
+    """v22ze-250: move each included passage's notes to the hand chosen for them (staff only; time, length and
+    loudness are kept; tied pieces go with their note).  Returns the number of notes moved."""
+    import copy as _cp
+    dropids, add, tm = set(), [], {}
+    for e in plan:
+        if not include(e):
+            continue
+        want = [(ti, n, e["fig_hand"]) for ti, n in e["figure"]] + [(ti, n, e["mel_hand"]) for ti, n in e["melody"]]
+        for ti, n, to in want:
+            if ti == to:
+                continue
+            if ti not in tm:
+                tm[ti] = _tie_maps(song.tracks[ti].notes)
+            _dn = song.tracks[to].notes
+            oc = _dn[0].channel if _dn else None
+            for pc in _tie_chain(tm[ti], n):
+                if id(pc) in dropids:
+                    continue
+                dropids.add(id(pc))
+                nc = _cp.copy(pc)
+                if oc is not None:
+                    nc.channel = oc
+                add.append((to, nc))
+    for ti, tr in enumerate(song.tracks):
+        if any(id(n) in dropids for n in tr.notes):
+            tr.notes = [n for n in tr.notes if id(n) not in dropids]
+    for to, nc in add:
+        song.tracks[to].notes.append(nc)
+    for ti in {a[0] for a in add}:
+        song.tracks[ti].notes.sort(key=lambda n: n.tick)
+    return len(add)
+
+
 def _thin_hand_chord(pitches, hand, max_notes, max_span):
     """Return the set of pitches to leave out so one hand can play the chord.
     hand 'R': the top note is kept (melody); hand 'L': the bottom note is kept (bass)."""
@@ -17460,6 +17647,7 @@ class MidisoftStudio:
         nm.add_command(label="Fix Chords…",command=self._thin_chords)
         nm.add_command(label="Fix Measures…",command=self._fix_measures)   # v22ze-215
         nm.add_command(label="Soft Notes…",command=self._soft_notes_dialog)   # v22ze-248
+        nm.add_command(label="Easy to Play (hand over hand)…",command=self._easy_play)   # v22ze-250
         nm.add_separator()
         scm=TkPopupMenu(mb,tearoff=0); mb.add_cascade(label="Score Settings",menu=scm)
         scm.add_command(label="Score Settings…\tCtrl+G", command=self._open_score_setup,
@@ -22187,6 +22375,113 @@ class MidisoftStudio:
             tk.Button(brow, text=txt, command=cmd, bg=col, fg="white", relief=tk.FLAT,
                       padx=12, pady=4).pack(side="left", padx=4)
         _show()
+
+    def _easy_play(self):   # v22ze-250
+        old = getattr(self, "_easy_dlg", None)
+        try:
+            if old is not None and old.winfo_exists():
+                old.lift(); return
+        except Exception:
+            pass
+        if not self._grand_staff_guard("Easy to Play"):
+            return
+        song = self.song
+        rh_i, lh_i = _hand_tracks(song)
+        if rh_i is None or lh_i is None:
+            messagebox.showinfo("Easy to Play",
+                "Run Corrections \u25b8 Separate Hands first, so the music is split into a "
+                "right-hand part and a left-hand part.", parent=self.root)
+            return
+        opts = self._ask_separate_hands_options(thin=True)
+        if opts is None:
+            return
+        max_span, max_notes = opts
+        BG, FG, MUTED = "#0d1117", "#f0f6fc", "#8b949e"
+        dlg = tk.Toplevel(self.root)
+        dlg.title("Easy to Play (hand over hand)")
+        dlg.configure(bg=BG)
+        self._easy_dlg = dlg
+        try:
+            self._work_dialogs = [w for w in getattr(self, "_work_dialogs", []) if w.winfo_exists()] + [dlg]
+        except Exception:
+            pass
+        tk.Label(dlg, text="Places where one hand keeps a trill or a repeated group of notes while the melody weaves "
+                           "above and below it. A split by pitch gives that melody to the wrong hand. Each line says "
+                           "which hand should hold the figure and which the melody (chosen by where each hand has to "
+                           "be before and after). Only the staff changes: the sound is exactly as recorded. "
+                           "Nothing changes until you press Apply; Edit > Undo takes it back.",
+                 bg=BG, fg=MUTED, justify="left", anchor="w", wraplength=760).pack(fill="x", padx=12, pady=(10, 6))
+        lb = tk.Listbox(dlg, width=100, height=10, bg="#161b22", fg=FG, selectbackground="#1f3b73",
+                        exportselection=False, font=("TkFixedFont", 9))
+        lb.pack(fill="both", expand=True, padx=12, pady=4)
+        msg = tk.StringVar(value="")
+        tk.Label(dlg, textvariable=msg, bg=BG, fg="#3fb950", justify="left", anchor="w",
+                 wraplength=760).pack(fill="x", padx=12, pady=(2, 0))
+        plan = []
+
+        def _nm(p):
+            return NOTE_NAMES[p % 12] + str(p // 12 - 1)
+
+        def _hn(ti):
+            return "right hand" if ti == rh_i else "left hand"
+
+        def _line(e):
+            return ("Measures %d-%d: figure %s-%s (%d notes) -> %s, melody (%d notes) -> %s, crosses %d times%s"
+                    % (e["bar"], e["bar_to"], _nm(e["band"][0]), _nm(e["band"][1]), len(e["figure"]),
+                       _hn(e["fig_hand"]), len(e["melody"]), _hn(e["mel_hand"]), e["crossings"],
+                       "" if e["fig_hand"] == e["cur_fig"] else "   [figure hand changes]"))
+
+        def _fill():
+            lb.delete(0, tk.END)
+            for e in plan:
+                lb.insert(tk.END, _line(e))
+            if not plan:
+                msg.set("No hand-over-hand passages found.")
+
+        def _find():
+            found = _easy_passages(self.song, rh_i, lh_i, max_notes, max_span)
+            plan[:] = [e for e in found if any(ti != e["fig_hand"] for ti, n in e["figure"])
+                       or any(ti != e["mel_hand"] for ti, n in e["melody"])]
+            _fill()
+            if plan:
+                msg.set(str(len(plan)) + " passage" + ("" if len(plan) == 1 else "s") + " found.")
+            elif found:
+                msg.set(str(len(found)) + " hand-over-hand passage" + ("" if len(found) == 1 else "s")
+                        + " found; the hands are already right.")
+
+        def _flip():
+            for i in lb.curselection():
+                e = plan[i]
+                e["fig_hand"], e["mel_hand"] = e["mel_hand"], e["fig_hand"]
+            _fill()
+
+        def _apply(only_selected):
+            import copy as _copy
+            idx = set(lb.curselection()) if only_selected else set(range(len(plan)))
+            if not idx:
+                msg.set("Select a line first."); return
+            sel = {id(plan[i]) for i in idx}
+            before_tracks = _copy.deepcopy(self.song.tracks)
+            before_map = _copy.deepcopy(self.song.rationalized_measure_map)
+            n = _easy_apply(self.song, plan, lambda e: id(e) in sel)
+            self.song.modified = True
+            self._update_title()
+            self._push_undo(RationalizationAction(
+                description="Easy to play (hand over hand)",
+                before_tracks=before_tracks, after_tracks=_copy.deepcopy(self.song.tracks),
+                before_map=before_map, after_map=_copy.deepcopy(self.song.rationalized_measure_map)))
+            self._refresh_track_list()
+            self._soft_redraw()
+            _find()
+            msg.set("Moved " + str(n) + " notes to the other staff. The sound is unchanged. Edit > Undo takes it back.")
+        brow = tk.Frame(dlg, bg=BG); brow.pack(pady=(6, 10))
+        for txt, cmd, col in (("Flip hands", _flip, "#1f6feb"),
+                              ("Apply selected", lambda: _apply(True), "#238636"),
+                              ("Apply all", lambda: _apply(False), "#238636"),
+                              ("Close", dlg.destroy, "#21262d")):
+            tk.Button(brow, text=txt, command=cmd, bg=col, fg="white", relief=tk.FLAT,
+                      padx=12, pady=4).pack(side="left", padx=4)
+        _find()
 
     def _show_log_folder(self):   # v22ze-210
         import subprocess
