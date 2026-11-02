@@ -16159,7 +16159,7 @@ import copy as _copy
 
 
 # v22ze-171: chord thinning (used by Edit > Fix Chords...)
-_FC_OPTS = {"thumb": True}   # v22ze-249: Fix Chords option "thumb on two neighbouring keys"
+_FC_OPTS = {"thumb": True, "tracker": False}   # v22ze-249: Fix Chords option "thumb on two neighbouring keys"
 _WHITE_PC = {0, 2, 4, 5, 7, 9, 11}
 
 
@@ -16366,6 +16366,83 @@ def _easy_apply(song, plan, include):
     for ti in {a[0] for a in add}:
         song.tracks[ti].notes.sort(key=lambda n: n.tick)
     return len(add)
+
+
+def _hand_follow(items, span=14, var_ps=20.0, mvar=20.0):
+    """v22ze-251: decide the hand for every note by following where each hand is.
+    items: [(start, end, pitch)] in seconds.  Returns a list of "L"/"R", one per item.
+    Idea from HANNDS (github.com/cemfi/hannds, MIT, Copyright (c) 2017 cemfi): a Kalman filter on each hand's
+    position.  Forward and backward passes are combined; the more confident one wins."""
+    import math as _m
+
+    def _pdf(x, mu, var):
+        return _m.exp(-0.5 * (x - mu) ** 2 / var) / _m.sqrt(2 * _m.pi * var)
+
+    def _run(events):
+        pos = {"L": 43.0, "R": 77.0}
+        var = {"L": 1000.0, "R": 1000.0}
+        last = {"L": None, "R": None}
+        sounding = []
+        out = {}
+        for t, kind, p, i in events:
+            if kind == "off":
+                if p in sounding:
+                    sounding.remove(p)
+                continue
+            sounding.append(p)
+            lo, hi = min(sounding), max(sounding)
+            hand = None
+            conf = 1.0
+            if p <= lo + span and p < hi - span:
+                hand = "L"
+            elif p > lo + span and p >= hi - span:
+                hand = "R"
+            if hand is None:
+                dl = abs(pos["L"] - p) / _m.sqrt(var["L"])
+                dr = abs(pos["R"] - p) / _m.sqrt(var["R"])
+                hand = "L" if dl < dr else "R"
+                d = t - last[hand] if last[hand] is not None else 0
+                conf = _pdf(p, pos[hand], var[hand] + d * var_ps)
+            d = t - last[hand] if last[hand] is not None else 0
+            var[hand] += d * var_ps
+            k = var[hand] / (var[hand] + mvar)
+            pos[hand] += k * (p - pos[hand])
+            var[hand] -= k * var[hand]
+            last[hand] = t
+            out[i] = (hand, conf)
+        return out
+
+    if not items:
+        return []
+    ev = []
+    for i, (s, e, p) in enumerate(items):
+        ev.append((s, "on", p, i))
+        ev.append((e, "off", p, i))
+    ev.sort(key=lambda x: (x[0], x[1] == "on"))
+    fwd = _run(ev)
+    top = max(e for s, e, p in items)
+    rev = [(top - t, "on" if k == "off" else "off", p, i) for t, k, p, i in ev]
+    rev.sort(key=lambda x: (x[0], x[1] == "on"))
+    bwd = _run(rev)
+    return [(fwd[i][0] if fwd[i][1] >= bwd[i][1] else bwd[i][0]) for i in range(len(items))]
+
+
+def _hand_follow_apply(song, rh_i, lh_i):
+    """v22ze-251: re-sort the notes of the two hand staves with _hand_follow.  Staff only.  Returns notes moved."""
+    tpb = float(song.ticks_per_beat)
+    heads = []
+    for ti in (rh_i, lh_i):
+        for n in song.tracks[ti].notes:
+            if getattr(n, "articulation", "") == "tie_continuation":
+                continue
+            heads.append((ti, n))
+    heads.sort(key=lambda x: (x[1].tick, x[1].pitch))
+    items = [(n.tick / tpb * 0.5, (n.tick + max(1, n.duration)) / tpb * 0.5, n.pitch) for ti, n in heads]
+    hands = _hand_follow(items)
+    fig = [(ti, n) for (ti, n), h in zip(heads, hands) if h == "R"]
+    mel = [(ti, n) for (ti, n), h in zip(heads, hands) if h == "L"]
+    plan = [{"figure": fig, "melody": mel, "fig_hand": rh_i, "mel_hand": lh_i}]
+    return _easy_apply(song, plan, lambda e: True)
 
 
 def _thin_hand_chord(pitches, hand, max_notes, max_span):
@@ -20820,6 +20897,8 @@ class MidisoftStudio:
                 result[0] = (int(span_var.get()), int(notes_var.get()))
                 if thin:
                     _FC_OPTS["thumb"] = bool(thumb_var.get())   # v22ze-249
+                else:
+                    _FC_OPTS["tracker"] = bool(trk_var.get())   # v22ze-251
                     self._fc_avoid_rolls = bool(avoid_var.get())   # v22ze-201
             except Exception:
                 result[0] = (12, 5)
@@ -20842,6 +20921,15 @@ class MidisoftStudio:
                      font=("TkDefaultFont", 8), justify=tk.LEFT).grid(row=7, column=0, columnspan=2, padx=16, sticky="w")
         else:
             thumb_var = None
+            trk_var = tk.BooleanVar(value=_FC_OPTS.get("tracker", False))   # v22ze-251
+            tk.Checkbutton(dlg, text="Follow the hands (new method, try it and compare)",
+                           variable=trk_var, bg=BG, fg=FG, selectcolor="#21262d",
+                           activebackground=BG, activeforeground=FG).grid(
+                row=5, column=0, columnspan=2, padx=16, pady=(10, 0), sticky="w")
+            tk.Label(dlg, text="Follows where each hand is from note to note instead of sorting by pitch.\n"
+                     "Idea from HANNDS (github.com/cemfi/hannds, MIT licence). Not tested by Mike yet.\n"
+                     "Edit > Undo takes it back.", bg=BG, fg=MUTED,
+                     font=("TkDefaultFont", 8), justify=tk.LEFT).grid(row=6, column=0, columnspan=2, padx=16, sticky="w")
         bs = dict(relief=tk.FLAT, padx=14, pady=5, bg="#21262d", fg=FG,
                   activebackground="#30363d", activeforeground=FG)
         tk.Button(bfrm, text="Continue" if thin else "Separate", command=_ok, **bs).pack(side=tk.LEFT, padx=6)
@@ -20903,14 +20991,18 @@ class MidisoftStudio:
             # v22ze-137: keep every note's original start/length/velocity
             # and every other instrument; only decide RH/LH.
             result = self.song.rationalize_keep_audio(params=params)
+            if _FC_OPTS.get("tracker"):   # v22ze-251
+                _ri, _li = _hand_tracks(result)
+                if _ri is not None and _li is not None:
+                    _hand_follow_apply(result, _ri, _li)
             after = _copy.deepcopy(result.tracks)
             after_map = _copy.deepcopy(result.rationalized_measure_map)
             action = RationalizationAction(
                 description="Separate Hands",
                 before_tracks=before, after_tracks=after,
                 before_map=before_map, after_map=after_map)
+            self._set_rationalized_song(result)   # v22ze-251: set first; it clears the undo list, so push after
             self._push_undo(action)
-            self._set_rationalized_song(result)
             self.song.modified = True
             self._update_title()
             rh = result.tracks[0] if result.tracks else None
