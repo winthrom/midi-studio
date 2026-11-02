@@ -21892,9 +21892,14 @@ class MidisoftStudio:
             messagebox.showinfo("Combine","Need ≥2 tracks.",parent=self.root); return
         dlg=tk.Toplevel(self.root); dlg.title("Combine Tracks"); dlg.grab_set()
         tk.Label(dlg,text="Select tracks to combine:").pack(padx=10,pady=4)
-        lb=tk.Listbox(dlg,selectmode=tk.MULTIPLE,height=min(10,len(self.song.tracks)))
+        lb=tk.Listbox(dlg,selectmode=tk.MULTIPLE,height=min(10,len(self.song.tracks)),exportselection=False,
+                      bg="#161b22",fg="#f0f6fc",selectbackground="#1f6feb",selectforeground="#ffffff",
+                      activestyle="none",width=40)   # v22ze-251b
         for t in self.song.tracks: lb.insert(tk.END,t.name)
         lb.pack(padx=10)
+        _cnt=tk.StringVar(value="0 tracks selected")
+        tk.Label(dlg,textvariable=_cnt).pack()
+        lb.bind("<<ListboxSelect>>",lambda e:_cnt.set("%d track%s selected"%(len(lb.curselection()),"" if len(lb.curselection())==1 else "s")))
         def do():
             sel=lb.curselection()
             if len(sel)<2: messagebox.showwarning("Combine","Select ≥2.",parent=dlg); return
