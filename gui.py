@@ -15115,13 +15115,17 @@ class ScoreView(tk.Frame):
             # edit in the other tools.
             hits = self.canvas.find_overlapping(cx - 3, cy - 3, cx + 3, cy + 3)
 
+        _heard = []
         for item_id in hits:
             note = self._note_hit_items.get(item_id)
             if note is not None:
                 self._selection.add(note)
+                if not isinstance(note, tuple) and note not in _heard:
+                    _heard.append(note)
 
         self._refresh_selection_label()
         self._draw()
+        self.app._hear_notes(_heard)   # v22ze-252
 
     # ── v22ze-214: editing tabs gated by Select; click selects; one Apply button ──────────
     def _widgets_state(self, w, on):
@@ -15588,6 +15592,7 @@ class ScoreView(tk.Frame):
         else:
             new_note = MidiNote(tick, pitch, 80, dur, tr.channel)
             tr.notes.append(new_note)
+            self.app._hear_notes([new_note])   # v22ze-252
             tr.notes.sort(key=lambda n: n.tick)
             self.app._push_undo(
                 NoteEditAction(
@@ -17712,6 +17717,14 @@ class MidisoftStudio:
         em.add_separator()
         em.add_command(label="Combine Tracks…",command=self._combine_tracks)
         em.add_command(label="Separate Channels…",command=self._separate_channels)
+        em.add_separator()
+        try:
+            self._hear_var = tk.IntVar(value=1 if midi_io._load_settings().get("hear_selected", True) else 0)   # v22ze-252
+        except Exception:
+            self._hear_var = tk.IntVar(value=1)
+        hsm = TkPopupMenu(mb, tearoff=0); em.add_cascade(label="Hear selected notes", menu=hsm)
+        hsm.add_radiobutton(label="On", value=1, variable=self._hear_var, command=self._hear_save)
+        hsm.add_radiobutton(label="Off", value=0, variable=self._hear_var, command=self._hear_save)
         # v22ze-209: Corrections and Score Settings sit right after Edit
         nm=TkPopupMenu(mb,tearoff=0); mb.add_cascade(label="Corrections",menu=nm)
         nm.add_command(label="Quantize…\tCtrl+Q", command=lambda: QuantizeDlg(self.root, self),
@@ -22392,6 +22405,58 @@ class MidisoftStudio:
         self._refresh_track_list()
         self._soft_redraw()
         return len(fl)
+
+    def _hear_setting(self):   # v22ze-252
+        v = getattr(self, "_hear_var", None)
+        if v is not None:
+            return bool(v.get())
+        try:
+            return bool(midi_io._load_settings().get("hear_selected", True))
+        except Exception:
+            return True
+
+    def _hear_save(self):   # v22ze-252
+        try:
+            s = midi_io._load_settings()
+            s["hear_selected"] = bool(self._hear_var.get())
+            midi_io._save_settings(s)
+        except Exception:
+            pass
+
+    def _hear_notes(self, notes):   # v22ze-252
+        """Sound these notes briefly so the person hears what they have selected.  Never changes the music."""
+        try:
+            if not notes or not self._hear_setting():
+                return
+            if self.transport.is_playing() or self.transport.is_recording():
+                return
+            notes = [n for n in notes if hasattr(n, "pitch")]
+            if not notes or len(notes) > 8:
+                return
+            song = self.song
+            sent = []
+            for n in notes:
+                tr = None
+                for t in song.tracks:
+                    if n in t.notes:
+                        tr = t
+                        break
+                ch = getattr(tr, "channel", getattr(n, "channel", 0)) if tr is not None else getattr(n, "channel", 0)
+                if tr is not None and ch != 9:
+                    _send(mido.Message("program_change", channel=ch, program=tr.program))
+                vel = max(40, min(127, int(getattr(n, "velocity", 80) or 80)))
+                _send(mido.Message("note_on", channel=ch, note=int(n.pitch), velocity=vel))
+                sent.append((ch, int(n.pitch)))
+
+            def _off(items=tuple(sent)):
+                for c, p in items:
+                    try:
+                        _send(mido.Message("note_off", channel=c, note=p, velocity=0))
+                    except Exception:
+                        pass
+            self.root.after(330, _off)
+        except Exception:
+            pass
 
     def _soft_redraw(self):
         try:
