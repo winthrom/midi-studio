@@ -14463,6 +14463,24 @@ class ScoreView(tk.Frame):
                 y = self._sp_to_y_bass(pos, bt_y)
                 tie_above = pos >= 5.5
 
+            # v22ze-255: where is the second note drawn?  When a bar changes clef (bass clef in one bar, treble in
+            # the next, on the same staff) or the second note is written on the other staff, the same pitch sits at
+            # a different height, so one arc from the first head ends in empty space.  Then draw a short arc leaving
+            # the first note and a short stub arriving at the second.
+            _y2, _above2, _split = y, tie_above, False
+            _ft2 = hand_of.get(id(cont_note)) if hand_of else None
+            if _ft2 is not None and _ft is not None:
+                try:
+                    _pos2, _ = note_staff_pos(cont_note, _song_uses_flats(self.app.song))
+                    _sp2y_b, _topy_b = self._clef_branch_for_chord(
+                        [cont_note], tt, bt, mmap, _ft2, bass_treble_measures or set(), treble_bass_measures,
+                        _song_uses_flats(self.app.song))[:2]
+                    _y2 = _sp2y_b(_pos2, _topy_b)
+                    _above2 = _pos2 >= 5.5
+                    _split = abs(_y2 - y) > 1
+                except Exception:
+                    _y2, _above2, _split = y, tie_above, False
+
             # v22ze-243: from the edge of the first note head to the edge of the second (the old end point was
             # two head-widths short, so a tie between notes a 16th apart came out 3 pixels wide)
             x1 = int(self._tick_to_x(note.tick)) + nr + 2 + int(nr * 0.9)
@@ -14470,29 +14488,38 @@ class ScoreView(tk.Frame):
             if x2 <= x1:
                 continue
 
-            arc_w = x2 - x1
-            arc_h = max(5, min(int(self.SLG * 1.2), int(arc_w * 0.12)))
-            h_dir = -1 if tie_above else 1
+            def _tie_arc(xa, xb, ya, above):
+                arc_w = xb - xa
+                arc_h = max(5, min(int(self.SLG * 1.2), int(arc_w * 0.12)))
+                h_dir = -1 if above else 1
+                pts = []
+                steps = 24
+                for i in range(steps + 1):
+                    t = i / steps
+                    mt = 1 - t
+                    bx = (
+                        mt**3 * xa
+                        + 3 * mt**2 * t * (xa + arc_w * 0.25)
+                        + 3 * mt * t**2 * (xb - arc_w * 0.25)
+                        + t**3 * xb
+                    )
+                    by = (
+                        mt**3 * ya
+                        + 3 * mt**2 * t * (ya + h_dir * arc_h)
+                        + 3 * mt * t**2 * (ya + h_dir * arc_h)
+                        + t**3 * ya
+                    )
+                    pts.extend([bx, by])
+                c.create_line(pts, fill="#222", width=1.8, smooth=False)
 
-            pts = []
-            steps = 24
-            for i in range(steps + 1):
-                t = i / steps
-                mt = 1 - t
-                bx = (
-                    mt**3 * x1
-                    + 3 * mt**2 * t * (x1 + arc_w * 0.25)
-                    + 3 * mt * t**2 * (x2 - arc_w * 0.25)
-                    + t**3 * x2
-                )
-                by = (
-                    mt**3 * y
-                    + 3 * mt**2 * t * (y + h_dir * arc_h)
-                    + 3 * mt * t**2 * (y + h_dir * arc_h)
-                    + t**3 * y
-                )
-                pts.extend([bx, by])
-            c.create_line(pts, fill="#222", width=1.8, smooth=False)
+            if not _split:
+                _tie_arc(x1, x2, y, tie_above)
+            else:
+                _xbar = int(self._tick_to_x(next_ms))
+                _out_end = max(x1 + 8, min(x2 - 6, _xbar - 2))
+                _in_start = min(x2 - 8, max(_out_end + 4, x2 - int(nr * 4.5)))
+                _tie_arc(x1, _out_end, y, tie_above)
+                _tie_arc(_in_start, x2, _y2, _above2)
 
     def _draw_note(self, c, note, tt, bt, nr, tpb):
         # Legacy single-note draw — kept for compatibility; chord path is used instead.
