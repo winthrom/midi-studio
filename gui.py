@@ -10240,7 +10240,7 @@ class QuantizeDlg(tk.Toplevel):
         # ── Division ──────────────────────────────────────────────────────────
         df = tk.LabelFrame(content, text=" Grid Division ", **lf_kw)
         df.pack(fill=tk.X, **pad)
-        default_div = getattr(self.app, "quantize_division", 8) or 8
+        default_div = getattr(self.app, "quantize_division", 32) or 32   # v22ze-253: 1/32 unless a grid was chosen
         self._div = tk.IntVar(value=default_div)
         for lbl, val in [
             ("Quarter notes  (1/4)", 4),
@@ -15057,6 +15057,8 @@ class ScoreView(tk.Frame):
         return dur_ticks(name, tpb) or tpb   # v22ze-214
 
     def _on_click(self, event):
+        if getattr(self.app, "_loading", False):   # v22ze-253
+            return
         cx, cy = self._cxy(event)
         if cx < self.LM:
             return
@@ -15089,6 +15091,9 @@ class ScoreView(tk.Frame):
             self.canvas.coords(self._box_select_rect_id, x0, y0, cx, cy)
 
     def _on_release(self, event):
+        if getattr(self.app, "_loading", False):   # v22ze-253
+            self._box_select_start = None
+            return
         if self._box_select_start is None:
             return
         cx, cy = self._cxy(event)
@@ -20184,7 +20189,26 @@ class MidisoftStudio:
                 pass
             self._close_current(); self._load_file(path)
 
-    def _load_file(self,path):
+    def _load_file(self,path):   # v22ze-253: busy cursor; clicks on the score are ignored while loading
+        self._loading = True
+        try:
+            self.root.config(cursor="watch")
+            self.root.update_idletasks()
+        except Exception:
+            pass
+        try:
+            return self._load_file_inner(path)
+        finally:
+            try:
+                self.root.config(cursor="")
+            except Exception:
+                pass
+            try:
+                self.root.after(350, lambda: setattr(self, "_loading", False))
+            except Exception:
+                self._loading = False
+
+    def _load_file_inner(self,path):
         try:
             self.song=Song.from_mid(path); self.transport.song=self.song
             self._origin_grand = _is_grand_staff(self.song)   # v22ze-191
