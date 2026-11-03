@@ -5979,6 +5979,7 @@ class Song:
         out.filename = self.filename
         out.title = getattr(self, "title", "")
         out.composer = getattr(self, "composer", "")   # v22ze-209
+        out.key_sig = getattr(self, "key_sig", "C")   # v22ze-254: keep the key the user set
         out.modified = True  # baked copy always needs a Save
 
         for tr in self.tracks:
@@ -19545,7 +19546,7 @@ class MidisoftStudio:
             "performance.")
 
         # Quantize grid
-        q_div_var = tk.StringVar(value="8th")
+        q_div_var = tk.StringVar(value="32nd")   # v22ze-254
         grid_opts = {"8th": 8, "16th": 16, "Quarter": 4, "32nd": 32}
         _tt(_row(pfrm, "Quantize grid:", lambda p: tk.OptionMenu(
             p, q_div_var, *grid_opts.keys()), 8),
@@ -23055,11 +23056,13 @@ class MidisoftStudio:
         tk.Frame(dlg, bg="#21262d", height=1).pack(fill=tk.X, padx=28, pady=14)
 
         # ── Technical info ────────────────────────────────────────────────────
+        tk.Label(dlg, text="Built in Python 3 + tkinter + mido + python-rtmidi", bg=BG, fg=MUTED,
+                 font=("TkDefaultFont", 9), justify=tk.LEFT).pack(padx=28, pady=(0, 2), anchor="w")   # v22ze-254
+        tk.Label(dlg, text="Developed by Michael F. Winthrop in collaboration with Claude Sonnet 4.6", bg=BG, fg="#e3b341",
+                 font=("TkDefaultFont", 9, "bold"), justify=tk.LEFT).pack(padx=28, pady=(0, 2), anchor="w")
+        tk.Label(dlg, text="Original inspiration: MidiSoft Studio4 © 1991–1995 MidiSoft\nCorporation, created by Raymond Bily", bg=BG, fg="#ffffff",
+                 font=("TkDefaultFont", 9), justify=tk.LEFT).pack(padx=28, pady=(0, 2), anchor="w")
         info = (
-            "Built in Python 3 + tkinter + mido + python-rtmidi\n"
-            "Original inspiration: MidiSoft Studio4 © 1991–1995 MidiSoft\n"
-            "Corporation, created by Raymond Bily\n"
-            "Developed by Michael F. Winthrop in collaboration with Claude Sonnet 4.6\n"
             "Contains MIDI Studio code by Michael Winthrop for the Sterling Lions Club, Virginia, USA.\n"
             "see: https://github.com/winthrom/midi-studio\n"
             "Free software: GNU General Public License, version 3 or later (see LICENSE).\n"
