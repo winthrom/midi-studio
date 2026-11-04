@@ -17253,6 +17253,30 @@ def move_measure_notes(song, ti, mi, delta):
     return move_notes_in_time(song, ns, delta, "selected")
 
 
+class SongSwapAction:   # v22ze-257
+    """Undo/redo step that swaps the WHOLE score (used when Rationalize is accepted)."""
+
+    __slots__ = ("description", "before", "after")
+
+    def __init__(self, description, before, after):
+        self.description = description
+        self.before = before
+        self.after = after
+
+
+def _song_sig(song):   # v22ze-257
+    """A small fingerprint of a score: key, time signature, tempo and every note.  Equal fingerprints = same score."""
+    try:
+        return (
+            getattr(song, "key_sig", "C"), song.time_sig_num, song.time_sig_den, song.tempo,
+            tuple((t.channel, t.program, len(t.notes),
+                   hash(tuple(sorted((n.tick, n.pitch, n.duration, n.velocity, n.articulation) for n in t.notes))))
+                  for t in song.tracks),
+        )
+    except Exception:
+        return object()
+
+
 class RationalizationAction:
     """Memento for a single rationalization edit (undo/redo)."""
 
@@ -17987,6 +18011,22 @@ class MidisoftStudio:
             except Exception:
                 pass   # panel may be partially constructed
 
+    def _swap_whole_song(self, song, deep=True):   # v22ze-257
+        """Make `song` the open score (a copy, unless deep=False), keeping the window and the views in step."""
+        import copy as _copy
+        s = _copy.deepcopy(song) if deep else song
+        s.modified = True
+        self.song = s
+        self.transport.song = s
+        self._update_status()
+        self._update_title()
+        self._refresh_views()
+        try:
+            if self._score_setup_dlg is not None and self._score_setup_dlg.winfo_exists():
+                self._score_setup_dlg._refresh_panel()
+        except Exception:
+            pass
+
     def _refresh_views(self):
         """Redraw all open score/roll/list views after song data changes."""
         if self._score_view and self._score_view.winfo_exists():
@@ -18071,6 +18111,9 @@ class MidisoftStudio:
             if action.before_event is not None:
                 tr.markings.append(action.before_event)
                 tr.markings.sort(key=lambda e: e.tick)
+        elif isinstance(action, SongSwapAction):   # v22ze-257
+            self._redo_stack.append(action)
+            self._swap_whole_song(action.before)
         else:
             redo_action = RationalizationAction(
                 description=action.description,
@@ -18145,6 +18188,9 @@ class MidisoftStudio:
             if action.after_event is not None:
                 tr.markings.append(action.after_event)
                 tr.markings.sort(key=lambda e: e.tick)
+        elif isinstance(action, SongSwapAction):   # v22ze-257
+            self._undo_stack.append(action)
+            self._swap_whole_song(action.after)
         else:
             undo_action = RationalizationAction(
                 description=action.description,
@@ -19309,6 +19355,15 @@ class MidisoftStudio:
         mmap = (self._original_song or self.song).get_measure_map()
         total_measures = len(mmap) if mmap else 1
 
+        # v22ze-257: the score as it is NOW is the starting point for every Preview and for Discard,
+        # so you can try settings again and again without rebuilding anything.
+        import copy as _cp257
+        _snap = [_cp257.deepcopy(self.song)]
+        _was_rat = [self._is_rationalized]
+        _orig0 = [self._original_song]
+        _undo0 = [list(self._undo_stack)]
+        _previewed = [False]
+
         dlg = tk.Toplevel(self.root)
         self._rationalize_dlg = dlg
         dlg.title("Rationalize Score")
@@ -19618,6 +19673,14 @@ class MidisoftStudio:
             "during hand assignment. 14 semitones (a tenth) is a typical "
             "adult hand span.")
 
+        # v22ze-257: same two hand-size questions as Separate Hands
+        notes_var = tk.IntVar(value=5)
+        _tt(_row(pfrm, "Most notes one hand plays:", lambda p: tk.Spinbox(
+            p, from_=1, to=5, textvariable=notes_var, width=4,
+            bg="#21262d", fg=FG, buttonbackground="#30363d"), 12),
+            "5 = one note per finger (standard, the most there can be). "
+            "Lower it for an injured hand. Same setting as in Separate Hands.")
+
         # Arpeggio window (0 = auto-compute from song tempo)
         arp_var = tk.IntVar(value=0)
         _tt(_row(pfrm, "Arpeggio window (0=auto):", lambda p: tk.Spinbox(
@@ -19673,7 +19736,7 @@ class MidisoftStudio:
 
         def _preview():
             import copy as _copy
-            src = self._original_song if self._original_song else self.song
+            src = _copy.deepcopy(_snap[0])   # v22ze-257: always start from the score as it was when this window opened
             params = {
                 'arpeggio_window':   (arp_var.get() or None),  # 0 → None → auto
                 'quantize_div':      grid_opts[q_div_var.get()],
@@ -19687,6 +19750,8 @@ class MidisoftStudio:
                                       else (_ts_num_var.get(), _ts_den_var.get())),
                 'preserve_hands':    preserve_hands_var.get(),
                 'correct_pedal_durations': correct_pedal_var.get(),
+                'max_notes_per_hand': notes_var.get(),   # v22ze-257: same as Separate Hands
+                'auto_move':         False,              # v22ze-257: Fix Chords offers each move
             }
             m_range = None
             if not range_all.get():
@@ -19730,6 +19795,7 @@ class MidisoftStudio:
                     after_map=after_map)
                 self._push_undo(action)
                 self._set_rationalized_song(rationalized)
+                _previewed[0] = True   # v22ze-257
                 # Record which meter this Preview used (v22k)
                 _last_preview_meter[0] = (rationalized.time_sig_num,
                                           rationalized.time_sig_den)
@@ -19754,7 +19820,7 @@ class MidisoftStudio:
                 import traceback; traceback.print_exc()
 
         def _accept():
-            if not self._is_rationalized:
+            if not self._is_rationalized or not _previewed[0]:   # v22ze-257
                 result_var.set("Nothing to accept — run Preview first.")
                 return
             # v22k: if the meter has changed since Preview (user adjusted
@@ -19790,11 +19856,52 @@ class MidisoftStudio:
             # result at this point (set by _preview()); just commit it.
             self.song.modified = True
             self._update_title()
-            result_var.set("✓  Accepted.  Playback and MIDI export match the score shown in Preview.")
+            # v22ze-257: one Undo step takes you back to the score as it was before Preview
+            self._undo_stack[:] = list(_undo0[0]) + [SongSwapAction(
+                "Rationalize", _cp257.deepcopy(_snap[0]), _cp257.deepcopy(self.song))]
+            self._redo_stack.clear()
+            _snap[0] = _cp257.deepcopy(self.song)
+            _undo0[0] = list(self._undo_stack)
+            _was_rat[0] = self._is_rationalized
+            _orig0[0] = self._original_song
+            _previewed[0] = False
+            self._update_status()
+            result_var.set("✓  Accepted.  Playback and MIDI export match the score shown in Preview.  Edit ▸ Undo takes it back.")
 
         def _discard():
-            self._set_rationalized_song(None)
-            result_var.set("Discarded.  Reverted to original.")
+            # v22ze-257: back to the score as it was when this window opened (or when you last pressed
+            # Accept), with the key and title you have set since.  Not back to the first loaded copy.
+            if not _previewed[0]:
+                result_var.set("Nothing to discard: no Preview is showing.")
+                return
+            _r = _cp257.deepcopy(_snap[0])
+            _r.key_sig = getattr(self.song, "key_sig", "C") or "C"
+            for _a in ("title", "composer"):
+                if getattr(self.song, _a, ""):
+                    setattr(_r, _a, getattr(self.song, _a))
+            self._swap_whole_song(_r, deep=False)
+            self._is_rationalized = _was_rat[0]
+            self._original_song = _orig0[0]
+            self._undo_stack[:] = _undo0[0]
+            self._redo_stack.clear()
+            _previewed[0] = False
+            self._update_status()
+            result_var.set("Discarded.  The score is back as it was before Preview.")
+
+        def _close_dlg():   # v22ze-257
+            if _previewed[0] and _song_sig(self.song) != _song_sig(_snap[0]):
+                ans = messagebox.askyesnocancel(
+                    "Rationalize Score",
+                    "Keep this result?\n\nYes keeps it (Edit > Undo takes it back).\n"
+                    "No returns the score to how it was before Preview.\n"
+                    "Cancel leaves this window open.", parent=dlg)
+                if ans is None:
+                    return
+                if ans:
+                    _accept()
+                else:
+                    _discard()
+            dlg.destroy()
 
         def _save_copy():
             if not self._is_rationalized:
@@ -19823,16 +19930,16 @@ class MidisoftStudio:
             "Requires Preview to have been run first.").pack(side=tk.LEFT, padx=4)
         _tt(tk.Button(bfrm, text="Discard", bg="#21262d", fg=FG,
                   activebackground="#30363d", command=_discard, **bs),
-            "Throw away the preview and go back to the original, "
-            "unrationalized song.").pack(side=tk.LEFT, padx=4)
+            "Throw away the preview and go back to the score as it was when "
+            "this window opened.").pack(side=tk.LEFT, padx=4)
         _tt(tk.Button(bfrm, text="Save copy…", bg="#21262d", fg=MUTED,
                   activebackground="#30363d", command=_save_copy, **bs),
             "Save the previewed result as a new .mid file without "
             "changing your currently open song.").pack(side=tk.LEFT, padx=4)
         tk.Button(bfrm, text="Close",   bg="#21262d", fg=MUTED,
-                  activebackground="#30363d", command=dlg.destroy, **bs).pack(side=tk.LEFT, padx=4)
+                  activebackground="#30363d", command=_close_dlg, **bs).pack(side=tk.LEFT, padx=4)
 
-        dlg.protocol("WM_DELETE_WINDOW", dlg.destroy)
+        dlg.protocol("WM_DELETE_WINDOW", _close_dlg)
 
         # v22ze-144: open wide and tall enough to show every control (the
         # scroll area alone is only ~370 px wide, which hid the value boxes).
