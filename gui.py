@@ -5171,6 +5171,20 @@ class Song:
         MAX_NOTES_PER_HAND = p["max_notes_per_hand"]
         INF = float("inf")
 
+        # v22ze-258: a bigger hand size must not change WHICH hand plays a note, only whether a chord is playable.
+        # Reach up to a standard hand (12 semitones) is free as before; reach between 12 and the chosen size costs
+        # a little (10 per semitone) instead of nothing; beyond the chosen size it costs 40 per semitone as before.
+        # With a size of 12 or less nothing changes.  (At 15+ the old search could settle on a path that put
+        # high notes in the left hand for many bars.)
+        _SPAN_BASE = min(12, MAX_SPAN)
+
+        def _span_cost(span):
+            if span <= _SPAN_BASE:
+                return 0.0
+            if span <= MAX_SPAN:
+                return (span - _SPAN_BASE) * 10.0
+            return (MAX_SPAN - _SPAN_BASE) * 10.0 + (span - MAX_SPAN) * 40
+
         def _split_cost(pitches_lh, pitches_rh, prev_lh, prev_rh, dt_lh=None, dt_rh=None,
                         held_lh=None, held_rh=None):
             if not pitches_lh and not pitches_rh:
@@ -5214,13 +5228,9 @@ class Song:
                     cost += (len(pitches_rh) - 2) * 6
             # Span violations
             if len(pitches_lh) > 1:
-                span = max(pitches_lh) - min(pitches_lh)
-                if span > MAX_SPAN:
-                    cost += (span - MAX_SPAN) * 40  # v22ze-173
+                cost += _span_cost(max(pitches_lh) - min(pitches_lh))
             if len(pitches_rh) > 1:
-                span = max(pitches_rh) - min(pitches_rh)
-                if span > MAX_SPAN:
-                    cost += (span - MAX_SPAN) * 40  # v22ze-173
+                cost += _span_cost(max(pitches_rh) - min(pitches_rh))
             # v22ze-164: notes this hand is still holding down take up fingers and
             # stretch the span too.  Only the EXTRA cost over the new notes alone
             # is added, so nothing is counted twice.
@@ -5233,9 +5243,9 @@ class Song:
                             cost += (len(_all) - max(len(_P), MAX_NOTES_PER_HAND)) * 40
                         _sa = max(_all) - min(_all)
                         _sp = (max(_P) - min(_P)) if len(_P) > 1 else 0
-                        _ex = max(0, _sa - MAX_SPAN) - max(0, _sp - MAX_SPAN)
+                        _ex = _span_cost(_sa) - _span_cost(_sp)   # v22ze-258
                         if _ex > 0:
-                            cost += _ex * 40  # v22ze-173
+                            cost += _ex
             # Centers
             lh_c = statistics.mean(pitches_lh) if pitches_lh else prev_lh
             rh_c = statistics.mean(pitches_rh) if pitches_rh else prev_rh
@@ -16197,7 +16207,8 @@ import copy as _copy
 
 
 # v22ze-171: chord thinning (used by Edit > Fix Chords...)
-_FC_OPTS = {"thumb": True, "tracker": False}   # v22ze-249: Fix Chords option "thumb on two neighbouring keys"
+_FC_OPTS = {"thumb": True, "hands": 0}   # v22ze-258: hands 0 standard, 1 follow everywhere, 2 follow where it looks wrong
+_FC_OPTS_UNUSED = None   # v22ze-249: Fix Chords option "thumb on two neighbouring keys"
 _WHITE_PC = {0, 2, 4, 5, 7, 9, 11}
 
 
@@ -16465,8 +16476,33 @@ def _hand_follow(items, span=14, var_ps=20.0, mvar=20.0):
     return [(fwd[i][0] if fwd[i][1] >= bwd[i][1] else bwd[i][0]) for i in range(len(items))]
 
 
-def _hand_follow_apply(song, rh_i, lh_i):
-    """v22ze-251: re-sort the notes of the two hand staves with _hand_follow.  Staff only.  Returns notes moved."""
+def _hand_suspects(song, rh_i, lh_i, ledger_hi=71, ledger_lo=50):
+    """v22ze-258: ticks of notes written far from their own staff (many ledger lines) while the OTHER hand has
+    nothing sounding there: a left-hand note at B4 or higher, or a right-hand note at D3 or lower.  Looks only."""
+    import bisect as _bs
+    tpb = song.ticks_per_beat
+    out = []
+    for mine, other, far in ((song.tracks[lh_i].notes, song.tracks[rh_i].notes, lambda p: p >= ledger_hi),
+                             (song.tracks[rh_i].notes, song.tracks[lh_i].notes, lambda p: p <= ledger_lo)):
+        iv = sorted((n.tick, n.tick + max(1, n.duration)) for n in other)
+        st = [x[0] for x in iv]
+        mx, m = [], -1
+        for _a, _b in iv:
+            m = max(m, _b)
+            mx.append(m)
+        for n in mine:
+            if not far(n.pitch):
+                continue
+            i = _bs.bisect_right(st, n.tick + tpb // 8)
+            if not (i > 0 and mx[i - 1] > n.tick - tpb // 8):
+                out.append(n.tick)
+    return sorted(out)
+
+
+def _hand_follow_apply(song, rh_i, lh_i, near=None):
+    """v22ze-251/258: re-sort the notes of the two hand staves with _hand_follow.  Staff only.  Returns notes moved.
+    near: None = every note; else a sorted list of ticks, and only notes within two beats of one of them change."""
+    import bisect as _bs
     tpb = float(song.ticks_per_beat)
     heads = []
     for ti in (rh_i, lh_i):
@@ -16477,8 +16513,15 @@ def _hand_follow_apply(song, rh_i, lh_i):
     heads.sort(key=lambda x: (x[1].tick, x[1].pitch))
     items = [(n.tick / tpb * 0.5, (n.tick + max(1, n.duration)) / tpb * 0.5, n.pitch) for ti, n in heads]
     hands = _hand_follow(items)
-    fig = [(ti, n) for (ti, n), h in zip(heads, hands) if h == "R"]
-    mel = [(ti, n) for (ti, n), h in zip(heads, hands) if h == "L"]
+    win = int(tpb * 2)
+
+    def _in(n):
+        if near is None:
+            return True
+        i = _bs.bisect_left(near, n.tick)
+        return (i < len(near) and near[i] - n.tick <= win) or (i > 0 and n.tick - near[i - 1] <= win)
+    fig = [(ti, n) for (ti, n), h in zip(heads, hands) if h == "R" and _in(n)]
+    mel = [(ti, n) for (ti, n), h in zip(heads, hands) if h == "L" and _in(n)]
     plan = [{"figure": fig, "melody": mel, "fig_hand": rh_i, "mel_hand": lh_i}]
     return _easy_apply(song, plan, lambda e: True)
 
@@ -21075,7 +21118,7 @@ class MidisoftStudio:
                 if thin:
                     _FC_OPTS["thumb"] = bool(thumb_var.get())   # v22ze-249
                 else:
-                    _FC_OPTS["tracker"] = bool(trk_var.get())   # v22ze-251
+                    _FC_OPTS["hands"] = int(hands_var.get())   # v22ze-258
                     self._fc_avoid_rolls = bool(avoid_var.get())   # v22ze-201
             except Exception:
                 result[0] = (12, 5)
@@ -21098,15 +21141,18 @@ class MidisoftStudio:
                      font=("TkDefaultFont", 8), justify=tk.LEFT).grid(row=7, column=0, columnspan=2, padx=16, sticky="w")
         else:
             thumb_var = None
-            trk_var = tk.BooleanVar(value=_FC_OPTS.get("tracker", False))   # v22ze-251
-            tk.Checkbutton(dlg, text="Follow the hands (new method, try it and compare)",
-                           variable=trk_var, bg=BG, fg=FG, selectcolor="#21262d",
-                           activebackground=BG, activeforeground=FG).grid(
-                row=5, column=0, columnspan=2, padx=16, pady=(10, 0), sticky="w")
-            tk.Label(dlg, text="Follows where each hand is from note to note instead of sorting by pitch.\n"
-                     "Idea from HANNDS (github.com/cemfi/hannds, MIT licence). Not tested by Mike yet.\n"
-                     "Edit > Undo takes it back.", bg=BG, fg=MUTED,
-                     font=("TkDefaultFont", 8), justify=tk.LEFT).grid(row=6, column=0, columnspan=2, padx=16, sticky="w")
+            hands_var = tk.IntVar(value=int(_FC_OPTS.get("hands", 0)))   # v22ze-258
+            hf = tk.LabelFrame(dlg, text=" How to decide the hands ", bg=BG, fg=FG,
+                               font=("TkDefaultFont", 9), padx=10, pady=4)
+            hf.grid(row=5, column=0, columnspan=2, padx=16, pady=(10, 0), sticky="we")
+            for _v, _t in ((0, "Standard: by pitch and reach"),
+                           (1, "Follow the hands everywhere (new, try it and compare)"),
+                           (2, "Standard, and follow the hands where the split looks wrong (new)")):
+                tk.Radiobutton(hf, text=_t, value=_v, variable=hands_var, bg=BG, fg=FG, selectcolor="#21262d",
+                               activebackground=BG, activeforeground=FG, anchor="w").pack(anchor="w")
+            tk.Label(hf, text="Follow the hands tracks where each hand is from note to note.  Idea from HANNDS\n"
+                     "(github.com/cemfi/hannds, MIT licence).  Edit > Undo takes it back.", bg=BG, fg=MUTED,
+                     font=("TkDefaultFont", 8), justify=tk.LEFT).pack(anchor="w", pady=(4, 0))
         bs = dict(relief=tk.FLAT, padx=14, pady=5, bg="#21262d", fg=FG,
                   activebackground="#30363d", activeforeground=FG)
         tk.Button(bfrm, text="Continue" if thin else "Separate", command=_ok, **bs).pack(side=tk.LEFT, padx=6)
@@ -21168,10 +21214,11 @@ class MidisoftStudio:
             # v22ze-137: keep every note's original start/length/velocity
             # and every other instrument; only decide RH/LH.
             result = self.song.rationalize_keep_audio(params=params)
-            if _FC_OPTS.get("tracker"):   # v22ze-251
+            _mode = int(_FC_OPTS.get("hands", 0))   # v22ze-258
+            if _mode in (1, 2):
                 _ri, _li = _hand_tracks(result)
                 if _ri is not None and _li is not None:
-                    _hand_follow_apply(result, _ri, _li)
+                    _hand_follow_apply(result, _ri, _li, near=(_hand_suspects(result, _ri, _li) if _mode == 2 else None))
             after = _copy.deepcopy(result.tracks)
             after_map = _copy.deepcopy(result.rationalized_measure_map)
             action = RationalizationAction(
@@ -21217,7 +21264,25 @@ class MidisoftStudio:
                     )
             except Exception:
                 _warn = ""
-            _msg = (f"Done.  RH: {rh_n} notes   LH: {lh_n} notes\n" + _warn
+            _sus_msg = ""   # v22ze-258: notes far from their staff while the other hand is silent
+            try:
+                _ri2, _li2 = _hand_tracks(result)
+                if _ri2 is not None and _li2 is not None:
+                    _sus = _hand_suspects(result, _ri2, _li2)
+                    if _sus:
+                        import bisect as _bs2
+                        _mm2 = result.get_measure_map()
+                        _st2 = [_m[1] for _m in _mm2]
+                        _bars2 = sorted({_mm2[max(0, _bs2.bisect_right(_st2, t) - 1)][0] + 1 for t in _sus})
+                        _sus_msg = (
+                            f"\n{len(_sus)} note(s) sit far from their staff (many ledger lines) while the other hand is "
+                            f"silent, in measure(s) " + ", ".join(str(b) for b in _bars2[:12])
+                            + (" ..." if len(_bars2) > 12 else "") + ".\n"
+                            + ("These may belong to the other hand.  Separate Hands again, choosing "
+                               "'follow the hands where the split looks wrong', can fix them.\n" if _mode == 0 else ""))
+            except Exception:
+                _sus_msg = ""
+            _msg = (f"Done.  RH: {rh_n} notes   LH: {lh_n} notes\n" + _warn + _sus_msg
                     + "\nTo reverse this, use Edit \u25b8 Undo.")   # v22ze-198
             if _warn:
                 if messagebox.askyesno(
