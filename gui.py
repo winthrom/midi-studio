@@ -2573,6 +2573,11 @@ def _find_split_pitch_for_track(notes, prefer_lh_octaves=True):
     return split
 
 
+# v22ze-260: marks that belong to one note.  A marked note was written that way on purpose: Remove Short Rests
+# leaves it alone and the little gap after it is never drawn as a rest.  The sound is not changed by a mark.
+NOTE_MARKS = ("staccato", "staccatissimo", "pizzicato", "tenuto", "accent", "marcato", "fermata", "tremolo")
+
+
 class MidiNote:
     __slots__ = (
         "tick",
@@ -2586,6 +2591,7 @@ class MidiNote:
         "_tie_pred_id",
         "roll_id",  # v22ze-182: rolled-chord marker
         "orig_dur",  # v22ze-191: sounding length before a display-only tidy
+        "mark",  # v22ze-260: a mark on this one note (see NOTE_MARKS); its own field, apart from articulation
     )
 
     def __init__(self, tick, pitch, velocity, duration, channel=0, articulation="", spelling=""):
@@ -2595,6 +2601,7 @@ class MidiNote:
         self.duration = duration
         self.channel = channel
         self.articulation = articulation
+        self.mark = ""   # v22ze-260
         # v22ze-51 fix: explicit accidental spelling override, set only
         # when the user picks an accidental via the Accidental tool (see
         # ScoreView._click_accidental). Empty string (the default) means
@@ -2844,7 +2851,7 @@ def remove_short_rests(song, thresh, m_from=None, m_to=None, dry=False):   # v22
 
     def meas(t):
         return _bis.bisect_right(starts, t) - 1
-    closed = lengthened = skipped = crossed = 0
+    closed = lengthened = skipped = crossed = marked = 0
     for tr in song.tracks:
         if not tr.notes or getattr(tr, "channel", 0) == 9:
             continue
@@ -2855,7 +2862,10 @@ def remove_short_rests(song, thresh, m_from=None, m_to=None, dry=False):   # v22
             ext = False
             if cur is not None and n.tick > cur:
                 gap = n.tick - cur
-                if 0 < gap < thresh and cur >= lo and (hi is None or cur < hi):
+                if 0 < gap < thresh and cur >= lo and (hi is None or cur < hi) \
+                        and any(getattr(e, "mark", "") for e in ending):
+                    marked += 1   # v22ze-260: a marked note was written that way on purpose: leave it as it is
+                elif 0 < gap < thresh and cur >= lo and (hi is None or cur < hi):
                     mn = meas(n.tick - 1)
                     kinds = [mn - meas(e.tick) for e in ending]     # 0 = same measure, 1 = carried over a barline
                     bad = (not all(k in (0, 1) for k in kinds)) or any(
@@ -2906,7 +2916,7 @@ def remove_short_rests(song, thresh, m_from=None, m_to=None, dry=False):   # v22
         if adds and not dry:
             tr.notes.extend(adds)
             tr.notes.sort(key=lambda x: x.tick)
-    return {"closed": closed, "lengthened": lengthened, "skipped": skipped, "crossed": crossed}
+    return {"closed": closed, "lengthened": lengthened, "skipped": skipped, "crossed": crossed, "marked": marked}
 
 
 class Song:
@@ -4236,7 +4246,7 @@ class Song:
             ped_ons = [s[0] for s in pedal_segs]
             ped_offs = [s[1] for s in pedal_segs]
             for n in notes:
-                if getattr(n, "articulation", "") == "staccato":
+                if getattr(n, "articulation", "") == "staccato" or getattr(n, "mark", "") == "staccato":   # v22ze-260
                     continue
                 tick = n.tick
                 onsets = pitch_idx[n.pitch]
@@ -6667,7 +6677,10 @@ class Song:
                 _perf_chosen = chosen   # staccato test uses the length before stretching
                 ch_u = _u_floor(min(int(round(chosen * _T2U)), avail_u)) or 1
                 # like the screen: a tiny gap after the note is not a rest -- write the note on to the next onset
-                if 0 < avail_u - ch_u < _min_u:
+                _mu = _min_u
+                if any(getattr(n, "mark", "") for n in chord):   # v22ze-260: no sliver rest after a marked note
+                    _mu = max(_min_u, int(round((tpb // 4) * _T2U)))
+                if 0 < avail_u - ch_u < _mu:
                     ch_u = max(ch_u, _u_floor(avail_u))
                 chord_notes = thin_chord(sorted(chord, key=lambda n: n.pitch))
                 ds = _UDUR[ch_u]
@@ -6676,6 +6689,7 @@ class Song:
                     for n in chord_notes
                     if (
                         getattr(n, "articulation", "") == "staccato"
+                        or getattr(n, "mark", "") == "staccato"   # v22ze-260
                         or (n.duration < _perf_chosen * 0.75 and _perf_chosen <= tpb // 2)
                     )
                 )
@@ -10788,12 +10802,15 @@ class ScoreView(tk.Frame):
         nb.add(t4, text="Articulation")
         _art_labels = [
             ("staccato", "Staccato"),
+            ("staccatissimo", "Staccatissimo"),
             ("accent", "Accent"),
             ("tenuto", "Tenuto"),
             ("legato", "Legato"),
             ("marcato", "Marcato"),
             ("pizzicato", "Pizz."),
             ("arco", "Arco"),
+            ("fermata", "Fermata"),
+            ("tremolo", "Tremolo"),
         ]
         for val, label in _art_labels:
             tk.Radiobutton(
@@ -12265,6 +12282,7 @@ class ScoreView(tk.Frame):
             # actually stored on the real note.
             cpy.articulation = getattr(n, "articulation", "")
             cpy.spelling = getattr(n, "spelling", "")  # v22ze-51
+            cpy.mark = getattr(n, "mark", "")   # v22ze-260
             # Phase 1 (Select tool): every note ScoreView ever draws passes
             # through this quantization copy, so this is the one place that
             # guarantees selection/deletion can always resolve back to the
@@ -12375,6 +12393,7 @@ class ScoreView(tk.Frame):
                 clipped.channel = cur.channel
                 clipped.articulation = getattr(cur, "articulation", "")
                 clipped.spelling = getattr(cur, "spelling", "")
+                clipped.mark = getattr(cur, "mark", "")   # v22ze-260
                 clipped.duration = _MAX_TIE_TICKS_r
                 clipped._orig = getattr(cur, "_orig", cur)   # v22ze-202: pieces select the real note
                 cur = clipped
@@ -12401,6 +12420,7 @@ class ScoreView(tk.Frame):
                 piece.channel = cur.channel
                 piece.articulation = getattr(cur, "articulation", "")
                 piece.spelling = getattr(cur, "spelling", "")  # v22ze-51
+                piece.mark = getattr(cur, "mark", "")   # v22ze-260
                 piece.duration = max_dur
                 piece._orig = getattr(cur, "_orig", cur)   # v22ze-202
                 _split_notes.append(piece)
@@ -12414,6 +12434,7 @@ class ScoreView(tk.Frame):
                 nxt.channel = cur.channel
                 nxt.articulation = getattr(cur, "articulation", "")
                 nxt.spelling = getattr(cur, "spelling", "")  # v22ze-51
+                nxt.mark = getattr(cur, "mark", "")   # v22ze-260
                 nxt.duration = cur.duration - max_dur
                 nxt._orig = getattr(cur, "_orig", cur)   # v22ze-202
                 cur = nxt
@@ -13409,6 +13430,28 @@ class ScoreView(tk.Frame):
                 c.create_text(_fx, _fy, text=str(_fg[0]), fill="#1a5fb4",
                               font=("TkDefaultFont", max(7, int(self.SLG * 0.95)), "bold"))
             art = getattr(n, "articulation", "")
+            _mk = getattr(n, "mark", "")   # v22ze-260
+            if _mk and art not in ("grace", "tie_continuation"):
+                if _mk in ("staccato", "accent", "marcato", "tenuto", "pizzicato"):
+                    art = _mk
+                elif _mk == "staccatissimo":
+                    _ay = y + (self.SLG * 1.15 if stem_up else -self.SLG * 1.15)
+                    _w = self.SLG * 0.2
+                    _d = self.SLG * 0.7 * (1 if stem_up else -1)
+                    c.create_polygon(nx - _w, _ay - _d / 2, nx + _w, _ay - _d / 2, nx, _ay + _d / 2,
+                                     fill="black", outline="black")
+                elif _mk == "fermata" and n is ys[-1][3]:
+                    _fy = (min(y, sy) if stem_up else y) - self.SLG * 1.6
+                    _fr = self.SLG * 1.0
+                    c.create_arc(nx - _fr, _fy - _fr, nx + _fr, _fy + _fr, start=0, extent=180,
+                                 style=tk.ARC, outline="black", width=2)
+                    c.create_oval(nx - 2, _fy - 3, nx + 2, _fy + 1, fill="black", outline="black")
+                elif _mk == "tremolo" and n is ys[-1][3]:
+                    _ym = (stem_root_y + sy) / 2.0
+                    for _k in (-1, 0, 1):
+                        c.create_line(sx - self.SLG * 0.6, _ym + _k * self.SLG * 0.45 + self.SLG * 0.25,
+                                      sx + self.SLG * 0.6, _ym + _k * self.SLG * 0.45 - self.SLG * 0.25,
+                                      fill="black", width=max(2, int(self.SLG * 0.25)))
             if art and art not in ("grace", "pedal_extended", "tie_continuation"):
                 art_y = y + (self.SLG * 1.15 if stem_up else -self.SLG * 1.15)
                 if art == "staccato":
@@ -14795,6 +14838,7 @@ class ScoreView(tk.Frame):
             cpy.velocity = getattr(n, "velocity", 100)
             cpy.duration = int(n.duration)
             cpy.channel = getattr(n, "channel", 0)
+            cpy.mark = getattr(n, "mark", "")   # v22ze-260
             qtr.notes.append(cpy)
 
         div_map = {4: 1, 8: 2, 16: 4, 32: 8}
@@ -14861,6 +14905,8 @@ class ScoreView(tk.Frame):
             by hand and calling this once per staff fixes both."""
             notes_sorted = sorted(hand_notes, key=lambda n: n.tick)
             mid_y = y_top + slg * 2
+            _mk_ends = {n.tick + n.duration for n in notes_sorted if getattr(n, "mark", "")}   # v22ze-260
+            _mk_lim = tpb // 4
 
             for m_idx, ms, me, num, den, tpm in mmap:
                 meas_notes = [n for n in notes_sorted if ms <= n.tick < me]
@@ -14885,7 +14931,7 @@ class ScoreView(tk.Frame):
                 for tick, delta in events:
                     if active == 0 and tick > cursor:
                         gap = tick - cursor
-                        if gap >= _min_rest:
+                        if gap >= _min_rest and not (gap < _mk_lim and cursor in _mk_ends):   # v22ze-260
                             parts = _rest_seq(gap)
                             gx = self._tick_to_x(cursor)
                             frag_tick = cursor
@@ -14913,7 +14959,7 @@ class ScoreView(tk.Frame):
                 # Gap after last sounding note
                 if active == 0 and cursor < me:
                     gap = me - cursor
-                    if gap >= _min_rest:
+                    if gap >= _min_rest and not (gap < _mk_lim and cursor in _mk_ends):   # v22ze-260
                         parts = _rest_seq(gap)
                         gx = self._tick_to_x(cursor)
                         frag_tick = cursor
@@ -15367,7 +15413,13 @@ class ScoreView(tk.Frame):
                     n.spelling = acc
                     k += 1
             parts.append("%d note(s) given %s" % (k, acc.replace("_", " ")))
-        if art:
+        if art in NOTE_MARKS:   # v22ze-260: a mark on a note goes in the note's own field
+            free = [n for n in sel if getattr(n, "articulation", "") not in ("tie_continuation", "grace")]
+            clear = bool(free) and all(getattr(n, "mark", "") == art for n in free)
+            for n in free:
+                n.mark = "" if clear else art
+            parts.append("%s %s on %d note(s)" % (art, "removed" if clear else "set", len(free)))
+        elif art:
             free = [n for n in sel if getattr(n, "articulation", "") not in
                     ("tie_predecessor", "tie_continuation", "grace", "pedal_extended")]
             clear = bool(free) and all(n.articulation == art for n in free)
@@ -22766,6 +22818,8 @@ class MidisoftStudio:
                 t = str(r["closed"]) + " short rest" + ("" if r["closed"] == 1 else "s") + " would be closed"
                 if r["skipped"]:
                     t += " (" + str(r["skipped"]) + " left alone: part of a tie)"
+                if r.get("marked"):
+                    t += " (" + str(r["marked"]) + " left as written: after a marked note)"   # v22ze-260
                 msg.set(t + ".")
             except Exception:
                 msg.set("")
@@ -22780,7 +22834,8 @@ class MidisoftStudio:
                 msg.set("Nothing to close here.")
             else:
                 msg.set("Closed " + str(r["closed"]) + " short rests (" + str(r["lengthened"]) + " notes lengthened, "
-                        + str(r.get("crossed", 0)) + " tied over a barline). The sound is unchanged. Edit > Undo restores them.")
+                        + str(r.get("crossed", 0)) + " tied over a barline). The sound is unchanged. Edit > Undo restores them."
+                        + (" " + str(r["marked"]) + " gap(s) after marked notes were left as written." if r.get("marked") else ""))
         brow = tk.Frame(dlg, bg=BG); brow.pack(pady=(6, 10))
         tk.Button(brow, text="Remove", command=_go, bg="#238636", fg="white", relief=tk.FLAT,
                   padx=12, pady=4).pack(side="left", padx=4)
