@@ -12224,6 +12224,12 @@ class ScoreView(tk.Frame):
         self._soft_ids = ({id(_sn) for _st, _sn, _sm in _soft_notes(song, int(getattr(self.app, "_soft_cut", 20)),
                                                                   float(getattr(self.app, "_soft_ratio", 3.0)))}
                           if self._flag_soft_var.get() else set())   # v22ze-248
+        self._finger_map = {}   # v22ze-259: suggested fingers, screen only
+        if int(getattr(self.app, "_finger_mode", 0) or 0):
+            try:
+                self._finger_map = _fingering_cached(song)
+            except Exception:
+                self._finger_map = {}
 
         # Score-only quantization copy (does not modify song data)
         class _TmpTrack:
@@ -13389,6 +13395,19 @@ class ScoreView(tk.Frame):
             # apply the requested mark" was really "applies the data
             # change, never draws it." Marks are placed on the side of
             # the notehead away from the stem, per standard engraving.
+            _fg = self._finger_map.get(id(getattr(n, "_orig", n))) if getattr(self, "_finger_map", None) else None
+            if _fg and not is_grace and (int(getattr(self.app, "_finger_mode", 0) or 0) == 2 or _fg[1]):   # v22ze-259
+                _fx, _fy = nx, y
+                if len(notes) == 1:   # a single note: the number above it (right hand) or below it (left hand)
+                    _fy = y - self.SLG * 1.7 if _fg[2] == "R" else y + self.SLG * 1.7
+                    if _fg[2] == "R" and stem_up:
+                        _fx = nx - self.SLG * 0.3
+                    elif _fg[2] == "L" and not stem_up:
+                        _fx = nx + self.SLG * 0.3
+                else:   # a chord: beside each note
+                    _fx = nx + h_rad + self.SLG * 0.9
+                c.create_text(_fx, _fy, text=str(_fg[0]), fill="#1a5fb4",
+                              font=("TkDefaultFont", max(7, int(self.SLG * 0.95)), "bold"))
             art = getattr(n, "articulation", "")
             if art and art not in ("grace", "pedal_extended", "tie_continuation"):
                 art_y = y + (self.SLG * 1.15 if stem_up else -self.SLG * 1.15)
@@ -16274,17 +16293,19 @@ def _easy_passages(song, rh_i, lh_i, max_notes, max_span, min_notes=8):
     mmap = song.get_measure_map()
     starts = [m[1] for m in mmap]
     tpm = mmap[0][5] if mmap else tpb * 4
+    wlen = max(tpm, tpb * 4)   # a window is at least a bar and four beats
     S = _easy_strikes(song)
     if len(S) < min_notes:
         return []
     ticks = [s[0] for s in S]
     width = 9
+    ext = 4   # the figure's own notes may lie a few semitones outside the detection band
     ok = []   # windows that look like the pattern: (i0, i1, band)
-    step = max(1, tpm // 2)
+    step = max(1, wlen // 2)
     t = ticks[0]
     while t <= ticks[-1]:
         i0 = _bs.bisect_left(ticks, t)
-        i1 = _bs.bisect_left(ticks, t + tpm)
+        i1 = _bs.bisect_left(ticks, t + wlen)
         win = S[i0:i1]
         t += step
         if len(win) < min_notes:
@@ -16302,31 +16323,35 @@ def _easy_passages(song, rh_i, lh_i, max_notes, max_span, min_notes=8):
         tot = sum(len(g) for _t, g in win)
         # a figure is a THIN line (one or two notes per strike) of a few pitches repeated over and over,
         # with a melody that goes both above and below it -- not ordinary chordal writing
-        if (cov >= 0.75 and cnt >= max(min_notes, 12) and per and _st.median(per) <= 2 and dist <= 4
-                and cnt >= 3 * dist and tot <= 2.5 * len(win)
-                and above >= 2 and below >= 2):
+        if (cov >= 0.75 and cnt >= max(min_notes, 12) and per and _st.median(per) <= 2 and dist <= 10
+                and cnt >= 2 * dist and tot <= 2.5 * len(win)
+                and ((above >= 2 and below >= 2)
+                     or (cov >= 0.9 and dist <= 3 and tot <= 1.4 * len(win) and (above >= 2 or below >= 2)))):   # v22ze-259
             ok.append((i0, i1, b))
     runs = []
     for i0, i1, b in ok:
-        if runs and i0 <= runs[-1][1] and abs(b - runs[-1][2]) <= 3:
+        if runs and i0 <= runs[-1][1] and abs(b - runs[-1][3]) <= 3:   # v22ze-259: against the band the run began with
             runs[-1][1] = max(runs[-1][1], i1)
         else:
-            runs.append([i0, i1, b])
+            runs.append([i0, i1, b, b])
     plan = []
-    for i0, i1, b0 in runs:
+    for i0, i1, b0, _bfirst in runs:
         win = S[i0:i1]
         b, cov, cnt = _easy_best_band(win, width)
         top = b + width
-        _has = [k for k, (_t, g) in enumerate(win) if any(b <= n.pitch <= top for _ti, n in g)]
+        def _isfig(p, g, b=b, top=top):
+            # in the band: figure.  Up to 4 semitones outside it: figure only when it is alone in its strike
+            return (b <= p <= top) or (len(g) == 1 and b - ext <= p <= top + ext)
+        _has = [k for k, (_t, g) in enumerate(win) if any(_isfig(n.pitch, g) for _ti, n in g)]
         win = win[_has[0]:_has[-1] + 1]   # only from the first to the last strike that has the figure
         figure, melody = [], []
         for _t, g in win:
             for ti, n in g:
-                (figure if b <= n.pitch <= top else melody).append((ti, n))
+                (figure if _isfig(n.pitch, g) else melody).append((ti, n))
         bad = None
         for _t, g in win:   # can each hand play what it would get at every strike?
-            fg = sorted({n.pitch for _ti, n in g if b <= n.pitch <= top})
-            mg = sorted({n.pitch for _ti, n in g if not (b <= n.pitch <= top)})
+            fg = sorted({n.pitch for _ti, n in g if _isfig(n.pitch, g)})
+            mg = sorted({n.pitch for _ti, n in g if not _isfig(n.pitch, g)})
             for who, c in (("figure", fg), ("melody", mg)):
                 if c and (not _fits_n(c, "R", max_notes) and not _fits_n(c, "L", max_notes) or c[-1] - c[0] > max_span):
                     bad = "a %s chord is too big for one hand" % who
@@ -16334,7 +16359,7 @@ def _easy_passages(song, rh_i, lh_i, max_notes, max_span, min_notes=8):
             if bad:
                 break
         t0, t1 = win[0][0], win[-1][0]
-        if t1 - t0 < tpm * 1.5 or bad:   # a figure goes on for a bar and a half or more; a chord too big is not offered
+        if t1 - t0 < max(tpm * 1.5, tpb * 6) or bad:   # a figure goes on for a bar and a half or more; a chord too big is not offered
             continue
         # crossings: melody notes of one hand-side of the band at times when the band is also sounding
         # who plays what now
@@ -16365,17 +16390,20 @@ def _easy_passages(song, rh_i, lh_i, max_notes, max_span, min_notes=8):
                         gap = (_t - t1 if after else t0 - _t) * sec
                         c += max(0.0, abs(pos[hand_ti] - sum(ns) / len(ns)) - 6) / (1.0 + 4.0 * gap)
                         break
-            cost[fig_hand] = c + (0.0 if fig_hand == cur_fig else 3.0)   # keep the hand that has it, when close
-        fig_hand = min(cost, key=lambda k: (cost[k], k != cur_fig))
+            cost[fig_hand] = c
+        # the hand that had the figure is kept unless the other hand is clearly better placed (1 semitone-equivalent)
+        fig_hand = cur_fig if cost[cur_fig] <= min(cost.values()) + 1.0 else min(cost, key=lambda k: cost[k])
         mel_hand = lh_i if fig_hand == rh_i else rh_i
         bar0 = max(0, _bs.bisect_right(starts, t0) - 1) + 1
         bar1 = max(0, _bs.bisect_right(starts, t1) - 1) + 1
         crossings = 0
         for _t, g in win:
-            fp = [n.pitch for _ti, n in g if b <= n.pitch <= top]
-            mp = [n.pitch for _ti, n in g if not (b <= n.pitch <= top)]
+            fp = [n.pitch for _ti, n in g if _isfig(n.pitch, g)]
+            mp = [n.pitch for _ti, n in g if not _isfig(n.pitch, g)]
             if fp and mp and ((mel_hand == lh_i and max(mp) > min(fp)) or (mel_hand == rh_i and min(mp) < max(fp))):
                 crossings += 1
+        if crossings < 2:   # the melody never really goes over/under the figure: nothing to decide
+            continue
         plan.append(dict(kind="over", bar=bar0, bar_to=bar1, tick=t0, tick_to=t1, band=(b, top),
                          figure=[(ti, n) for ti, n in figure], melody=[(ti, n) for ti, n in melody],
                          cur_fig=cur_fig, fig_hand=fig_hand, mel_hand=mel_hand, cost=dict(cost),
@@ -16415,6 +16443,157 @@ def _easy_apply(song, plan, include):
     for ti in {a[0] for a in add}:
         song.tracks[ti].notes.sort(key=lambda n: n.tick)
     return len(add)
+
+
+_FING_BLACK = (1, 3, 6, 8, 10)
+
+
+def _fing_step_cost(f, g, a, b, hand):
+    """v22ze-259: how awkward it is to play pitch b with finger g right after pitch a with finger f.
+    Looked at from the right hand; for the left hand the direction is mirrored (so the same table fits).
+    Returns (cost, kind) where kind is "cross" for a thumb under/over, "leap" for a hand move, else ""."""
+    d = (b - a) if hand == "R" else (a - b)
+    if d == 0:
+        return (0.0 if f == g else 1.5), ""
+    black_g = (b % 12) in _FING_BLACK
+    black_f = (a % 12) in _FING_BLACK
+    c = 0.0
+    if g == 1 and black_g:
+        c += 1.0
+    if g == 5 and black_g:
+        c += 0.3
+    if abs(d) > 9:   # a leap: the hand moves, any fingers will do
+        return c + 1.5 + (0.5 if f == g else 0.0), "leap"
+    if f == g:
+        return c + 4.0, ""
+    steps = g - f
+    if (d > 0) == (steps > 0):   # going the way the fingers point: inside one hand position
+        n = abs(steps)
+        reach = {1: 4, 2: 6, 3: 8, 4: 12}[n]
+        if abs(d) > reach:
+            c += (abs(d) - reach) * 1.5
+        elif abs(d) < n:   # fingers need at least about a semitone each
+            c += (n - abs(d)) * 1.5
+        else:
+            c += 0.15 * abs(abs(d) - 2.0 * n)
+        return c, ""
+    # going against the fingers: only the thumb can cross (under going away from it, over coming back)
+    if (g == 1 or f == 1) and abs(d) <= 5:
+        other = f if g == 1 else g
+        c += 2.0 + {2: 1.5, 3: 0.0, 4: 0.3, 5: 1.0}.get(other, 2.0)
+        if g == 1 and black_g or f == 1 and black_f:
+            c += 1.0
+        return c, "cross"
+    return c + 30.0, ""
+
+
+def _fing_sequence(pitches, hand):
+    """v22ze-259: fingers 1-5 for a run of single notes (cheapest overall).  Returns [(finger, matters)]:
+    matters is True for the first note, after a thumb crossing, and after a leap."""
+    n = len(pitches)
+    if n == 0:
+        return []
+    INF = 1e18
+    cost = [[0.0 if (pitches[0] % 12 not in _FING_BLACK or f not in (1,)) else 1.0 for f in range(1, 6)]]
+    back = []
+    for i in range(1, n):
+        row, br = [], []
+        for g in range(1, 6):
+            best, bf = INF, 0
+            for f in range(1, 6):
+                s, _k = _fing_step_cost(f, g, pitches[i - 1], pitches[i], hand)
+                t = cost[-1][f - 1] + s
+                if t < best:
+                    best, bf = t, f
+            row.append(best)
+            br.append(bf)
+        cost.append(row)
+        back.append(br)
+    f = min(range(1, 6), key=lambda k: cost[-1][k - 1])
+    out = [f]
+    for i in range(n - 1, 0, -1):
+        f = back[i - 1][f - 1]
+        out.append(f)
+    out.reverse()
+    res = [(out[0], True)]
+    for i in range(1, n):
+        _c, kind = _fing_step_cost(out[i - 1], out[i], pitches[i - 1], pitches[i], hand)
+        res.append((out[i], bool(kind)))
+    return res
+
+
+def _fing_chord(pitches_sorted, hand):
+    """v22ze-259: fingers for the notes of one chord (lowest first); None when there are more than five."""
+    k = len(pitches_sorted)
+    span = pitches_sorted[-1] - pitches_sorted[0]
+    if k < 2 or k > 5:
+        return None
+    if k == 2:
+        fs = [1, 2 if span <= 2 else 3 if span <= 4 else 4 if span <= 6 else 5]
+    elif k == 3:
+        fs = [1, 2, 3] if span <= 4 else [1, 3, 5]
+    elif k == 4:
+        fs = [1, 2, 3, 5] if span >= 7 else [1, 2, 3, 4]
+    else:
+        fs = [1, 2, 3, 4, 5]
+    return fs if hand == "R" else fs[::-1]   # left hand: the thumb is on the highest note
+
+
+def _fingering(song, rh_i, lh_i):
+    """v22ze-259: suggested fingers for both hands.  Returns {id(note): (finger, matters, "R"/"L")}.  Looks only: no
+    note is changed.  Single notes: the cheapest fingering of each run (a gap of a beat or more, or a chord,
+    starts a new run).  Chords: by the shape of the chord; "matters" only for stretched or 4-5 note chords."""
+    tpb = song.ticks_per_beat
+    out = {}
+    for ti, hand in ((rh_i, "R"), (lh_i, "L")):
+        notes = [n for n in song.tracks[ti].notes if getattr(n, "articulation", "") != "tie_continuation"]
+        notes.sort(key=lambda n: (n.tick, n.pitch))
+        strikes = []
+        for n in notes:
+            if strikes and n.tick - strikes[-1][0] <= 40:
+                strikes[-1][1].append(n)
+            else:
+                strikes.append((n.tick, [n]))
+        run, run_end = [], None
+
+        def _flush():
+            if run:
+                for nn, (f, m) in zip(run, _fing_sequence([x.pitch for x in run], hand)):
+                    out[id(nn)] = (f, m, hand)
+                del run[:]
+        for t, g in strikes:
+            if len(g) > 1:
+                _flush()
+                ps = sorted(g, key=lambda x: x.pitch)
+                fs = _fing_chord([x.pitch for x in ps], hand)
+                if fs:
+                    big = len(ps) >= 4 or ps[-1].pitch - ps[0].pitch >= 9
+                    for x, f in zip(ps, fs):
+                        out[id(x)] = (f, big, hand)
+                run_end = None
+                continue
+            if run and run_end is not None and t - run_end >= tpb:
+                _flush()
+            run.append(g[0])
+            run_end = g[0].tick + max(1, g[0].duration)
+        _flush()
+    return out
+
+
+_FING_CACHE = {"key": None, "map": {}}
+
+
+def _fingering_cached(song):
+    """v22ze-259: _fingering for the score on screen, worked out again only when the notes change."""
+    rh_i, lh_i = _hand_tracks(song)
+    if rh_i is None or lh_i is None:
+        return {}
+    key = (id(song), rh_i, lh_i, tuple(len(t.notes) for t in song.tracks),
+           sum(n.tick + n.pitch for t in song.tracks for n in t.notes))
+    if _FING_CACHE["key"] != key:
+        _FING_CACHE["map"] = _fingering(song, rh_i, lh_i)
+        _FING_CACHE["key"] = key
+    return _FING_CACHE["map"]
 
 
 def _hand_follow(items, span=14, var_ps=20.0, mvar=20.0):
@@ -17838,6 +18017,7 @@ class MidisoftStudio:
         nm.add_command(label="Fix Measures…",command=self._fix_measures)   # v22ze-215
         nm.add_command(label="Soft Notes…",command=self._soft_notes_dialog)   # v22ze-248
         nm.add_command(label="Easy to Play (hand over hand)…",command=self._easy_play)   # v22ze-250
+        nm.add_command(label="Fingering Numbers…",command=self._fingering_dialog)   # v22ze-259
         nm.add_separator()
         scm=TkPopupMenu(mb,tearoff=0); mb.add_cascade(label="Score Settings",menu=scm)
         scm.add_command(label="Score Settings…\tCtrl+G", command=self._open_score_setup,
@@ -22814,7 +22994,7 @@ class MidisoftStudio:
             return NOTE_NAMES[p % 12] + str(p // 12 - 1)
 
         def _hn(ti):
-            return "right hand" if ti == rh_i else "left hand"
+            return "R.H." if ti == rh_i else "L.H."   # v22ze-259
 
         def _line(e):
             return ("Measures %d-%d: figure %s-%s (%d notes) -> %s, melody (%d notes) -> %s, crosses %d times%s"
@@ -22873,6 +23053,44 @@ class MidisoftStudio:
             tk.Button(brow, text=txt, command=cmd, bg=col, fg="white", relief=tk.FLAT,
                       padx=12, pady=4).pack(side="left", padx=4)
         _find()
+
+    def _fingering_dialog(self):   # v22ze-259
+        old = getattr(self, "_finger_dlg", None)
+        if old is not None and old.winfo_exists():
+            old.lift(); return
+        rh_i, lh_i = _hand_tracks(self.song)
+        if rh_i is None or lh_i is None:
+            messagebox.showinfo("Fingering Numbers",
+                "Run Corrections \u25b8 Separate Hands first, so the music is split into a right-hand "
+                "part and a left-hand part.", parent=self.root)
+            return
+        BG, FG, MUTED = "#0d1117", "#f0f6fc", "#8b949e"
+        dlg = tk.Toplevel(self.root)
+        dlg.title("Fingering Numbers")
+        dlg.configure(bg=BG)
+        self._finger_dlg = dlg
+        try:
+            self._work_dialogs = [w for w in getattr(self, "_work_dialogs", []) if w.winfo_exists()] + [dlg]
+        except Exception:
+            pass
+        tk.Label(dlg, text="Suggested fingers (1 = thumb ... 5 = little finger) for each hand, shown in blue on the "
+                           "Score. They are a suggestion from the notes alone, not a teacher's fingering. "
+                           "Nothing in the music changes and nothing is saved in the MIDI file. "
+                           "For now they show on the screen only (not in the printed score or MusicXML).",
+                 bg=BG, fg=MUTED, justify="left", anchor="w", wraplength=460).pack(fill="x", padx=12, pady=(10, 6))
+        mode = tk.IntVar(value=int(getattr(self, "_finger_mode", 0) or 0))
+        for v_, t_ in ((0, "Off"), (1, "Only where they matter (start of a run, thumb crossings, leaps, wide chords)"),
+                       (2, "Every note")):
+            tk.Radiobutton(dlg, text=t_, value=v_, variable=mode, bg=BG, fg=FG, selectcolor="#21262d",
+                           activebackground=BG, activeforeground=FG, anchor="w", justify="left",
+                           wraplength=440).pack(fill="x", padx=16)
+
+        def _set(*_x):
+            self._finger_mode = int(mode.get())
+            self._soft_redraw()
+        mode.trace_add("write", _set)
+        tk.Button(dlg, text="Close", command=dlg.destroy, bg="#21262d", fg="white", relief=tk.FLAT,
+                  padx=12, pady=4).pack(pady=(8, 10))
 
     def _show_log_folder(self):   # v22ze-210
         import subprocess
