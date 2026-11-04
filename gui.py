@@ -17956,6 +17956,7 @@ class MidisoftStudio:
             for _a in ("title", "composer"):   # v22ze-209: keep the title through rationalize / separate hands
                 if not getattr(song, _a, ""):
                     setattr(song, _a, getattr(self.song, _a, ""))
+            song.key_sig = getattr(self.song, "key_sig", "C") or "C"   # v22ze-256: keep the key the user set
             self.song = song
             self.transport.song = song
             self._is_rationalized = True
@@ -17964,6 +17965,10 @@ class MidisoftStudio:
         else:
             # Discarding — revert to original
             if self._original_song is not None:
+                self._original_song.key_sig = getattr(self.song, "key_sig", "C") or "C"   # v22ze-256
+                for _a in ("title", "composer"):
+                    if getattr(self.song, _a, ""):
+                        setattr(self._original_song, _a, getattr(self.song, _a))
                 self.song = self._original_song
                 self.transport.song = self._original_song
             self._original_song = None
