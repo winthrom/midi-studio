@@ -23129,11 +23129,23 @@ class MidisoftStudio:
             old.lift(); return
         rh_i, lh_i = _hand_tracks_for_fingers(self.song)   # v22ze-260b
         if rh_i is None or lh_i is None:
-            messagebox.showinfo("Fingering Numbers",
-                "Fingering needs the music in two parts, a right hand and a left hand. This file does not "
-                "have exactly two tracks with notes. Run Corrections \u25b8 Separate Hands first (or Combine "
-                "Tracks, then Separate Hands).", parent=self.root)
-            return
+            _one = [t for t in self.song.tracks if t.notes and getattr(t, "channel", 0) != 9]
+            if len(_one) == 1:   # v22ze-260c: one track with both hands: offer to separate them now
+                if not messagebox.askyesno("Fingering Numbers",
+                        "This file has one track with both hands in it. Fingering needs the right hand and "
+                        "the left hand apart.\n\nRun Separate Hands now?  (Edit > Undo takes it back.)",
+                        parent=self.root):
+                    return
+                self._separate_hands()
+                rh_i, lh_i = _hand_tracks_for_fingers(self.song)
+                if rh_i is None or lh_i is None:
+                    return
+            else:
+                messagebox.showinfo("Fingering Numbers",
+                    "Fingering needs the music in two parts, a right hand and a left hand. This file has %d "
+                    "tracks with notes. Use Corrections \u25b8 Combine Tracks, then Separate Hands."
+                    % len(_one), parent=self.root)
+                return
         BG, FG, MUTED = "#0d1117", "#f0f6fc", "#8b949e"
         dlg = tk.Toplevel(self.root)
         dlg.title("Fingering Numbers")
