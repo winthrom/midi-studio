@@ -9908,6 +9908,61 @@ class SongSettingsDlg(tk.Toplevel):
 # ─────────────────────────────────────────────────────────────────────────────
 
 
+# v22ze-263: Sterling Lions Club block shared by the opening screen and Help > About.
+# The Lions emblem is NOT in the public source.  It is shown only if the file lions_emblem.png
+# sits next to the program (official builds add it; see TRADEMARKS.md).  Without it the block is text only.
+def _lions_emblem_image(master, size_in=1.0):
+    try:
+        import app_resources as _ar
+        for root in _ar.app_roots():
+            for sub in ("", "assets"):
+                p = os.path.join(root, sub, "lions_emblem.png")
+                if os.path.isfile(p):
+                    img = tk.PhotoImage(master=master, file=p)
+                    want = max(24, int(master.winfo_fpixels("%fi" % size_in)))
+                    m = max(img.width(), img.height())
+                    if m > want:
+                        img = img.subsample(max(1, int(round(m / want))))
+                    elif m < want:
+                        img = img.zoom(max(1, int(round(want / m))))
+                    return img
+    except Exception:
+        pass
+    return None
+
+
+def _lions_block(parent, bg, wrap=380):
+    import webbrowser
+    BLUE, MUTED, GOLD = "#58a6ff", "#8b949e", "#d29922"
+    tk.Label(parent, text="Supporting the Lions Club of Sterling, VA", bg=bg, fg=GOLD,
+             font=("TkDefaultFont", 11, "italic")).pack(pady=(14, 6))
+    row = tk.Frame(parent, bg=bg); row.pack()
+    img = _lions_emblem_image(parent)
+    if img is not None:
+        lab = tk.Label(row, image=img, bg=bg, bd=0)
+        lab.image = img          # keep a reference
+        lab.pack(side=tk.LEFT, padx=(0, 14))
+    col = tk.Frame(row, bg=bg); col.pack(side=tk.LEFT)
+    tk.Label(col, text="Sterling Lions Club", bg=bg, fg="#e6edf3",
+             font=("TkDefaultFont", 11, "bold"), anchor="w").pack(anchor="w")
+    for lead, shown, url in (("Donate:", "e-clubhouse.org/sites/sterlingva/page-10.php", LIONS_DONATE_URL),
+                             ("Club:", "e-clubhouse.org/sites/sterlingva", LIONS_WEBSITE_URL)):
+        r = tk.Frame(col, bg=bg); r.pack(anchor="w", pady=1)
+        tk.Label(r, text=lead, bg=bg, fg=MUTED, font=("TkDefaultFont", 9), width=7, anchor="w").pack(side=tk.LEFT)
+        lk = tk.Label(r, text=shown, bg=bg, fg=BLUE, font=("TkDefaultFont", 10, "underline"), cursor="hand2")
+        lk.pack(side=tk.LEFT)
+        def _go(e, u=url):
+            webbrowser.open(u)
+            return "break"
+        lk.bind("<Button-1>", _go)
+        lk.bind("<Enter>", lambda e, w=lk: w.configure(fg="#79c0ff"))
+        lk.bind("<Leave>", lambda e, w=lk: w.configure(fg=BLUE))
+    tk.Label(parent, text="Donations go to the Sterling Lions Club Charity Fund,\nnot to Lions Clubs International.",
+             bg=bg, fg="#c9d1d9", font=("TkDefaultFont", 9), justify=tk.CENTER, wraplength=wrap).pack(pady=(10, 0))
+    tk.Label(parent, text="MIDI Studio is an independent project by a Lions member.\nIt is not an official product of Lions Clubs International.",
+             bg=bg, fg=MUTED, font=("TkDefaultFont", 8), justify=tk.CENTER, wraplength=wrap).pack(pady=(6, 0))
+
+
 class SplashScreen(tk.Toplevel):
     """Startup splash — stays open until the user explicitly closes it.
 
@@ -10079,48 +10134,18 @@ class SplashScreen(tk.Toplevel):
             font=("TkDefaultFont", 9),
         ).pack(pady=(4, 8))
 
-        tk.Label(inner, text="A collaboration:", bg=BG, fg=MUTED, font=("TkDefaultFont", 8)).pack()
         tk.Label(
             inner,
-            text="Michael F. Winthrop  &  Claude Sonnet 4.6",
+            text="Michael F. Winthrop, Member of Sterling Lions Club,\nin collaboration with Claude Sonnet of Anthropic",
             bg=BG,
             fg=GOLD,
             font=("TkDefaultFont", 10, "bold"),
-        ).pack(pady=(0, 20))
+            justify=tk.CENTER,
+        ).pack(pady=(0, 20))   # v22ze-263
 
         tk.Frame(inner, bg=BDCOL, height=1).pack(fill=tk.X)
 
-        tk.Label(
-            inner,
-            text="Supporting the Sterling Lions Club",
-            bg=BG,
-            fg=GOLD,
-            font=("TkDefaultFont", 11, "italic"),
-        ).pack(pady=(16, 6))
-
-        lf = tk.Frame(inner, bg=BG)
-        lf.pack()
-        for txt, url in [
-            ("♌  Make a Donation", LIONS_DONATE_URL),
-            ("⊕  https://e-clubhouse.org/sites/sterlingva", LIONS_WEBSITE_URL),
-        ]:
-            lk = tk.Label(
-                lf,
-                text=txt,
-                bg=BG,
-                fg=BLUE,
-                font=("TkDefaultFont", 10, "underline"),
-                cursor="hand2",
-            )
-            lk.pack(pady=1)
-
-            def _open_lions_link(e, u=url):
-                webbrowser.open(u)
-                return "break"
-
-            lk.bind("<Button-1>", _open_lions_link)
-            lk.bind("<Enter>", lambda e, w=lk: w.configure(fg="#79c0ff"))
-            lk.bind("<Leave>", lambda e, w=lk: w.configure(fg=BLUE))
+        _lions_block(inner, BG)   # v22ze-263
 
         tk.Label(inner, text="Contains MIDI Studio code by Michael Winthrop for the Sterling Lions Club, Virginia, USA.\nsee: https://github.com/winthrom/midi-studio", bg=BG, fg=MUTED,
                  font=("TkDefaultFont", 7), justify=tk.CENTER).pack(pady=(8, 0))
@@ -23811,27 +23836,14 @@ class MidisoftStudio:
         tk.Frame(dlg, bg="#21262d", height=1).pack(fill=tk.X, padx=28)
 
         # ── Sterling Lions Club section ───────────────────────────────────────
-        tk.Label(dlg, text="Supporting the Sterling Lions Club",
-                 bg=BG, fg="#d29922",
-                 font=("TkDefaultFont", 10, "italic")).pack(pady=(14, 4))
-
-        lf = tk.Frame(dlg, bg=BG); lf.pack()
-        for txt, url in [("♌  Make a Donation", LIONS_DONATE_URL),
-                         ("⊕  Visit Website",   LIONS_WEBSITE_URL)]:
-            lk = tk.Label(lf, text=txt, bg=BG, fg="#58a6ff",
-                          font=("TkDefaultFont", 10, "underline"),
-                          cursor="hand2")
-            lk.pack(pady=2)
-            lk.bind("<Button-1>", lambda e, u=url: webbrowser.open(u))
-            lk.bind("<Enter>", lambda e, w=lk: w.configure(fg="#79c0ff"))
-            lk.bind("<Leave>", lambda e, w=lk: w.configure(fg="#58a6ff"))
+        _lions_block(dlg, BG, wrap=420)   # v22ze-263
 
         tk.Frame(dlg, bg="#21262d", height=1).pack(fill=tk.X, padx=28, pady=14)
 
         # ── Technical info ────────────────────────────────────────────────────
         tk.Label(dlg, text="Built in Python 3 + tkinter + mido + python-rtmidi", bg=BG, fg=MUTED,
                  font=("TkDefaultFont", 9), justify=tk.LEFT).pack(padx=28, pady=(0, 2), anchor="w")   # v22ze-254
-        tk.Label(dlg, text="Developed by Michael F. Winthrop in collaboration with Claude Sonnet 4.6", bg=BG, fg="#e3b341",
+        tk.Label(dlg, text="Michael F. Winthrop, Member of Sterling Lions Club, in collaboration with Claude Sonnet of Anthropic", bg=BG, fg="#e3b341",
                  font=("TkDefaultFont", 9, "bold"), justify=tk.LEFT).pack(padx=28, pady=(0, 2), anchor="w")
         tk.Label(dlg, text="Original inspiration: MidiSoft Studio4 © 1991–1995 MidiSoft\nCorporation, created by Raymond Bily", bg=BG, fg="#ffffff",
                  font=("TkDefaultFont", 9), justify=tk.LEFT).pack(padx=28, pady=(0, 2), anchor="w")
