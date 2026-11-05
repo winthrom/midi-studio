@@ -16635,9 +16635,23 @@ def _fingering(song, rh_i, lh_i):
 _FING_CACHE = {"key": None, "map": {}}
 
 
+def _hand_tracks_for_fingers(song):
+    """v22ze-260b: the two hand tracks for fingering.  The usual recognition first (names, piano programs);
+    if that finds nothing, a file with exactly two tracks that hold notes (not drums) is taken as two hands,
+    the track with the higher average pitch being the right hand."""
+    rh_i, lh_i = _hand_tracks(song)
+    if rh_i is not None and lh_i is not None:
+        return rh_i, lh_i
+    cand = [i for i, t in enumerate(song.tracks) if t.notes and getattr(t, "channel", 0) != 9]
+    if len(cand) != 2:
+        return None, None
+    avg = [sum(n.pitch for n in song.tracks[i].notes) / len(song.tracks[i].notes) for i in cand]
+    return (cand[0], cand[1]) if avg[0] >= avg[1] else (cand[1], cand[0])
+
+
 def _fingering_cached(song):
     """v22ze-259: _fingering for the score on screen, worked out again only when the notes change."""
-    rh_i, lh_i = _hand_tracks(song)
+    rh_i, lh_i = _hand_tracks_for_fingers(song)   # v22ze-260b
     if rh_i is None or lh_i is None:
         return {}
     key = (id(song), rh_i, lh_i, tuple(len(t.notes) for t in song.tracks),
@@ -23113,11 +23127,12 @@ class MidisoftStudio:
         old = getattr(self, "_finger_dlg", None)
         if old is not None and old.winfo_exists():
             old.lift(); return
-        rh_i, lh_i = _hand_tracks(self.song)
+        rh_i, lh_i = _hand_tracks_for_fingers(self.song)   # v22ze-260b
         if rh_i is None or lh_i is None:
             messagebox.showinfo("Fingering Numbers",
-                "Run Corrections \u25b8 Separate Hands first, so the music is split into a right-hand "
-                "part and a left-hand part.", parent=self.root)
+                "Fingering needs the music in two parts, a right hand and a left hand. This file does not "
+                "have exactly two tracks with notes. Run Corrections \u25b8 Separate Hands first (or Combine "
+                "Tracks, then Separate Hands).", parent=self.root)
             return
         BG, FG, MUTED = "#0d1117", "#f0f6fc", "#8b949e"
         dlg = tk.Toplevel(self.root)
