@@ -8223,6 +8223,7 @@ def _sound_list(notes, match_score=False):   # v22ze-213
 class Transport:
     def __init__(self, song: Song):
         self.song = song
+        self.speed = 1.0   # v22ze-262: listening speed, playback only (1.0 = as written)
         self.position_ticks = 0
         self.position_sec = 0.0
         self._playing = False
@@ -8341,11 +8342,20 @@ class Transport:
     def set_metronome(self, on):
         self._metronome = on
 
+    def _eff_speed(self):   # v22ze-262
+        if self._recording:
+            return 1.0
+        try:
+            s = float(getattr(self, "speed", 1.0))
+        except Exception:
+            s = 1.0
+        return min(4.0, max(0.1, s))
+
     def _t2s(self, ticks):
-        return (ticks / self.song.ticks_per_beat) * (self.song.tempo / 1_000_000)
+        return (ticks / self.song.ticks_per_beat) * (self.song.tempo / self._eff_speed() / 1_000_000)
 
     def _s2t(self, sec):
-        return sec * self.song.ticks_per_beat / (self.song.tempo / 1_000_000)
+        return sec * self.song.ticks_per_beat / (self.song.tempo / self._eff_speed() / 1_000_000)
 
     # ── Tempo map helpers ────────────────────────────────────────────────────
     def _build_tempo_map(self):
@@ -8362,6 +8372,9 @@ class Transport:
                 deduped[-1] = (tick, tempo)
             else:
                 deduped.append((tick, tempo))
+        _sp = self._eff_speed()   # v22ze-262: listening speed slows or speeds every tempo the same way
+        if abs(_sp - 1.0) > 1e-9:
+            deduped = [(t, int(tp / _sp)) for t, tp in deduped]
         return deduped
 
     def _tmap_tick_to_sec(self, tick, tempo_map, start_tick=0):
@@ -8369,7 +8382,7 @@ class Transport:
         Returns seconds relative to start_tick."""
         sec = 0.0
         prev_tick = start_tick
-        prev_tempo = self.song.tempo
+        prev_tempo = self.song.tempo / self._eff_speed()   # v22ze-262
         # Find the tempo in effect at start_tick
         for t, tmp in tempo_map:
             if t <= start_tick:
@@ -8391,7 +8404,7 @@ class Transport:
         # Convert wall-clock seconds (from start_tick) back to absolute tick.
         remaining = sec
         prev_tick = start_tick
-        prev_tempo = self.song.tempo
+        prev_tempo = self.song.tempo / self._eff_speed()   # v22ze-262
         for t, tmp in tempo_map:
             if t <= start_tick:
                 prev_tempo = tmp
@@ -8468,7 +8481,7 @@ class Transport:
                     timeline.append((te, lambda c=ch, v=val: _send_raw(0xB0 | c, 64, v)))
         # Metronome — use base tempo; sufficient for live use
         if self._metronome:
-            base_tempo = song.tempo
+            base_tempo = song.tempo / self._eff_speed()   # v22ze-262
             beat_sec = base_tempo / 1_000_000
             bi = 0
             t = 0.0
@@ -16662,6 +16675,89 @@ def _fingering_cached(song):
     return _FING_CACHE["map"]
 
 
+def _sound_set(song):
+    """v22ze-262: {(pitch, start, end, velocity)} of everything that is heard, as the player and the saved file
+    work it out (tied pieces joined, a note lengthened only for the score keeps its recorded sound)."""
+    out = set()
+    for t in song.tracks:
+        if getattr(t, "channel", 0) == 9:
+            continue
+        for n in _sound_list(t.notes):
+            out.add((n.pitch, n.tick, n.tick + n.duration, n.velocity))
+    return out
+
+
+def _compare_songs(orig, cur):
+    """v22ze-262: how `cur` differs from `orig` (the file as it was loaded).  Looks only."""
+    import bisect as _bs
+    r = {}
+    a, b = _sound_set(orig), _sound_set(cur)
+    ka = {(p, s): (e, v) for p, s, e, v in a}
+    kb = {(p, s): (e, v) for p, s, e, v in b}
+    r["sound_same"] = (a == b)
+    r["sound_changed"] = sum(1 for k in ka if k in kb and ka[k] != kb[k])
+    r["sound_missing"] = sum(1 for k in ka if k not in kb)
+    r["sound_new"] = sum(1 for k in kb if k not in ka)
+    mm = orig.get_measure_map()
+    starts = [m[1] for m in mm]
+
+    def per_bar(S):
+        ticks = set(n.tick for t in S.tracks if getattr(t, "channel", 0) != 9 for n in t.notes
+                    if getattr(n, "articulation", "") != "tie_continuation")
+        c = {}
+        for tk_ in ticks:
+            i = max(0, _bs.bisect_right(starts, tk_) - 1)
+            c[i] = c.get(i, 0) + 1
+        return c
+    ca, cb = per_bar(orig), per_bar(cur)
+    r["bars_differ"] = sorted(i + 1 for i in set(ca) | set(cb) if ca.get(i, 0) != cb.get(i, 0))
+
+    def count(S):
+        return sum(1 for t in S.tracks if getattr(t, "channel", 0) != 9 for n in t.notes
+                   if getattr(n, "articulation", "") != "tie_continuation")
+    r["notes_before"], r["notes_now"] = count(orig), count(cur)
+    ri, li = _hand_tracks(cur)
+    r["hands"] = None if ri is None or li is None else (len(cur.tracks[ri].notes), len(cur.tracks[li].notes))
+    r["score_only"] = sum(1 for t in cur.tracks for n in t.notes
+                          if getattr(n, "orig_dur", None) is not None and n.orig_dur != n.duration)
+    r["marked"] = sum(1 for t in cur.tracks for n in t.notes if getattr(n, "mark", ""))
+    r["settings"] = []
+    for nm_, f_ in (("key", lambda S: getattr(S, "key_sig", "C")),
+                    ("time signature", lambda S: "%d/%d" % (S.time_sig_num, S.time_sig_den)),
+                    ("tempo", lambda S: "%d BPM" % S.bpm)):
+        if f_(orig) != f_(cur):
+            r["settings"].append("%s %s -> %s" % (nm_, f_(orig), f_(cur)))
+    return r
+
+
+def _compare_text(r):
+    """v22ze-262: the report for _compare_songs, in plain words."""
+    L = []
+    if r["sound_same"]:
+        L.append("Sound (what you hear): the same as the loaded file.")
+    else:
+        L.append("Sound (what you hear): DIFFERENT. %d note(s) missing, %d new, %d changed in length or loudness."
+                 % (r["sound_missing"], r["sound_new"], r["sound_changed"]))
+    if not r["bars_differ"]:
+        L.append("Strikes per bar: the same in every bar.")
+    else:
+        bs = r["bars_differ"]
+        L.append("Strikes per bar: DIFFERENT in %d bar(s): %s%s." % (
+            len(bs), ", ".join(str(x) for x in bs[:20]), " ..." if len(bs) > 20 else ""))
+    L.append("Notes: %d when loaded, %d now (a tied note counts once)." % (r["notes_before"], r["notes_now"]))
+    if r["hands"]:
+        L.append("Hands: right hand %d notes, left hand %d notes." % r["hands"])
+    else:
+        L.append("Hands: not split into a right hand and a left hand.")
+    if r["score_only"]:
+        L.append("Score only: %d note(s) are drawn longer than they sound (Remove Short Rests). The sound is kept." % r["score_only"])
+    if r["marked"]:
+        L.append("Marks: %d note(s) carry a mark." % r["marked"])
+    L.append("Key, time signature, tempo: " + ("; ".join(r["settings"]) if r["settings"] else "unchanged."))
+    return "\n\n".join(L)
+
+
+
 def _hand_follow(items, span=14, var_ps=20.0, mvar=20.0):
     """v22ze-251: decide the hand for every note by following where each hand is.
     items: [(start, end, pitch)] in seconds.  Returns a list of "L"/"R", one per item.
@@ -18074,6 +18170,9 @@ class MidisoftStudio:
         nm=TkPopupMenu(mb,tearoff=0); mb.add_cascade(label="Corrections",menu=nm)
         nm.add_command(label="Quantize…\tCtrl+Q", command=lambda: QuantizeDlg(self.root, self),
                        accelerator="Ctrl+Q")
+        nm.add_command(label="Auto-Correct Score…", command=self._auto_correct_score)   # v22ze-262
+        nm.add_command(label="Compare with Original…", command=self._compare_original)   # v22ze-262
+        nm.add_separator()
         nm.add_command(label="Separate Hands…",command=self._separate_hands)
         nm.add_command(label="Rationalize Score…\tCtrl+R", command=self._rationalize_score,
                        accelerator="Ctrl+R")
@@ -18619,6 +18718,7 @@ class MidisoftStudio:
             return "Choose a speed between 10 and 1000 percent."
         if abs(pct - 100.0) < 1e-9:
             return "No change: 100 percent is the current speed."
+        self._tempo_user_set = True   # v22ze-262
         before = _ts_snapshot(song)
         err = _ts_transform(song, song.ticks_per_beat, 100.0 / pct)
         if err:
@@ -18648,6 +18748,8 @@ class MidisoftStudio:
         ))
         self.song.tempo = new_tempo
         self.song.modified = True
+        if source == "manual":
+            self._tempo_user_set = True   # v22ze-262: Rationalize will not replace it unless you tick Auto-detect
         self._update_title()
         self._refresh_views()
 
@@ -19034,7 +19136,7 @@ class MidisoftStudio:
         spd_msg = tk.StringVar(value="100 = same speed; 125 = 25% faster; 80 = 20% slower")
         spd_row = tk.Frame(gfrm, bg=BG)
         spd_row.pack(fill=tk.X, pady=3)
-        _lbl(spd_row, "Speed (%):", width=18).pack(side=tk.LEFT)
+        _lbl(spd_row, "Tempo change (%):", width=18).pack(side=tk.LEFT)   # v22ze-262
         tk.Spinbox(spd_row, from_=10, to=1000, textvariable=spd_var,
                    **sb).pack(side=tk.LEFT, padx=(0, 6))
 
@@ -19053,6 +19155,26 @@ class MidisoftStudio:
             "changes are scaled together. Notes do not move. Undo restores it."
             ).pack(side=tk.LEFT)
         _lbl(gfrm, "", textvariable=spd_msg, fg=MUTED, font=("TkDefaultFont", 8),
+             wraplength=330, justify=tk.LEFT, anchor="w").pack(fill=tk.X, padx=(4, 0))
+
+        # v22ze-262: Listening speed -- for the ears only
+        ls_var = tk.IntVar(value=int(round(getattr(self, "_listen_pct", 100))))
+        ls_msg = tk.StringVar(value="For your ears only: it never changes the music, the saved file or the "
+                                    "printed score. Applies the next time you press Play.")
+        ls_row = tk.Frame(gfrm, bg=BG)
+        ls_row.pack(fill=tk.X, pady=3)
+        _lbl(ls_row, "Listening speed (%):", width=18).pack(side=tk.LEFT)
+        tk.Spinbox(ls_row, from_=25, to=200, textvariable=ls_var, **sb).pack(side=tk.LEFT, padx=(0, 6))
+
+        def _do_listen():
+            try:
+                v = ls_var.get()
+            except Exception:
+                v = 0
+            ls_msg.set(self._set_listening_speed(v))
+        _tt(tk.Button(ls_row, text="Apply", command=_do_listen, **bb),
+            "Play slower or faster to practise or to check a passage. Only what you hear changes.").pack(side=tk.LEFT)
+        _lbl(gfrm, "", textvariable=ls_msg, fg=MUTED, font=("TkDefaultFont", 8),
              wraplength=330, justify=tk.LEFT, anchor="w").pack(fill=tk.X, padx=(4, 0))
 
         # v22ze-207: Measure length row
@@ -19699,7 +19821,7 @@ class MidisoftStudio:
             return w
 
         # Tempo correction
-        detect_var = tk.BooleanVar(value=True)
+        detect_var = tk.BooleanVar(value=not getattr(self, "_tempo_user_set", False))   # v22ze-262: keep a tempo you set
         _tt(_row(pfrm, "Auto-detect tempo:", lambda p: tk.Checkbutton(
             p, variable=detect_var, bg=BG, fg=FG,
             selectcolor="#21262d", activebackground=BG), 0),
@@ -20480,8 +20602,10 @@ class MidisoftStudio:
         # v22ze-115b: via midi_io.output_ready()/output_label()
         out=(("MIDI OUT OK (FluidSynth)" if midi_io.output_label() == "FluidSynth (built-in)" else "MIDI OUT OK") if midi_io.output_ready() else "No MIDI out — run: timidity -B8,8 -Os -iA &")
         inp=" | MIDI IN OK" if midi_io.MIDI_IN_OK else ""
+        _ls = (f"  Listening speed {self._listen_pct:.0f}%"
+               if abs(getattr(self, "_listen_pct", 100) - 100) > 0.5 else "")   # v22ze-262
         self.status_var.set(f"BPM:{s.bpm}  {s.time_sig_num}/{s.time_sig_den}  "
-                            f"Tracks:{len(s.tracks)}  Measures:{bars:.0f}  TPB:{s.ticks_per_beat}  {out}{inp}")
+                            f"Tracks:{len(s.tracks)}  Measures:{bars:.0f}  TPB:{s.ticks_per_beat}  {out}{inp}{_ls}")
         # Rationalization indicator
         if hasattr(self,'_ration_var'):
             if self._is_rationalized:
@@ -20505,6 +20629,7 @@ class MidisoftStudio:
 
     def _close_current(self):
         self.transport.stop()
+        self._pristine_song = None   # v22ze-262
         try:   # v22ze-214
             if self._score_view and self._score_view.winfo_exists():
                 self._score_view._reset_editing()
@@ -20640,6 +20765,12 @@ class MidisoftStudio:
     def _load_file_inner(self,path):
         try:
             self.song=Song.from_mid(path); self.transport.song=self.song
+            self._tempo_user_set = False   # v22ze-262
+            try:   # v22ze-262: the file as loaded, for Compare with Original
+                import copy as _cpy262
+                self._pristine_song = _cpy262.deepcopy(self.song)
+            except Exception:
+                self._pristine_song = None
             self._origin_grand = _is_grand_staff(self.song)   # v22ze-191
             self._grand_ok = False
             # v22ze-61 fix: reassigning transport.song did NOT reset
@@ -23173,6 +23304,144 @@ class MidisoftStudio:
         mode.trace_add("write", _set)
         tk.Button(dlg, text="Close", command=dlg.destroy, bg="#21262d", fg="white", relief=tk.FLAT,
                   padx=12, pady=4).pack(pady=(8, 10))
+
+    def _set_listening_speed(self, pct):   # v22ze-262
+        try:
+            pct = float(pct)
+        except Exception:
+            return "Enter a percentage such as 70."
+        if pct < 25 or pct > 200:
+            return "Choose a speed between 25 and 200 percent."
+        self._listen_pct = pct
+        self.transport.speed = pct / 100.0
+        self._update_status()
+        if abs(pct - 100.0) < 0.5:
+            return "Normal speed. Applies the next time you press Play."
+        return ("Listening at %d%%. Only what you hear changes, not the music, the file or the print. "
+                "Applies the next time you press Play." % round(pct))
+
+    def _show_compare(self, title="Compare with Original", intro="", offer_undo=False):   # v22ze-262
+        BG, FG, MUTED = "#0d1117", "#f0f6fc", "#8b949e"
+        pr = getattr(self, "_pristine_song", None)
+        if pr is None:
+            messagebox.showinfo("Compare with Original",
+                "There is no loaded file to compare with. This works on a score opened from a MIDI file.",
+                parent=self.root)
+            return
+        r = _compare_songs(pr, self.song)
+        old = getattr(self, "_cmp_dlg", None)
+        if old is not None and old.winfo_exists():
+            old.destroy()
+        dlg = tk.Toplevel(self.root)
+        dlg.title(title)
+        dlg.configure(bg=BG)
+        self._cmp_dlg = dlg
+        txt = (intro + "\n\n" if intro else "") + "Compared with the file as you opened it:\n\n" + _compare_text(r)
+        t = tk.Text(dlg, width=72, height=18, wrap="word", bg="#161b22", fg=FG, relief=tk.FLAT, padx=10, pady=8,
+                    font=("TkDefaultFont", 10))
+        t.insert("1.0", txt)
+        t.config(state="disabled")
+        t.pack(padx=12, pady=(12, 6))
+        bar = tk.Frame(dlg, bg=BG)
+        bar.pack(pady=(0, 12))
+        if offer_undo:
+            def _undo_all():
+                dlg.destroy()
+                self._undo()
+            tk.Button(bar, text="Undo all of this", command=_undo_all, bg="#21262d", fg="white", relief=tk.FLAT,
+                      padx=12, pady=4).pack(side=tk.LEFT, padx=6)
+        tk.Button(bar, text="Keep" if offer_undo else "Close", command=dlg.destroy, bg="#238636", fg="white",
+                  relief=tk.FLAT, padx=12, pady=4).pack(side=tk.LEFT, padx=6)
+
+    def _compare_original(self):   # v22ze-262
+        self._show_compare()
+
+    def _auto_correct_score(self):   # v22ze-262
+        old = getattr(self, "_auto_dlg", None)
+        if old is not None and old.winfo_exists():
+            old.lift(); return
+        if not any(t.notes for t in self.song.tracks):
+            messagebox.showinfo("Auto-Correct Score", "There are no notes to correct.", parent=self.root)
+            return
+        BG, FG, MUTED = "#0d1117", "#f0f6fc", "#8b949e"
+        ri, li = _hand_tracks_for_fingers(self.song)
+        two = ri is not None and li is not None
+        dlg = tk.Toplevel(self.root)
+        dlg.title("Auto-Correct Score")
+        dlg.configure(bg=BG)
+        self._auto_dlg = dlg
+        tk.Label(dlg, text="Runs the repairs that change only the written score, one after the other. The sound "
+                           "stays as recorded, and one Undo puts everything back. When it is done it compares "
+                           "the result with the file you opened.",
+                 bg=BG, fg=MUTED, justify="left", wraplength=470).pack(padx=14, pady=(12, 8), anchor="w")
+        v_sep = tk.BooleanVar(value=not two)
+        v_fix = tk.BooleanVar(value=False)
+        v_rsr = tk.BooleanVar(value=True)
+        cb = dict(bg=BG, fg=FG, selectcolor="#21262d", activebackground=BG, activeforeground=FG, anchor="w",
+                  justify="left", wraplength=450)
+        c1 = tk.Checkbutton(dlg, text="Separate hands (right and left)" if not two else
+                            "Separate hands (this file already has two hand parts)", variable=v_sep, **cb)
+        c1.pack(fill="x", padx=18)
+        if two:
+            c1.config(state="disabled")
+        tk.Checkbutton(dlg, text="   and fix places where the split looks wrong (Follow the hands)", variable=v_fix,
+                       **cb).pack(fill="x", padx=18)
+        tk.Checkbutton(dlg, text="Remove short rests (gaps shorter than a 16th note); marked notes are left alone",
+                       variable=v_rsr, **cb).pack(fill="x", padx=18)
+
+        def _go():
+            sep, fix, rsr = bool(v_sep.get()) and not two, bool(v_fix.get()), bool(v_rsr.get())
+            dlg.destroy()
+            self._auto_correct_run(sep, fix, rsr)
+        bar = tk.Frame(dlg, bg=BG)
+        bar.pack(pady=(10, 12))
+        tk.Button(bar, text="Run", command=_go, bg="#238636", fg="white", relief=tk.FLAT, padx=14, pady=4).pack(side=tk.LEFT, padx=6)
+        tk.Button(bar, text="Cancel", command=dlg.destroy, bg="#21262d", fg="white", relief=tk.FLAT, padx=14, pady=4).pack(side=tk.LEFT, padx=6)
+
+    def _auto_correct_run(self, sep, fix, rsr):   # v22ze-262
+        import copy as _copy
+        if not (sep or rsr):
+            messagebox.showinfo("Auto-Correct Score", "Nothing was ticked, so nothing was done.", parent=self.root)
+            return
+        if sep and not self._grand_staff_guard("Auto-Correct Score"):
+            return
+        try:
+            self.root.config(cursor="watch")
+            self.root.update_idletasks()
+        except Exception:
+            pass
+        try:
+            before = _copy.deepcopy(self.song)
+            work = _copy.deepcopy(self.song)
+            did = []
+            if sep:
+                params = {'quantize_strength': 0, 'detect_tempo': False, 'detect_timesig': False,
+                          'preserve_hands': False, 'correct_pedal_durations': False,
+                          'max_span': 12, 'max_notes_per_hand': 5, 'auto_move': False}
+                res = work.rationalize_keep_audio(params=params)
+                if fix:
+                    _ri, _li = _hand_tracks(res)
+                    if _ri is not None and _li is not None:
+                        _hand_follow_apply(res, _ri, _li, near=_hand_suspects(res, _ri, _li))
+                for _a in ("title", "composer", "key_sig"):
+                    if getattr(work, _a, None) is not None:
+                        setattr(res, _a, getattr(work, _a))
+                res.tempo = work.tempo
+                work = res
+                did.append("Separated the hands.")
+            if rsr:
+                rr = remove_short_rests(work, max(1, work.ticks_per_beat // 4))
+                did.append("Removed %d short rest(s)%s." % (
+                    rr["closed"], (", left %d after marked notes as written" % rr["marked"]) if rr.get("marked") else ""))
+            work.modified = True
+            self._push_undo(SongSwapAction("Auto-Correct Score", before, work))
+            self._swap_whole_song(work, deep=False)
+        finally:
+            try:
+                self.root.config(cursor="")
+            except Exception:
+                pass
+        self._show_compare("Auto-Correct Score: done", "\n".join(did), offer_undo=True)
 
     def _show_log_folder(self):   # v22ze-210
         import subprocess
