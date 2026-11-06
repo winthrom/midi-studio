@@ -241,3 +241,6 @@ archive/cleanup-*/
 packaging/macos/payload/lib/*
 packaging/macos/payload/sound/*
 !packaging/macos/midi-studio.spec
+lions_emblem.*
+assets/lions/
+*lions*emblem*
