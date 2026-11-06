@@ -2590,11 +2590,54 @@ def _chord_mark(notes):
     return ""
 
 
+_FINGER_MODE_LY = [0]   # v22ze-266b: the Fingering Numbers choice (0 off, 1 where they matter, 2 every note), for the print
+
+
+def _ly_finger_lookup(song):
+    """v22ze-266b: finger for a note when the LilyPond print is made: (finger, matters, "R"/"L") or None, by the same
+    rule as the screen.  Notes are found by pitch and start (within 40 ticks) because the print works on copies."""
+    try:
+        fm = _fingering_cached(song)
+    except Exception:
+        fm = {}
+    if not fm:
+        return lambda n: None
+    by = {}
+    for t in song.tracks:
+        for n in t.notes:
+            v = fm.get(id(n))
+            if v:
+                by.setdefault(n.pitch, []).append((n.tick, v))
+    mode = _FINGER_MODE_LY[0]
+
+    def look(n):
+        best = None
+        for tk_, v in by.get(n.pitch, ()):
+            d = abs(tk_ - n.tick)
+            if d <= 40 and (best is None or d < best[0]):
+                best = (d, v)
+        if best is None:
+            return None
+        return best[1] if (mode == 2 or best[1][1]) else None
+    return look
+
+
 def _ly_xml_enable_marks():
     """python-ly writes staccato, staccatissimo, tenuto, accent, portato (detached-legato), fermata and tremolo into
     MusicXML itself.  It leaves out the marcato sign (-^); this adds it as <strong-accent/>.  Safe to call twice."""
     try:
         import ly.musicxml.ly2xml_mediator as _M
+        if not getattr(_M.Mediator.new_articulation, "_fing266", False):
+            # v22ze-266b: python-ly gives every finger number inside a chord to the first note of the chord.
+            _na = _M.Mediator.new_articulation
+            def _new_art(self, art_token):
+                import ly.lex.lilypond as _L
+                if isinstance(art_token, _L.Fingering) and self.current_chord:
+                    self.current_chord[-1].add_fingering(art_token)
+                else:
+                    _na(self, art_token)
+            _new_art._fing266 = True
+            _M.Mediator.new_articulation = _new_art
         if getattr(_M.artic_token2xml_name, "_marks265", False):
             return
         _orig = _M.artic_token2xml_name
@@ -6342,6 +6385,12 @@ class Song:
         tpb = self.ticks_per_beat
         mmap = self.get_measure_map()
         tpm = mmap[0][5] if mmap else self.ticks_per_measure()  # first measure tpm (for compat)
+        _fl_get = _ly_finger_lookup(self) if _FINGER_MODE_LY[0] else (lambda n: None)   # v22ze-266b
+        def _fl_txt(n, below=False):
+            f = _fl_get(n)
+            if not f:
+                return ""
+            return ("_" if (below and f[2] == "L") else "-") + str(f[0])
         n_meas = len(mmap)
         title = (getattr(self, "title", "") or "").strip()     # v22ze-209: the score's own title
         if not title:
@@ -6798,11 +6847,14 @@ class Song:
                 for _pi, _pv in enumerate(_pieces):
                     _lastp = _pi == len(_pieces) - 1
                     _sfx = stac_sfx if _pi == 0 else ""
+                    _trem = _sfx if _sfx.startswith(":") else ""   # a tremolo sign must follow the length at once
+                    _post = "" if _trem else _sfx
                     if len(chord_notes) == 1:
-                        mstr.append(pitch_ly(chord_notes[0]) + _UDUR[_pv] + _sfx + (_tie(chord_notes[0]) if _lastp else "~"))
+                        _f1 = _fl_txt(chord_notes[0], True) if _pi == 0 else ""   # v22ze-266b: finger number
+                        mstr.append(pitch_ly(chord_notes[0]) + _UDUR[_pv] + _trem + _f1 + _post + (_tie(chord_notes[0]) if _lastp else "~"))
                     else:
-                        pitches = " ".join(pitch_ly(n) + (_tie(n) if _lastp else "~") for n in chord_notes)
-                        mstr.append("<" + pitches + ">" + _UDUR[_pv] + _sfx)
+                        pitches = " ".join(pitch_ly(n) + (_fl_txt(n) if _pi == 0 else "") + (_tie(n) if _lastp else "~") for n in chord_notes)
+                        mstr.append("<" + pitches + ">" + _UDUR[_pv] + _trem + _post)
                     mstr_kind.append("staccato" if _sfx == "-." else "note")   # v22ze-265
                 cur_u = on_u + sum(_pieces)
 
@@ -23510,6 +23562,7 @@ class MidisoftStudio:
 
         def _set(*_x):
             self._finger_mode = int(mode.get())
+            _FINGER_MODE_LY[0] = self._finger_mode   # v22ze-266b: the print follows this choice
             self._soft_redraw()
         mode.trace_add("write", _set)
         tk.Button(dlg, text="Close", command=dlg.destroy, bg="#21262d", fg="white", relief=tk.FLAT,
