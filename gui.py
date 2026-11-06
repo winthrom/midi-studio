@@ -18638,17 +18638,8 @@ class MidisoftStudio:
             _ts_restore(self.song, action.before)
             self._redo_stack.append(action)
         elif isinstance(action, CalibrationAction):
-            # Restore song tempo and time signature
-            redo_action = CalibrationAction(
-                description=action.description,
-                before_tempo=action.after_tempo,
-                after_tempo=action.before_tempo,
-                before_ts_num=action.after_ts_num,
-                before_ts_den=action.after_ts_den,
-                after_ts_num=action.before_ts_num,
-                after_ts_den=action.before_ts_den,
-            )
-            self._redo_stack.append(redo_action)
+            # v22ze-266c: the same action goes to the other stack (it was swapped here and again in Redo, so Redo did nothing)
+            self._redo_stack.append(action)
             self.song.tempo      = action.before_tempo
             self.song.set_time_signature(action.before_ts_num, action.before_ts_den)
             self.song.rationalized_measure_map = None   # v22l: force grid rebuild
@@ -18724,16 +18715,7 @@ class MidisoftStudio:
             _ts_restore(self.song, action.after)
             self._undo_stack.append(action)
         elif isinstance(action, CalibrationAction):
-            undo_action = CalibrationAction(
-                description=action.description,
-                before_tempo=action.after_tempo,
-                after_tempo=action.before_tempo,
-                before_ts_num=action.after_ts_num,
-                before_ts_den=action.after_ts_den,
-                after_ts_num=action.before_ts_num,
-                after_ts_den=action.before_ts_den,
-            )
-            self._undo_stack.append(undo_action)
+            self._undo_stack.append(action)   # v22ze-266c
             self.song.tempo      = action.after_tempo
             self.song.set_time_signature(action.after_ts_num, action.after_ts_den)
             self.song.rationalized_measure_map = None   # v22l: force grid rebuild
@@ -18932,6 +18914,17 @@ class MidisoftStudio:
         new_tempo  = int(60_000_000 / max(1, new_bpm))
         if new_tempo == old_tempo:
             return
+        if source == "manual":
+            # v22ze-266c: typing the BPM that is already shown changes nothing (it used to replace the file's own
+            # tempo changes with one steady tempo, so the same number played slower).  A real change scales the
+            # whole tempo line in proportion, so a performance keeps its give and take.
+            if round(60_000_000 / new_tempo) == round(60_000_000 / old_tempo):
+                return
+            if len(self.song.tempo_changes()) > 1:
+                err = self._bpm_scale_keep_changes(new_bpm)
+                if not err:
+                    self._tempo_user_set = True
+                    return
         self._push_undo(CalibrationAction(
             description=f"BPM {round(60_000_000/old_tempo)} → {round(new_bpm)} ({source})",
             before_tempo=old_tempo,  after_tempo=new_tempo,
@@ -18944,6 +18937,26 @@ class MidisoftStudio:
             self._tempo_user_set = True   # v22ze-262: Rationalize will not replace it unless you tick Auto-detect
         self._update_title()
         self._refresh_views()
+
+    def _bpm_scale_keep_changes(self, new_bpm):   # v22ze-266c
+        """Set the starting BPM and scale every tempo change in the file by the same amount.  One Undo step.
+        Returns an error text, or None when done.  The notes and the measures are not touched."""
+        song = self.song
+        old_bpm = 60_000_000.0 / max(1, song.tempo)
+        before = _ts_snapshot(song)
+        rmm = song.rationalized_measure_map
+        err = _ts_transform(song, song.ticks_per_beat, old_bpm / float(new_bpm))
+        if err:
+            _ts_restore(song, before)
+            return err
+        song.rationalized_measure_map = rmm
+        after = _ts_snapshot(song)
+        self._push_undo(TimeScaleAction(
+            description="BPM %d \u2192 %d (tempo changes kept in proportion)" % (round(old_bpm), round(new_bpm)),
+            before=before, after=after))
+        self._update_title()
+        self._refresh_views()
+        return None
 
     def _apply_global_timesig(self, new_num, new_den, source="manual"):
         """Change the song's time signature, push to undo stack, refresh views."""
@@ -20553,7 +20566,10 @@ class MidisoftStudio:
         dlg.geometry(f"{_w}x{_h}+{_x}+20")
 
     def _apply_bpm(self):
-        self.song.bpm=self.bpm_var.get(); self.song.modified=True
+        try:   # v22ze-266c: same rule as Score Settings (no change for the same number; Undo works)
+            self._apply_global_bpm(self.bpm_var.get())
+        except Exception:
+            pass
         self._update_title(); self._update_status()
 
     # ── Track area ────────────────────────────────────────────────────────────
@@ -23582,10 +23598,20 @@ class MidisoftStudio:
         except Exception:
             pass
         self._update_status()
+        live = False
+        try:   # v22ze-266c: while it is playing, carry on from the same place at the new speed
+            tr = self.transport
+            if tr.is_playing() and not getattr(tr, "_recording", False):
+                self._stop()
+                self.root.after(200, self._play)
+                live = True
+        except Exception:
+            live = False
+        tail = "Playing again from here at the new speed." if live else "Applies the next time you press Play."
         if abs(pct - 100.0) < 0.5:
-            return "Normal speed. Applies the next time you press Play."
+            return "Normal speed. " + tail
         return ("Listening at %d%%. Only what you hear changes, not the music, the file or the print. "
-                "Applies the next time you press Play." % round(pct))
+                "%s" % (round(pct), tail))
 
     def _show_compare(self, title="Compare with Original", intro="", offer_undo=False):   # v22ze-262
         BG, FG, MUTED = "#0d1117", "#f0f6fc", "#8b949e"
