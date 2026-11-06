@@ -21,6 +21,8 @@ done
 cp "$ROOT/packaging/linux/selftest.py" "$OUT/"
 # v22ze-198: the User Guide travels with the AppImage (Help > User Guide works offline)
 [ -f "$ROOT/docs/MIDI-Studio-User-Guide.pdf" ] && cp "$ROOT/docs/MIDI-Studio-User-Guide.pdf" "$OUT/"
+# v22ze-264: the Lions emblem travels only when the official build wrote it
+[ -f "$ROOT/lions_emblem.png" ] && cp "$ROOT/lions_emblem.png" "$OUT/" || true
 
 for sub in lib sound; do
     if [ -d "$ROOT/packaging/linux/payload/$sub" ] && \

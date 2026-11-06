@@ -27,6 +27,12 @@ jobs:
       - name: Fetch payload (FluidSynth libraries + soundfont)
         run: bash packaging/macos/fetch_payload.sh
 
+      - name: Add the Lions emblem (official builds only; skipped when the secret is not set)
+        env:
+          LIONS_EMBLEM_B64: ${{ secrets.LIONS_EMBLEM_B64 }}
+        run: |
+          if [ -n "$LIONS_EMBLEM_B64" ]; then echo "$LIONS_EMBLEM_B64" | base64 -d > lions_emblem.png; echo "emblem added"; else echo "no emblem secret: building without the emblem"; fi
+
       - name: Build (PyInstaller)
         run: bash packaging/macos/build_macos.sh
 

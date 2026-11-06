@@ -24,6 +24,14 @@ for sub in ("lib", "sound"):
     else:
         print("midi-studio.spec: no payload", sub + "/ (system one will be used)")
 
+# v22ze-264: the Lions emblem is bundled only when the official build has written lions_emblem.png
+EMBLEM = os.path.join(ROOT, "lions_emblem.png")
+if os.path.isfile(EMBLEM):
+    datas.append((EMBLEM, "."))
+    print("midi-studio.spec: bundling the Lions emblem")
+else:
+    print("midi-studio.spec: no Lions emblem (text-only Lions block)")
+
 hidden = ["mido.backends.rtmidi", "rtmidi", "fluidsynth"] + collect_submodules("ly")
 datas += collect_data_files("ly")
 

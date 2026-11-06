@@ -29,6 +29,13 @@ jobs:
         shell: pwsh
         run: ./packaging/windows/fetch_payload.ps1
 
+      - name: Add the Lions emblem (official builds only; skipped when the secret is not set)
+        shell: pwsh
+        env:
+          LIONS_EMBLEM_B64: ${{ secrets.LIONS_EMBLEM_B64 }}
+        run: |
+          if ($env:LIONS_EMBLEM_B64) { [IO.File]::WriteAllBytes("lions_emblem.png", [Convert]::FromBase64String($env:LIONS_EMBLEM_B64)); "emblem added" } else { "no emblem secret: building without the emblem" }
+
       - name: Build (PyInstaller)
         shell: pwsh
         run: ./packaging/windows/build_windows.ps1
