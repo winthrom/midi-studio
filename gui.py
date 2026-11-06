@@ -11107,7 +11107,7 @@ class ScoreView(tk.Frame):
             "0 = auto (gap-detection picks a sensible split per chord).\n"
             "A typical manual value is around 55-60 (just below middle C).\n\n"
             "This is a different setting from \u201cMax hand span\u201d in the\n"
-            "Rationalize Score dialog or Edit \u25b8 Separate Hands, which\n"
+            "Rationalize Score dialog or Fix File \u25b8 Separate Hands, which\n"
             "measures the INTERVAL (in semitones) a hand can comfortably\n"
             "reach, not a fixed pitch line.",
         )
@@ -11127,7 +11127,7 @@ class ScoreView(tk.Frame):
                               command=self._draw)
         _sfb.pack(side=tk.LEFT, padx=(6, 2))
         _tt(_sfb, "Show in red the single notes played so softly they are hardly heard.\n"
-                  "Off (usual).  This only changes what the Score draws; Corrections > Soft Notes\n"
+                  "Off (usual).  This only changes what the Score draws; Playing > Soft Notes\n"
                   "can delete or raise them.")
         self._show_pedal_var = tk.BooleanVar(value=True)   # v22ze-215
         _spb = tk.Checkbutton(tb, text="Pedal marks", variable=self._show_pedal_var, bg="#e8e8e0",
@@ -15721,7 +15721,7 @@ class ScoreView(tk.Frame):
         song = self.app.song
         rh, lh = _hand_tracks(song)   # v22ze-206
         if rh is None or lh is None:
-            messagebox.showinfo("Move to staff", "Run Edit > Separate Hands first, so there is an "
+            messagebox.showinfo("Move to staff", "Run Fix File > Separate Hands first, so there is an "
                                 "upper and a lower staff to move between.", parent=self.app.root)
             return
         src, dst = (lh, rh) if where == "upper" else (rh, lh)
@@ -18279,12 +18279,6 @@ class MidisoftStudio:
         em.add_command(label="Redo\tCtrl+Y",command=self._redo,accelerator="Ctrl+Y")
         em.add_command(label="Editing tabs On/Off",command=self._toggle_editing_tabs)   # v22ze-215
         em.add_separator()
-        em.add_command(label="Add Track",command=self._add_track)
-        em.add_command(label="Delete Track",command=self._del_track)
-        em.add_separator()
-        em.add_command(label="Combine Tracks…",command=self._combine_tracks)
-        em.add_command(label="Separate Channels…",command=self._separate_channels)
-        em.add_separator()
         try:
             self._hear_var = tk.IntVar(value=1 if midi_io._load_settings().get("hear_selected", True) else 0)   # v22ze-252
         except Exception:
@@ -18292,34 +18286,53 @@ class MidisoftStudio:
         hsm = TkPopupMenu(mb, tearoff=0); em.add_cascade(label="Hear selected notes", menu=hsm)
         hsm.add_radiobutton(label="On", value=1, variable=self._hear_var, command=self._hear_save)
         hsm.add_radiobutton(label="Off", value=0, variable=self._hear_var, command=self._hear_save)
-        # v22ze-209: Corrections and Score Settings sit right after Edit
-        nm=TkPopupMenu(mb,tearoff=0); mb.add_cascade(label="Corrections",menu=nm)
-        nm.add_command(label="Quantize…\tCtrl+Q", command=lambda: QuantizeDlg(self.root, self),
-                       accelerator="Ctrl+Q")
+        # v22ze-266: menus grouped by what the person is doing: File, Edit, Tracks, Fix File, Playing, Score, View, Setup, Help
+        tkm=TkPopupMenu(mb,tearoff=0); mb.add_cascade(label="Tracks",menu=tkm)
+        tkm.add_command(label="Add Track",command=self._add_track)
+        tkm.add_command(label="Delete Track",command=self._del_track)
+        tkm.add_separator()
+        tkm.add_command(label="Combine Tracks…",command=self._combine_tracks)
+        tkm.add_command(label="Separate Channels…",command=self._separate_channels)
+        # Fix File: repairs for a file as loaded. They change the written score only, except Quantize.
+        nm=TkPopupMenu(mb,tearoff=0); mb.add_cascade(label="Fix File",menu=nm)
         nm.add_command(label="Auto-Correct Score…", command=self._auto_correct_score)   # v22ze-262
-        nm.add_command(label="Compare with Original…", command=self._compare_original)   # v22ze-262
         nm.add_separator()
         nm.add_command(label="Separate Hands…",command=self._separate_hands)
+        nm.add_command(label="Remove Short Rests…", command=self._remove_short_rests_dialog)   # v22ze-211
+        nm.add_command(label="Fix Measures…",command=self._fix_measures)   # v22ze-215
+        nm.add_command(label="Fix Chords…",command=self._thin_chords)
         nm.add_command(label="Rationalize Score…\tCtrl+R", command=self._rationalize_score,
                        accelerator="Ctrl+R")
-        nm.add_command(label="Remove Short Rests…", command=self._remove_short_rests_dialog)   # v22ze-211
-        nm.add_command(label="Clean Up Measures…", command=self._open_score_setup)
-        nm.add_command(label="Fix Chords…",command=self._thin_chords)
-        nm.add_command(label="Fix Measures…",command=self._fix_measures)   # v22ze-215
-        nm.add_command(label="Soft Notes…",command=self._soft_notes_dialog)   # v22ze-248
-        nm.add_command(label="Easy to Play (hand over hand)…",command=self._easy_play)   # v22ze-250
-        nm.add_command(label="Fingering Numbers…",command=self._fingering_dialog)   # v22ze-259
-        nm.add_command(label="Suggest Marks…",command=self._suggest_marks_dialog)   # v22ze-265
         nm.add_separator()
-        scm=TkPopupMenu(mb,tearoff=0); mb.add_cascade(label="Score Settings",menu=scm)
+        nm.add_command(label="Quantize… (changes the sound)\tCtrl+Q", command=lambda: QuantizeDlg(self.root, self),
+                       accelerator="Ctrl+Q")
+        nm.add_separator()
+        nm.add_command(label="Compare with Original…", command=self._compare_original)   # v22ze-262
+        # Playing: making the music easier to play and read
+        pm=TkPopupMenu(mb,tearoff=0); mb.add_cascade(label="Playing",menu=pm)
+        pm.add_command(label="Easy to Play (hand over hand)…",command=self._easy_play)   # v22ze-250
+        pm.add_command(label="Fingering Numbers…",command=self._fingering_dialog)   # v22ze-259
+        pm.add_command(label="Suggest Marks…",command=self._suggest_marks_dialog)   # v22ze-265
+        pm.add_command(label="Soft Notes…",command=self._soft_notes_dialog)   # v22ze-248
+        scm=TkPopupMenu(mb,tearoff=0); mb.add_cascade(label="Score",menu=scm)
         scm.add_command(label="Score Settings…\tCtrl+G", command=self._open_score_setup,
                         accelerator="Ctrl+G")
         scm.add_command(label="Key Signature…", command=self._set_key_signature)
+        scm.add_separator()
         vm=TkPopupMenu(mb,tearoff=0); mb.add_cascade(label="View",menu=vm)
         vm.add_command(label="Score View\tCtrl+1",command=self._open_score_view,accelerator="Ctrl+1")
         vm.add_command(label="Piano Roll\tCtrl+2",command=self._open_piano_roll,accelerator="Ctrl+2")
         vm.add_command(label="MIDI List\tCtrl+3",command=self._open_list_view,accelerator="Ctrl+3")
         vm.add_command(label="Mixer",command=self._open_mixer)
+        vm.add_separator()
+        self._listen_menu_var = tk.IntVar(value=int(round(getattr(self, "_listen_pct", 100))))
+        lsm = TkPopupMenu(mb, tearoff=0); vm.add_cascade(label="Listening speed", menu=lsm)
+        for _p in (50, 60, 70, 80, 90, 100):
+            lsm.add_radiobutton(label=("%d%% (as written)" % _p) if _p == 100 else ("%d%%" % _p), value=_p,
+                                variable=self._listen_menu_var,
+                                command=lambda p=_p: self._set_listening_speed(p))
+        lsm.add_separator()
+        lsm.add_command(label="Other speed… (Score Settings)", command=self._open_score_setup)
         sm=TkPopupMenu(mb,tearoff=0); mb.add_cascade(label="Setup",menu=sm)
         sm.add_command(label="MIDI I/O Info",command=self._midi_info)
         sm.add_command(label="MIDI Output Device…",command=self._choose_midi_output)
@@ -18341,8 +18354,8 @@ class MidisoftStudio:
                 pass
         self._quantize_var.trace_add('write', _on_quantize_change)
 
-        qm = TkPopupMenu(nm, tearoff=0)
-        nm.add_cascade(label="Quantization", menu=qm)
+        qm = TkPopupMenu(scm, tearoff=0)
+        scm.add_cascade(label="Quantization", menu=qm)   # v22ze-266
 
         qm.add_radiobutton(label="Off", value=0, variable=self._quantize_var,
                            command=lambda: setattr(self, "quantize_division", 0))
@@ -18362,8 +18375,8 @@ class MidisoftStudio:
 
         self._grace_var = tk.IntVar(value=self.grace_cleanup_ms)
 
-        gm = TkPopupMenu(nm, tearoff=0)
-        nm.add_cascade(label="Grace Cleanup", menu=gm)
+        gm = TkPopupMenu(scm, tearoff=0)
+        scm.add_cascade(label="Grace Cleanup", menu=gm)   # v22ze-266
 
         for _ms in (0,20,40,60,80):
             _label = "Off" if _ms == 0 else f"{_ms} ms"
@@ -20896,7 +20909,7 @@ class MidisoftStudio:
             self._tempo_user_set = False   # v22ze-262
             try:   # v22ze-265: marks the recording suggests (nothing is changed)
                 _s265, _a265 = _suggest_marks(self.song)
-                self._mark_hint = ("  |  Marks suggested: Corrections > Suggest Marks" if (_s265 or _a265) else "")
+                self._mark_hint = ("  |  Marks suggested: Playing > Suggest Marks" if (_s265 or _a265) else "")
             except Exception:
                 self._mark_hint = ""
             try:   # v22ze-262: the file as loaded, for Compare with Original
@@ -21995,7 +22008,7 @@ class MidisoftStudio:
         rh_i, lh_i = _hand_tracks(song)   # v22ze-206
         if rh_i is None or lh_i is None:
             messagebox.showinfo("Fix Chords",
-                "Run Edit \u25b8 Separate Hands first, so the music is split into a "
+                "Run Fix File \u25b8 Separate Hands first, so the music is split into a "
                 "right-hand part and a left-hand part.", parent=self.root)
             return
         if opts is None:
@@ -23294,7 +23307,7 @@ class MidisoftStudio:
         rh_i, lh_i = _hand_tracks(song)
         if rh_i is None or lh_i is None:
             messagebox.showinfo("Easy to Play",
-                "Run Corrections \u25b8 Separate Hands first, so the music is split into a "
+                "Run Fix File \u25b8 Separate Hands first, so the music is split into a "
                 "right-hand part and a left-hand part.", parent=self.root)
             return
         opts = self._ask_separate_hands_options(thin=True)
@@ -23471,7 +23484,7 @@ class MidisoftStudio:
             else:
                 messagebox.showinfo("Fingering Numbers",
                     "Fingering needs the music in two parts, a right hand and a left hand. This file has %d "
-                    "tracks with notes. Use Corrections \u25b8 Combine Tracks, then Separate Hands."
+                    "tracks with notes. Use Tracks \u25b8 Combine Tracks, then Separate Hands."
                     % len(_one), parent=self.root)
                 return
         BG, FG, MUTED = "#0d1117", "#f0f6fc", "#8b949e"
@@ -23511,6 +23524,10 @@ class MidisoftStudio:
             return "Choose a speed between 25 and 200 percent."
         self._listen_pct = pct
         self.transport.speed = pct / 100.0
+        try:   # v22ze-266: View > Listening speed shows the current choice
+            self._listen_menu_var.set(int(round(pct)))
+        except Exception:
+            pass
         self._update_status()
         if abs(pct - 100.0) < 0.5:
             return "Normal speed. Applies the next time you press Play."
@@ -23730,26 +23747,35 @@ class MidisoftStudio:
         if old is not None and old.winfo_exists():
             old.lift(); return
         items = [
-            ("Corrections ▸ Separate Hands…", "split a keyboard recording (piano organ accordion) into right-hand and left-hand staves hands", "separate-hands-piano-organ-accordion"),
-            ("Corrections ▸ Fix Chords…", "chords too wide for one hand span fingers move note other hand", "fix-chords"),
-            ("Corrections ▸ Fix Measures…", "measure beats over under count barline overflow too long short fix", "fix-measures"),
+            ("Fix File ▸ Separate Hands…", "split a keyboard recording (piano organ accordion) into right-hand and left-hand staves hands", "separate-hands-piano-organ-accordion"),
+            ("Fix File ▸ Fix Chords…", "chords too wide for one hand span fingers move note other hand", "fix-chords"),
+            ("Fix File ▸ Fix Measures…", "measure beats over under count barline overflow too long short fix", "fix-measures"),
             ("Score editing tabs ▸ Move / Remove Rest", "move notes earlier later time rest remove close gap lengthen", "the-editing-tabs"),
-            ("Corrections ▸ Quantize…", "snap notes to a grid timing rhythm", "quantize"),
-            ("Corrections ▸ Rationalize Score…", "turn a recording into clean notation measures", "rationalize-score"),
-            ("Corrections ▸ Remove Short Rests…", "sliver rests tiny gaps eighth sixteenth rests too many rests legato", "remove-short-rests"),
-            ("Corrections ▸ Clean Up Measures…", "overflow measure notes cross the barline tidy rests", "when-the-measures-are-the-wrong-length"),
-            ("Corrections ▸ Quantization / Grace Cleanup", "grid size grace notes tiny notes", "quantize"),
-            ("Score Settings ▸ Score Settings…", "tempo bpm speed faster slower measures wanted measure length time signature key title composer", "setting-the-speed-time-key-and-title"),
-            ("Score Settings ▸ Key Signature…", "sharps flats key", "setting-the-speed-time-key-and-title"),
+            ("Fix File ▸ Quantize… (changes the sound)", "snap notes to a grid timing rhythm", "quantize"),
+            ("Fix File ▸ Rationalize Score…", "turn a recording into clean notation measures", "rationalize-score"),
+            ("Fix File ▸ Remove Short Rests…", "sliver rests tiny gaps eighth sixteenth rests too many rests legato", "remove-short-rests"),
+            ("Score ▸ Score Settings… (Clean Up Measures)", "overflow measure notes cross the barline tidy rests", "when-the-measures-are-the-wrong-length"),
+            ("Score ▸ Quantization / Grace Cleanup", "grid size grace notes tiny notes", "quantize"),
+            ("Score ▸ Score Settings…", "tempo bpm speed faster slower measures wanted measure length time signature key title composer", "setting-the-speed-time-key-and-title"),
+            ("Score ▸ Key Signature…", "sharps flats key", "setting-the-speed-time-key-and-title"),
             ("Score editing tabs (Select, Apply to Selection)", "edit notes length duration dotted accidental sharp flat dynamics articulation staccato apply selection select hold", "the-editing-tabs"),
             ("File ▸ Save As…", "save a copy midi file name edited original", "the-menus"),
             ("File ▸ Export ▸ …", "musicxml lilypond musescore sibelius finale braille", "the-menus"),
             ("File ▸ Print Score…", "print paper pdf sheet music", "printing-a-score"),
             ("Edit ▸ Undo / Redo", "undo redo take back", "the-menus"),
-            ("Edit ▸ Combine Tracks / Separate Channels / Add Track / Delete Track", "tracks channels instruments merge split", "the-track-list"),
+            ("Tracks ▸ Add Track / Delete Track / Combine Tracks / Separate Channels", "tracks channels instruments merge split", "the-track-list"),
             ("View ▸ Score View / Piano Roll / MIDI List / Mixer", "windows volume instruments mute solo", "four-ways-of-looking-at-the-music"),
             ("Setup ▸ MIDI Output Device…", "sound speaker synth volume pianoteq fluidsynth", "something-not-working"),
             ("Help ▸ User Guide", "manual instructions", "what-this-program-does"),
+        
+            ("Fix File ▸ Auto-Correct Score…", "do everything one step repair separate hands short rests automatic fix the whole file", "the-menus"),
+            ("Fix File ▸ Compare with Original…", "what changed since loading sound same bars differ check", "the-menus"),
+            ("Playing ▸ Easy to Play (hand over hand)…", "hand crossing figure one hand easier to play passages", "the-menus"),
+            ("Playing ▸ Fingering Numbers…", "fingers numbers thumb 1 2 3 4 5 fingering", "the-menus"),
+            ("Playing ▸ Suggest Marks…", "staccato accent marks detect suggestions articulation", "the-menus"),
+            ("Playing ▸ Soft Notes…", "quiet notes soft hide faint velocity screen", "the-menus"),
+            ("View ▸ Listening speed", "slow down practice speed percent tempo rest time slower faster hear", "the-menus"),
+            ("Edit ▸ Hear selected notes", "click note sound play selected", "the-menus"),
         ]
         BG, FG = "#0d1117", "#f0f6fc"
         dlg = tk.Toplevel(self.root)
