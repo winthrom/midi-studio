@@ -2575,7 +2575,88 @@ def _find_split_pitch_for_track(notes, prefer_lh_octaves=True):
 
 # v22ze-260: marks that belong to one note.  A marked note was written that way on purpose: Remove Short Rests
 # leaves it alone and the little gap after it is never drawn as a rest.  The sound is not changed by a mark.
-NOTE_MARKS = ("staccato", "staccatissimo", "pizzicato", "tenuto", "accent", "marcato", "fermata", "tremolo")
+NOTE_MARKS = ("staccato", "staccatissimo", "pizzicato", "tenuto", "accent", "marcato", "portato", "fermata", "tremolo")   # v22ze-265: portato added
+# v22ze-265: how each mark is written in the LilyPond print (and so in MusicXML, which is made from the same text)
+_MARK_LY = {"staccato": "-.", "staccatissimo": "-!", "tenuto": "--", "accent": "->", "marcato": "-^",
+            "portato": "-_", "fermata": "\\fermata", "tremolo": ":32", "pizzicato": "^\\markup{pizz.}"}
+
+
+def _chord_mark(notes):
+    """The mark that prints on a chord: the first of NOTE_MARKS found on any of its notes, or ''."""
+    ms = [getattr(n, "mark", "") for n in notes if getattr(n, "mark", "")]
+    for m in NOTE_MARKS:
+        if m in ms:
+            return m
+    return ""
+
+
+def _ly_xml_enable_marks():
+    """python-ly writes staccato, staccatissimo, tenuto, accent, portato (detached-legato), fermata and tremolo into
+    MusicXML itself.  It leaves out the marcato sign (-^); this adds it as <strong-accent/>.  Safe to call twice."""
+    try:
+        import ly.musicxml.ly2xml_mediator as _M
+        if getattr(_M.artic_token2xml_name, "_marks265", False):
+            return
+        _orig = _M.artic_token2xml_name
+        def _patched(tok):
+            if tok == "^":
+                return "strong-accent"
+            return _orig(tok)
+        _patched._marks265 = True
+        _M.artic_token2xml_name = _patched
+    except Exception:
+        pass
+
+
+def _suggest_marks(song):
+    """Marks the recording suggests (never applied by themselves): staccato for runs of 2 or more short notes with a
+    gap after each, and accent for a note much louder than its neighbours.  Returns (staccato chords, accent chords)."""
+    tpb = song.ticks_per_beat
+    stac, acc = [], []
+    for tr in song.tracks:
+        if getattr(tr, "channel", 0) == 9:
+            continue
+        live = [n for n in tr.notes
+                if getattr(n, "articulation", "") not in ("tie_continuation", "grace") and n.duration > 0]
+        by = {}
+        for n in live:
+            by.setdefault(n.tick, []).append(n)
+        ticks = sorted(by)
+        if len(ticks) < 4:
+            continue
+        cand = []
+        for i in range(len(ticks) - 1):
+            ioi = ticks[i + 1] - ticks[i]
+            d = max(n.duration for n in by[ticks[i]])
+            cand.append(tpb // 4 <= ioi <= 2 * tpb and d <= 0.5 * ioi)
+        cand.append(False)
+        i = 0
+        while i < len(ticks):
+            if cand[i]:
+                j = i
+                while j + 1 < len(ticks) and cand[j + 1]:
+                    j += 1
+                if j - i + 1 >= 2:
+                    for k in range(i, j + 1):
+                        ch = by[ticks[k]]
+                        if not any(getattr(n, "mark", "") for n in ch):
+                            stac.append(ch)
+                i = j + 1
+            else:
+                i += 1
+        vel = [max(n.velocity for n in by[t]) for t in ticks]
+        found = []
+        for i in range(len(ticks)):
+            nb = sorted(vel[k] for k in range(max(0, i - 3), min(len(ticks), i + 4)) if k != i)
+            if len(nb) < 5:
+                continue
+            if vel[i] >= nb[len(nb) // 2] + 30 and vel[i] >= 70:
+                ch = by[ticks[i]]
+                if not any(getattr(n, "mark", "") for n in ch):
+                    found.append(ch)
+        if len(found) <= 0.25 * len(ticks):
+            acc.extend(found)
+    return stac, acc
 
 
 class MidiNote:
@@ -6694,6 +6775,9 @@ class Song:
                     )
                 )
                 stac_sfx = "-." if stac_count > len(chord_notes) / 2 else ""
+                _cm265 = _chord_mark(chord_notes)   # v22ze-265: a mark you set prints as that mark
+                if _cm265:
+                    stac_sfx = _MARK_LY[_cm265]
                 # v22ze-242: the first piece of a note split at a barline is tied to its second piece.  A chord
                 # holding such a note, last in the bar, is written on to the barline (in tied pieces if the
                 # length is not one standard value), so no rest or gap sits between the two pieces.
@@ -6719,7 +6803,7 @@ class Song:
                     else:
                         pitches = " ".join(pitch_ly(n) + (_tie(n) if _lastp else "~") for n in chord_notes)
                         mstr.append("<" + pitches + ">" + _UDUR[_pv] + _sfx)
-                    mstr_kind.append("staccato" if _sfx else "note")
+                    mstr_kind.append("staccato" if _sfx == "-." else "note")   # v22ze-265
                 cur_u = on_u + sum(_pieces)
 
             # ── Fill the tail of the bar ──────────────────────────────
@@ -10853,6 +10937,7 @@ class ScoreView(tk.Frame):
             ("staccatissimo", "Staccatissimo"),
             ("accent", "Accent"),
             ("tenuto", "Tenuto"),
+            ("portato", "Portato"),   # v22ze-265
             ("legato", "Legato"),
             ("marcato", "Marcato"),
             ("pizzicato", "Pizz."),
@@ -13480,7 +13565,7 @@ class ScoreView(tk.Frame):
             art = getattr(n, "articulation", "")
             _mk = getattr(n, "mark", "")   # v22ze-260
             if _mk and art not in ("grace", "tie_continuation"):
-                if _mk in ("staccato", "accent", "marcato", "tenuto", "pizzicato"):
+                if _mk in ("staccato", "accent", "marcato", "tenuto", "pizzicato", "portato"):   # v22ze-265
                     art = _mk
                 elif _mk == "staccatissimo":
                     _ay = y + (self.SLG * 1.15 if stem_up else -self.SLG * 1.15)
@@ -13541,6 +13626,12 @@ class ScoreView(tk.Frame):
                 elif art == "tenuto":
                     w = self.SLG * 0.55
                     c.create_line(nx - w, art_y, nx + w, art_y, fill="black", width=2.2)
+                elif art == "portato":   # v22ze-265: a dot with a dash beyond it
+                    w = self.SLG * 0.55
+                    _o = self.SLG * 0.62 * (1 if stem_up else -1)
+                    r = max(1.5, self.SLG * 0.14)
+                    c.create_oval(nx - r, art_y - r, nx + r, art_y + r, fill="black", outline="black")
+                    c.create_line(nx - w, art_y + _o, nx + w, art_y + _o, fill="black", width=2.2)
                 elif art in ("pizzicato", "arco"):
                     label = "pizz." if art == "pizzicato" else "arco"
                     c.create_text(
@@ -18218,6 +18309,7 @@ class MidisoftStudio:
         nm.add_command(label="Soft Notes…",command=self._soft_notes_dialog)   # v22ze-248
         nm.add_command(label="Easy to Play (hand over hand)…",command=self._easy_play)   # v22ze-250
         nm.add_command(label="Fingering Numbers…",command=self._fingering_dialog)   # v22ze-259
+        nm.add_command(label="Suggest Marks…",command=self._suggest_marks_dialog)   # v22ze-265
         nm.add_separator()
         scm=TkPopupMenu(mb,tearoff=0); mb.add_cascade(label="Score Settings",menu=scm)
         scm.add_command(label="Score Settings…\tCtrl+G", command=self._open_score_setup,
@@ -20640,7 +20732,7 @@ class MidisoftStudio:
         _ls = (f"  Listening speed {self._listen_pct:.0f}%"
                if abs(getattr(self, "_listen_pct", 100) - 100) > 0.5 else "")   # v22ze-262
         self.status_var.set(f"BPM:{s.bpm}  {s.time_sig_num}/{s.time_sig_den}  "
-                            f"Tracks:{len(s.tracks)}  Measures:{bars:.0f}  TPB:{s.ticks_per_beat}  {out}{inp}{_ls}")
+                            f"Tracks:{len(s.tracks)}  Measures:{bars:.0f}  TPB:{s.ticks_per_beat}  {out}{inp}{_ls}{getattr(self, '_mark_hint', '')}")
         # Rationalization indicator
         if hasattr(self,'_ration_var'):
             if self._is_rationalized:
@@ -20665,6 +20757,7 @@ class MidisoftStudio:
     def _close_current(self):
         self.transport.stop()
         self._pristine_song = None   # v22ze-262
+        self._mark_hint = ""   # v22ze-265
         try:   # v22ze-214
             if self._score_view and self._score_view.winfo_exists():
                 self._score_view._reset_editing()
@@ -20801,6 +20894,11 @@ class MidisoftStudio:
         try:
             self.song=Song.from_mid(path); self.transport.song=self.song
             self._tempo_user_set = False   # v22ze-262
+            try:   # v22ze-265: marks the recording suggests (nothing is changed)
+                _s265, _a265 = _suggest_marks(self.song)
+                self._mark_hint = ("  |  Marks suggested: Corrections > Suggest Marks" if (_s265 or _a265) else "")
+            except Exception:
+                self._mark_hint = ""
             try:   # v22ze-262: the file as loaded, for Compare with Original
                 import copy as _cpy262
                 self._pristine_song = _cpy262.deepcopy(self.song)
@@ -21023,6 +21121,7 @@ class MidisoftStudio:
             # in-memory copy fed to python-ly, never the file to_ly() wrote.
             ly_text_for_xml = ly_text.replace("\\absolute {", "{")
             ly_text_for_xml = _strip_ly_block(ly_text_for_xml, "layout")
+            _ly_xml_enable_marks()   # v22ze-265
             writer = ly_mod.writer()
             writer.parse_text(ly_text_for_xml)
             xml_doc = writer.musicxml()
@@ -23288,6 +23387,69 @@ class MidisoftStudio:
             tk.Button(brow, text=txt, command=cmd, bg=col, fg="white", relief=tk.FLAT,
                       padx=12, pady=4).pack(side="left", padx=4)
         _find()
+
+    def _suggest_marks_dialog(self):   # v22ze-265
+        import copy as _copy
+        song = self.song
+        stac, acc = _suggest_marks(song)
+        if not (stac or acc):
+            messagebox.showinfo("Suggest Marks",
+                                "Nothing to suggest. This looks for runs of short, separated notes (staccato) and "
+                                "notes much louder than their neighbours (accent). Other marks (tenuto, portato, "
+                                "fermata, tremolo, marcato, pizzicato) cannot be told from a recording; set those "
+                                "yourself on the Articulation tab.", parent=self.root)
+            return
+        BG, FG, MUTED = "#0d1117", "#f0f6fc", "#8b949e"
+        dlg = tk.Toplevel(self.root)
+        dlg.title("Suggest Marks")
+        dlg.configure(bg=BG)
+        tk.Label(dlg, text="These marks are only suggestions from how the music was played. Nothing changes unless you "
+                           "tick a kind and press Add Marks. Marks change the written score only (a marked note keeps "
+                           "its gap, Remove Short Rests leaves it, and it prints with its sign). The sound stays as "
+                           "recorded, and Undo takes them back.",
+                 bg=BG, fg=MUTED, justify="left", wraplength=460).pack(padx=14, pady=(12, 8), anchor="w")
+        v_s = tk.BooleanVar(value=bool(stac))
+        v_a = tk.BooleanVar(value=False)
+        cb = dict(bg=BG, fg=FG, selectcolor="#21262d", activebackground=BG, activeforeground=FG, anchor="w")
+        cs = tk.Checkbutton(dlg, text="Staccato on %d chord(s) in runs of short separated notes" % len(stac), variable=v_s, **cb)
+        cs.pack(fill="x", padx=18)
+        ca = tk.Checkbutton(dlg, text="Accent on %d note(s) much louder than their neighbours" % len(acc), variable=v_a, **cb)
+        ca.pack(fill="x", padx=18)
+        if not stac:
+            cs.config(state="disabled")
+        if not acc:
+            ca.config(state="disabled")
+
+        def _go():
+            do_s, do_a = bool(v_s.get()) and bool(stac), bool(v_a.get()) and bool(acc)
+            dlg.destroy()
+            if not (do_s or do_a):
+                return
+            before = _copy.deepcopy(song.tracks)
+            before_map = _copy.deepcopy(song.rationalized_measure_map)
+            ns = na = 0
+            if do_s:
+                for ch in stac:
+                    for n in ch:
+                        n.mark = "staccato"
+                    ns += 1
+            if do_a:
+                for ch in acc:
+                    max(ch, key=lambda n: n.velocity).mark = "accent"
+                    na += 1
+            song.modified = True
+            self._update_title()
+            self._push_undo(RationalizationAction(
+                description="Suggest Marks: %d staccato, %d accent" % (ns, na), before_tracks=before,
+                after_tracks=_copy.deepcopy(song.tracks), before_map=before_map,
+                after_map=_copy.deepcopy(song.rationalized_measure_map)))
+            self._mark_hint = ""
+            self._update_status()
+            self._refresh_views()
+        bar = tk.Frame(dlg, bg=BG)
+        bar.pack(pady=(10, 12))
+        tk.Button(bar, text="Add Marks", command=_go, bg="#238636", fg="white", relief=tk.FLAT, padx=14, pady=4).pack(side=tk.LEFT, padx=6)
+        tk.Button(bar, text="Cancel", command=dlg.destroy, bg="#21262d", fg="white", relief=tk.FLAT, padx=14, pady=4).pack(side=tk.LEFT, padx=6)
 
     def _fingering_dialog(self):   # v22ze-259
         old = getattr(self, "_finger_dlg", None)
