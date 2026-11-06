@@ -9957,7 +9957,7 @@ def _lions_block(parent, bg, wrap=380):
         lk.bind("<Button-1>", _go)
         lk.bind("<Enter>", lambda e, w=lk: w.configure(fg="#79c0ff"))
         lk.bind("<Leave>", lambda e, w=lk: w.configure(fg=BLUE))
-    tk.Label(parent, text="Donations go to the Sterling Lions Club Charity Fund, not to Lions Clubs International headquarters. The Fund supports Lions charities for people in need in Sterling, Virginia, across the state and the nation, and around the world.",
+    tk.Label(parent, text="Donations go directly to the Sterling Lions Club Charity Fund. This fund is used specifically for people in need in Sterling, VA, the state of Virginia, the USA, and around the world.",
              bg=bg, fg="#c9d1d9", font=("TkDefaultFont", 9), justify=tk.CENTER, wraplength=wrap).pack(pady=(6, 0))
     tk.Label(parent, text="MIDI Studio is an independent project by a Lions member.\nIt is not an official product of Lions Clubs International.",
              bg=bg, fg=MUTED, font=("TkDefaultFont", 8), justify=tk.CENTER, wraplength=wrap).pack(pady=(4, 0))
