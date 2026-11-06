@@ -9935,7 +9935,7 @@ def _lions_block(parent, bg, wrap=380):
     import webbrowser
     BLUE, MUTED, GOLD = "#58a6ff", "#8b949e", "#d29922"
     tk.Label(parent, text="Supporting the Lions Club of Sterling, VA", bg=bg, fg=GOLD,
-             font=("TkDefaultFont", 11, "italic")).pack(pady=(14, 6))
+             font=("TkDefaultFont", 11, "italic")).pack(pady=(8, 4))
     row = tk.Frame(parent, bg=bg); row.pack()
     img = _lions_emblem_image(parent)
     if img is not None:
@@ -9958,9 +9958,9 @@ def _lions_block(parent, bg, wrap=380):
         lk.bind("<Enter>", lambda e, w=lk: w.configure(fg="#79c0ff"))
         lk.bind("<Leave>", lambda e, w=lk: w.configure(fg=BLUE))
     tk.Label(parent, text="Donations go to the Sterling Lions Club Charity Fund, not to Lions Clubs International headquarters. The Fund supports Lions charities for people in need in Sterling, Virginia, across the state and the nation, and around the world.",
-             bg=bg, fg="#c9d1d9", font=("TkDefaultFont", 9), justify=tk.CENTER, wraplength=wrap).pack(pady=(10, 0))
+             bg=bg, fg="#c9d1d9", font=("TkDefaultFont", 9), justify=tk.CENTER, wraplength=wrap).pack(pady=(6, 0))
     tk.Label(parent, text="MIDI Studio is an independent project by a Lions member.\nIt is not an official product of Lions Clubs International.",
-             bg=bg, fg=MUTED, font=("TkDefaultFont", 8), justify=tk.CENTER, wraplength=wrap).pack(pady=(6, 0))
+             bg=bg, fg=MUTED, font=("TkDefaultFont", 8), justify=tk.CENTER, wraplength=wrap).pack(pady=(4, 0))
 
 
 class SplashScreen(tk.Toplevel):
@@ -10071,18 +10071,19 @@ class SplashScreen(tk.Toplevel):
 
         outer = tk.Frame(self, bg=BDCOL, padx=2, pady=2)
         outer.pack()
-        inner = tk.Frame(outer, bg=BG, padx=40, pady=30)
+        inner = tk.Frame(outer, bg=BG, padx=30, pady=12)
         inner.pack()
-
-        tk.Label(inner, text="♬", bg=BG, fg=BLUE, font=("TkDefaultFont", 38)).pack()
+        # v22ze-264b: the Continue area is packed FIRST at the bottom so it is always on the screen
+        _bottom = tk.Frame(inner, bg=BG)
+        _bottom.pack(side=tk.BOTTOM, fill=tk.X)
 
         tk.Label(
             inner,
-            text="Midi-Studio",
+            text="♬  Midi-Studio",
             bg=BG,
             fg=BLUE,
-            font=("TkDefaultFont", 24, "bold"),
-        ).pack(pady=(6, 2))
+            font=("TkDefaultFont", 22, "bold"),
+        ).pack(pady=(0, 2))
 
         tk.Label(
             inner,
@@ -10117,7 +10118,7 @@ class SplashScreen(tk.Toplevel):
                 font=("TkDefaultFont", 7, "underline"),
                 cursor="hand2",
             )
-            _clk.pack()
+            _clk.pack(side=tk.LEFT, padx=6)
             def _open_link(e, u=url):
                 webbrowser.open(u)
                 return "break"  # don't let this click also reach the
@@ -10132,7 +10133,7 @@ class SplashScreen(tk.Toplevel):
             bg=BG,
             fg=GREEN,
             font=("TkDefaultFont", 9),
-        ).pack(pady=(4, 8))
+        ).pack(pady=(4, 4))
 
         tk.Label(
             inner,
@@ -10141,33 +10142,34 @@ class SplashScreen(tk.Toplevel):
             fg=GOLD,
             font=("TkDefaultFont", 10, "bold"),
             justify=tk.CENTER,
-        ).pack(pady=(0, 20))   # v22ze-263
+        ).pack(pady=(0, 8))   # v22ze-263
 
         tk.Frame(inner, bg=BDCOL, height=1).pack(fill=tk.X)
 
         _lions_block(inner, BG)   # v22ze-263
 
-        tk.Label(inner, text="Contains MIDI Studio code by Michael Winthrop for the Sterling Lions Club, Virginia, USA.\nsee: https://github.com/winthrom/midi-studio", bg=BG, fg=MUTED,
-                 font=("TkDefaultFont", 7), justify=tk.CENTER).pack(pady=(8, 0))
+        _contains = tk.Label(inner, text="Contains MIDI Studio code by Michael Winthrop for the Sterling Lions Club, Virginia, USA.\nsee: https://github.com/winthrom/midi-studio", bg=BG, fg=MUTED,
+                 font=("TkDefaultFont", 7), justify=tk.CENTER)
+        _contains.pack(pady=(4, 0))
 
-        tk.Frame(inner, bg=BDCOL, height=1).pack(fill=tk.X, pady=(16, 8))
+        tk.Frame(_bottom, bg=BDCOL, height=1).pack(fill=tk.X, pady=(6, 4))
 
         # v22ze-111 fix: welcome-screen MIDI status also recognizes built-in FluidSynth (see _play()).
         midi_ok = midi_io.output_ready()  # v22ze-115b
         midi_txt = "MIDI ready" if midi_ok else "⚠  No MIDI output — start TiMidity"
         midi_col = GREEN if midi_ok else "#f78166"
-        tk.Label(inner, text=midi_txt, bg=BG, fg=midi_col, font=("TkDefaultFont", 9)).pack()
+        tk.Label(_bottom, text=midi_txt, bg=BG, fg=midi_col, font=("TkDefaultFont", 9)).pack()
 
         tk.Label(
-            inner,
+            _bottom,
             text="Click Continue below to proceed",
             bg=BG,
             fg=MUTED,
             font=("TkDefaultFont", 8),
-        ).pack(pady=(6, 4))
+        ).pack(pady=(2, 2))
 
         tk.Button(
-            inner,
+            _bottom,
             text="Continue  ▶",
             bg="#21262d",
             fg=BLUE,
@@ -10180,7 +10182,15 @@ class SplashScreen(tk.Toplevel):
             font=("TkDefaultFont", 10, "bold"),
             cursor="hand2",
             command=self._dismiss,
-        ).pack(pady=(4, 0))
+        ).pack(pady=(2, 0))
+
+        # v22ze-264b: on a short screen drop the small print, never the Continue button
+        self.update_idletasks()
+        _room = self.winfo_screenheight() - 90
+        for _w in (_contains, _credit_lf):
+            if self.winfo_reqheight() > _room:
+                _w.pack_forget()
+                self.update_idletasks()
 
     def _dismiss(self):
         try:
@@ -23824,21 +23834,22 @@ class MidisoftStudio:
         dlg.grab_set()
 
         BG = "#0d1117"; FG = "white"; MUTED = "#8b949e"
+        _bar = tk.Frame(dlg, bg=BG); _bar.pack(side=tk.BOTTOM, fill=tk.X)   # v22ze-264b: buttons first, always visible
 
         tk.Label(dlg, text="♬  Midi-Studio",
                  bg=BG, fg="#58a6ff",
-                 font=("TkDefaultFont", 18, "bold")).pack(pady=(24, 4))
+                 font=("TkDefaultFont", 18, "bold")).pack(pady=(12, 2))
         tk.Label(dlg, text="Work-Alike — No code from the original",
                  bg=BG, fg=MUTED, font=("TkDefaultFont", 9)).pack()
         tk.Label(dlg, text=f"Version {APP_RELEASE} (build {APP_VERSION})   ·   {APP_TIMESTAMP}",
-                 bg=BG, fg="#3fb950", font=("TkDefaultFont", 9)).pack(pady=(4, 14))
+                 bg=BG, fg="#3fb950", font=("TkDefaultFont", 9)).pack(pady=(2, 8))
 
         tk.Frame(dlg, bg="#21262d", height=1).pack(fill=tk.X, padx=28)
 
         # ── Sterling Lions Club section ───────────────────────────────────────
         _lions_block(dlg, BG, wrap=420)   # v22ze-263
 
-        tk.Frame(dlg, bg="#21262d", height=1).pack(fill=tk.X, padx=28, pady=14)
+        tk.Frame(dlg, bg="#21262d", height=1).pack(fill=tk.X, padx=28, pady=8)
 
         # ── Technical info ────────────────────────────────────────────────────
         tk.Label(dlg, text="Built in Python 3 + tkinter + mido + python-rtmidi", bg=BG, fg=MUTED,
@@ -23857,10 +23868,11 @@ class MidisoftStudio:
             "       ← / → = Prev / Next measure\n"
             "       Ctrl+1/2/3 = Score / Piano Roll / List"
         )
-        tk.Label(dlg, text=info, bg=BG, fg=MUTED,
-                 font=("TkDefaultFont", 9), justify=tk.LEFT).pack(padx=28, pady=(0, 6))
+        _info_lbl = tk.Label(dlg, text=info, bg=BG, fg=MUTED,
+                 font=("TkDefaultFont", 9), justify=tk.LEFT)
+        _info_lbl.pack(padx=28, pady=(0, 6))
 
-        _credit_lf = tk.Frame(dlg, bg=BG); _credit_lf.pack(pady=(0, 10))
+        _credit_lf = tk.Frame(dlg, bg=BG); _credit_lf.pack(pady=(0, 6))
         for txt, url in [("MidiSoft.com", "https://midisoft.com/"),
                           ("MIDISOFT Studio 4.0 archive (vetusware.com)",
                            "https://vetusware.com/download/MIDISOFT%20Studio%204.0%204.0/?id=5666")]:
@@ -23872,17 +23884,25 @@ class MidisoftStudio:
             _clk.bind("<Enter>", lambda e, w=_clk: w.configure(fg="#58a6ff"))
             _clk.bind("<Leave>", lambda e, w=_clk: w.configure(fg=MUTED))
 
-        tk.Button(dlg, text="About Our Notation Engraving", command=self._about_engraving,
+        tk.Button(_bar, text="About Our Notation Engraving", command=self._about_engraving,
                   bg="#21262d", fg="#58a6ff",
                   activebackground="#30363d", activeforeground="#79c0ff",
                   relief=tk.FLAT, padx=12, pady=4,
                   font=("TkDefaultFont", 9, "underline")).pack(pady=(0, 4))
 
-        tk.Button(dlg, text="Close", command=dlg.destroy,
+        tk.Button(_bar, text="Close", command=dlg.destroy,
                   bg="#21262d", fg=FG,
                   activebackground="#30363d", activeforeground=FG,
                   relief=tk.FLAT, padx=20, pady=5,
-                  font=("TkDefaultFont", 10)).pack(pady=14)
+                  font=("TkDefaultFont", 10)).pack(pady=8)
+
+        # v22ze-264b: on a short screen drop the key list and credit links, never the buttons
+        dlg.update_idletasks()
+        _room = dlg.winfo_screenheight() - 90
+        for _w in (_info_lbl, _credit_lf):
+            if dlg.winfo_reqheight() > _room:
+                _w.pack_forget()
+                dlg.update_idletasks()
 
     def _about_engraving(self):
         """Explains, in plain terms, what Midi-Studio's notation rendering
