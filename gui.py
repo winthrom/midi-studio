@@ -18335,7 +18335,7 @@ class MidisoftStudio:
             self._hear_var = tk.IntVar(value=1 if midi_io._load_settings().get("hear_selected", True) else 0)   # v22ze-252
         except Exception:
             self._hear_var = tk.IntVar(value=1)
-        hsm = TkPopupMenu(mb, tearoff=0); em.add_cascade(label="Hear selected notes", menu=hsm)
+        hsm = TkPopupMenu(em, tearoff=0); em.add_cascade(label="Hear selected notes", menu=hsm)   # v22ze-266d: a submenu is built on its parent menu, or its clicks are blocked
         hsm.add_radiobutton(label="On", value=1, variable=self._hear_var, command=self._hear_save)
         hsm.add_radiobutton(label="Off", value=0, variable=self._hear_var, command=self._hear_save)
         # v22ze-266: menus grouped by what the person is doing: File, Edit, Tracks, Fix File, Playing, Score, View, Setup, Help
@@ -18378,7 +18378,7 @@ class MidisoftStudio:
         vm.add_command(label="Mixer",command=self._open_mixer)
         vm.add_separator()
         self._listen_menu_var = tk.IntVar(value=int(round(getattr(self, "_listen_pct", 100))))
-        lsm = TkPopupMenu(mb, tearoff=0); vm.add_cascade(label="Listening speed", menu=lsm)
+        lsm = TkPopupMenu(vm, tearoff=0); vm.add_cascade(label="Listening speed", menu=lsm)   # v22ze-266d
         for _p in (50, 60, 70, 80, 90, 100):
             lsm.add_radiobutton(label=("%d%% (as written)" % _p) if _p == 100 else ("%d%%" % _p), value=_p,
                                 variable=self._listen_menu_var,
