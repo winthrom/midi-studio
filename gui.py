@@ -20979,6 +20979,7 @@ class MidisoftStudio:
         try:
             self.song=Song.from_mid(path); self.transport.song=self.song
             self._tempo_user_set = False   # v22ze-262
+            self._finger_mode = 0; _FINGER_MODE_LY[0] = 0   # v22ze-266f: Fingering Numbers start Off for every file
             try:   # v22ze-265: marks the recording suggests (nothing is changed)
                 _s265, _a265 = _suggest_marks(self.song)
                 self._mark_hint = ("  |  Marks suggested: Playing > Suggest Marks" if (_s265 or _a265) else "")
