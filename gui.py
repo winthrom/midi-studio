@@ -2590,6 +2590,10 @@ def _chord_mark(notes):
     return ""
 
 
+# v22ze-266e: shown on the hand and finger tools: hover notes in the menus and in their dialogs
+_EXPERT_CHECK = ("These are suggestions worked out from the notes alone and can produce impossible results "
+                 "(hands or fingers that cannot be played). Check them by ear and eye with an expert such as a "
+                 "music teacher or performer.")
 _FINGER_MODE_LY = [0]   # v22ze-266b: the Fingering Numbers choice (0 off, 1 where they matter, 2 every note), for the print
 
 
@@ -18349,7 +18353,7 @@ class MidisoftStudio:
         nm=TkPopupMenu(mb,tearoff=0); mb.add_cascade(label="Fix File",menu=nm)
         nm.add_command(label="Auto-Correct Score…", command=self._auto_correct_score)   # v22ze-262
         nm.add_separator()
-        nm.add_command(label="Separate Hands…",command=self._separate_hands)
+        nm.add_command(label="Separate Hands…",command=self._separate_hands, tooltip=_EXPERT_CHECK + "  Edit > Undo takes it back.")   # v22ze-266e
         nm.add_command(label="Remove Short Rests…", command=self._remove_short_rests_dialog)   # v22ze-211
         nm.add_command(label="Fix Measures…",command=self._fix_measures)   # v22ze-215
         nm.add_command(label="Fix Chords…",command=self._thin_chords)
@@ -18362,8 +18366,8 @@ class MidisoftStudio:
         nm.add_command(label="Compare with Original…", command=self._compare_original)   # v22ze-262
         # Playing: making the music easier to play and read
         pm=TkPopupMenu(mb,tearoff=0); mb.add_cascade(label="Playing",menu=pm)
-        pm.add_command(label="Easy to Play (hand over hand)…",command=self._easy_play)   # v22ze-250
-        pm.add_command(label="Fingering Numbers…",command=self._fingering_dialog)   # v22ze-259
+        pm.add_command(label="Easy to Play (hand over hand)…",command=self._easy_play, tooltip=_EXPERT_CHECK + "  Edit > Undo takes it back.")   # v22ze-250
+        pm.add_command(label="Fingering Numbers…",command=self._fingering_dialog, tooltip=_EXPERT_CHECK + "  They are off until you turn them on.")   # v22ze-259
         pm.add_command(label="Suggest Marks…",command=self._suggest_marks_dialog)   # v22ze-265
         pm.add_command(label="Soft Notes…",command=self._soft_notes_dialog)   # v22ze-248
         scm=TkPopupMenu(mb,tearoff=0); mb.add_cascade(label="Score",menu=scm)
@@ -21671,11 +21675,12 @@ class MidisoftStudio:
                  "It then lists the chords that hand cannot play.")
                 if thin else
                 ("Sort the keyboard notes (piano, organ, accordion) into a\n"
-                 "right-hand staff and a left-hand staff. The sound is not changed.")
+                 "right-hand staff and a left-hand staff. The sound is not changed.\n\n" + _EXPERT_CHECK)
             ),
             bg=BG,
             fg=FG,
             justify=tk.LEFT,
+            wraplength=420,
         ).grid(row=0, column=0, columnspan=2, padx=16, pady=(14, 8), sticky="w")
         tk.Label(dlg, text="Widest stretch of one hand (semitones):", bg=BG, fg=FG).grid(
             row=1, column=0, padx=(16, 6), pady=4, sticky="w"
@@ -23395,7 +23400,7 @@ class MidisoftStudio:
                            "above and below it. A split by pitch gives that melody to the wrong hand. Each line says "
                            "which hand should hold the figure and which the melody (chosen by where each hand has to "
                            "be before and after). Only the staff changes: the sound is exactly as recorded. "
-                           "Nothing changes until you press Apply; Edit > Undo takes it back.",
+                           "Nothing changes until you press Apply; Edit > Undo takes it back. " + _EXPERT_CHECK,
                  bg=BG, fg=MUTED, justify="left", anchor="w", wraplength=760).pack(fill="x", padx=12, pady=(10, 6))
         lb = tk.Listbox(dlg, width=100, height=10, bg="#161b22", fg=FG, selectbackground="#1f3b73",
                         exportselection=False, font=("TkFixedFont", 9))
@@ -23567,7 +23572,7 @@ class MidisoftStudio:
         tk.Label(dlg, text="Suggested fingers (1 = thumb ... 5 = little finger) for each hand, shown in blue on the "
                            "Score. They are a suggestion from the notes alone, not a teacher's fingering. "
                            "Nothing in the music changes and nothing is saved in the MIDI file. "
-                           "For now they show on the screen only (not in the printed score or MusicXML).",
+                           "They also appear in the printed score and in the MusicXML export. " + _EXPERT_CHECK,
                  bg=BG, fg=MUTED, justify="left", anchor="w", wraplength=460).pack(fill="x", padx=12, pady=(10, 6))
         mode = tk.IntVar(value=int(getattr(self, "_finger_mode", 0) or 0))
         for v_, t_ in ((0, "Off"), (1, "Only where they matter (start of a run, thumb crossings, leaps, wide chords)"),
