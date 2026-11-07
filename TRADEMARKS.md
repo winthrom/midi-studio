@@ -20,9 +20,16 @@ donation page. That is not an endorsement by, and does not make this a product o
 
 ## Other names
 
-Other product and company names in this project (MidiSoft Studio, Microsoft, Windows, Apple, macOS,
-Linux, LilyPond, FluidSynth and so on) belong to their owners and are used only to say what the program
-works with. MIDI Studio is an independent work-alike and contains no code from MidiSoft Studio.
+Other product and company names mentioned in this project (MuseScore, MidiSoft Studio,
+Microsoft, Windows, Apple, macOS, Linux, LilyPond, FluidSynth and so on) belong to their
+owners. They are used only to say what the program may work with, and no endorsement or
+connection is implied.
+
+MIDI Studio is an independent work-alike. It contains no code from MidiSoft Studio.
+
+Compatibility notes: MIDI Studio's MusicXML export has been tested by opening the files in
+MuseScore. It has not yet been tested whether a MIDI file saved by MIDI Studio opens in
+MidiSoft Studio, and the program has not yet been tested on macOS.
 
 ## Fonts and sounds
 
