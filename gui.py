@@ -21665,45 +21665,49 @@ class MidisoftStudio:
             dlg.transient(self.root)
         except Exception:
             pass
+        bot = tk.Frame(dlg, bg=BG); bot.pack(side="bottom", fill="x")   # v22ze-266g: the buttons are laid out first so they can always be reached
+        body = tk.Frame(dlg, bg=BG); body.pack(side="top", fill="both", expand=True)
+        if not thin:   # the warning sits right above the buttons
+            tk.Label(bot, text=_EXPERT_CHECK, bg=BG, fg="#d29922", justify="left", anchor="w", wraplength=440,
+                     font=("TkDefaultFont", 9)).pack(fill="x", padx=16, pady=(8, 0))
         result = [None]
         span_var = tk.IntVar(value=12)  # v22ze-142: 12 = an octave; 14 is a very large hand
         notes_var = tk.IntVar(value=5)
         avoid_var = tk.BooleanVar(value=getattr(self, "_fc_avoid_rolls", True))   # v22ze-201
         tk.Label(
-            dlg,
+            body,
             text=(
                 ("Tell Fix Chords how big a hand to plan for.\n"
                  "It then lists the chords that hand cannot play.")
                 if thin else
                 ("Sort the keyboard notes (piano, organ, accordion) into a\n"
-                 "right-hand staff and a left-hand staff. The sound is not changed.\n\n" + _EXPERT_CHECK)
+                 "right-hand staff and a left-hand staff. The sound is not changed.")
             ),
             bg=BG,
             fg=FG,
             justify=tk.LEFT,
-            wraplength=420,
         ).grid(row=0, column=0, columnspan=2, padx=16, pady=(14, 8), sticky="w")
-        tk.Label(dlg, text="Widest stretch of one hand (semitones):", bg=BG, fg=FG).grid(
+        tk.Label(body, text="Widest stretch of one hand (semitones):", bg=BG, fg=FG).grid(
             row=1, column=0, padx=(16, 6), pady=4, sticky="w"
         )
-        tk.Spinbox(dlg, from_=6, to=30, textvariable=span_var, width=5).grid(
+        tk.Spinbox(body, from_=6, to=30, textvariable=span_var, width=5).grid(
             row=1, column=1, padx=(0, 16), pady=4
         )
         tk.Label(
-            dlg,
+            body,
             text="12 = one octave (standard). Raise it for large hands, lower it for small (children's) hands.",
             bg=BG,
             fg=MUTED,
             font=("TkDefaultFont", 8),
         ).grid(row=2, column=0, columnspan=2, padx=16, sticky="w")
-        tk.Label(dlg, text="Most notes one hand plays at once:", bg=BG, fg=FG).grid(
+        tk.Label(body, text="Most notes one hand plays at once:", bg=BG, fg=FG).grid(
             row=3, column=0, padx=(16, 6), pady=(10, 4), sticky="w"
         )
-        tk.Spinbox(dlg, from_=1, to=5, textvariable=notes_var, width=5).grid(
+        tk.Spinbox(body, from_=1, to=5, textvariable=notes_var, width=5).grid(
             row=3, column=1, padx=(0, 16), pady=(10, 4)
         )
         tk.Label(
-            dlg,
+            body,
             text="5 = one note per finger (standard, the most there can be). Lower it for an injured hand.",
             bg=BG,
             fg=MUTED,
@@ -21723,24 +21727,24 @@ class MidisoftStudio:
             dlg.destroy()
 
         if thin:   # v22ze-201
-            tk.Checkbutton(dlg, text="Move notes to the other hand instead of roll signs",
+            tk.Checkbutton(body, text="Move notes to the other hand instead of roll signs",
                            variable=avoid_var, bg=BG, fg=FG, selectcolor="#21262d",
                            activebackground=BG, activeforeground=FG).grid(
                 row=5, column=0, columnspan=2, padx=16, pady=(10, 0), sticky="w")
-        bfrm = tk.Frame(dlg, bg=BG)
-        bfrm.grid(row=8, column=0, columnspan=2, pady=(14, 14))
+        bfrm = tk.Frame(bot, bg=BG)
+        bfrm.pack(pady=(10, 12))
         if thin:   # v22ze-249
             thumb_var = tk.BooleanVar(value=_FC_OPTS.get("thumb", True))
-            tk.Checkbutton(dlg, text="Thumb on two neighbouring keys counts as one finger",
+            tk.Checkbutton(body, text="Thumb on two neighbouring keys counts as one finger",
                            variable=thumb_var, bg=BG, fg=FG, selectcolor="#21262d",
                            activebackground=BG, activeforeground=FG).grid(
                 row=6, column=0, columnspan=2, padx=16, pady=(6, 0), sticky="w")
-            tk.Label(dlg, text="Still fits 5 fingers: B-C, E-F, C-D, D-E, F-G, G-A, A-B and C#-D#, F#-G#, G#-A# (not C-C# or C#-D),\nat the thumb end of the hand.  A 6th note is then allowed.", bg=BG, fg=MUTED,
+            tk.Label(body, text="Still fits 5 fingers: B-C, E-F, C-D, D-E, F-G, G-A, A-B and C#-D#, F#-G#, G#-A# (not C-C# or C#-D),\nat the thumb end of the hand.  A 6th note is then allowed.", bg=BG, fg=MUTED,
                      font=("TkDefaultFont", 8), justify=tk.LEFT).grid(row=7, column=0, columnspan=2, padx=16, sticky="w")
         else:
             thumb_var = None
             hands_var = tk.IntVar(value=int(_FC_OPTS.get("hands", 0)))   # v22ze-258
-            hf = tk.LabelFrame(dlg, text=" How to decide the hands ", bg=BG, fg=FG,
+            hf = tk.LabelFrame(body, text=" How to decide the hands ", bg=BG, fg=FG,
                                font=("TkDefaultFont", 9), padx=10, pady=4)
             hf.grid(row=5, column=0, columnspan=2, padx=16, pady=(10, 0), sticky="we")
             for _v, _t in ((0, "Standard: by pitch and reach"),
@@ -21755,6 +21759,14 @@ class MidisoftStudio:
                   activebackground="#30363d", activeforeground=FG)
         tk.Button(bfrm, text="Continue" if thin else "Separate", command=_ok, **bs).pack(side=tk.LEFT, padx=6)
         tk.Button(bfrm, text="Cancel", command=dlg.destroy, **bs).pack(side=tk.LEFT, padx=6)
+        try:   # v22ze-266g: on a short screen drop the small hint lines, so the choices and Separate / Cancel show
+            dlg.update_idletasks()
+            if dlg.winfo_reqheight() > int(dlg.winfo_screenheight() * 0.60):
+                for _w in body.winfo_children():
+                    if isinstance(_w, tk.Label) and str(_w.cget("fg")) == MUTED:
+                        _w.grid_remove()
+        except Exception:
+            pass
         try:
             dlg.grab_set()
         except Exception:
