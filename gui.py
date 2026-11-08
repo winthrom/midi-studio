@@ -18157,6 +18157,10 @@ class MidisoftStudio:
         _wx = max(0, (sw - win_w) // 2)
         _wy = max(0, (sh - win_h) // 2 - 30)
         root.geometry(f"{win_w}x{win_h}+{_wx}+{_wy}")
+        try:   # v22ze-267: the main window cannot be dragged larger than the screen
+            root.maxsize(sw, sh)
+        except Exception:
+            pass
         root.configure(bg="#0d1117")
         self._build_menu(); self._build_toolbar(); self._build_track_area()
         self._build_status(); self._update_title(); self._update_status()
@@ -23865,14 +23869,75 @@ class MidisoftStudio:
             ("Setup ▸ MIDI Output Device…", "sound speaker synth volume pianoteq fluidsynth", "something-not-working"),
             ("Help ▸ User Guide", "manual instructions", "what-this-program-does"),
         
-            ("Fix File ▸ Auto-Correct Score…", "do everything one step repair separate hands short rests automatic fix the whole file", "the-menus"),
-            ("Fix File ▸ Compare with Original…", "what changed since loading sound same bars differ check", "the-menus"),
-            ("Playing ▸ Easy to Play (hand over hand)…", "hand crossing figure one hand easier to play passages", "the-menus"),
-            ("Playing ▸ Fingering Numbers…", "fingers numbers thumb 1 2 3 4 5 fingering", "the-menus"),
-            ("Playing ▸ Suggest Marks…", "staccato accent marks detect suggestions articulation", "the-menus"),
-            ("Playing ▸ Soft Notes…", "quiet notes soft hide faint velocity screen", "the-menus"),
-            ("View ▸ Listening speed", "slow down practice speed percent tempo rest time slower faster hear", "the-menus"),
+            ("Fix File ▸ Auto-Correct Score…", "do everything one step repair separate hands short rests automatic fix the whole file", "auto-correct-score"),
+            ("Fix File ▸ Compare with Original…", "what changed since loading sound same bars differ check", "compare-with-original"),
+            ("Playing ▸ Easy to Play (hand over hand)…", "hand crossing figure one hand easier to play passages", "easy-to-play-hand-over-hand"),
+            ("Playing ▸ Fingering Numbers…", "fingers numbers thumb 1 2 3 4 5 fingering", "fingering-numbers"),
+            ("Playing ▸ Suggest Marks…", "staccato accent marks detect suggestions articulation", "suggest-marks"),
+            ("Playing ▸ Soft Notes…", "quiet notes soft hide faint velocity screen", "soft-notes"),
+            ("View ▸ Listening speed", "slow down practice speed percent tempo rest time slower faster hear", "bpm-tempo-change-and-listening-speed"),
             ("Edit ▸ Hear selected notes", "click note sound play selected", "the-menus"),
+        ]
+        items += [   # v22ze-267: the guide's Index, so Where do I find... searches the same topics
+            ("Guide ▸ Accent", "accent mark louder stress", "marks-on-notes"),
+            ("Guide ▸ Add Track / Delete Track", "add track / delete track tracks new empty", "the-menus"),
+            ("Guide ▸ Arco", "arco bow", "marks-on-notes"),
+            ("Guide ▸ Auto-Correct Score", "auto-correct score automatic repair everything one step", "auto-correct-score"),
+            ("Guide ▸ Barlines in the wrong place", "barlines in the wrong place measure too long short bars", "when-the-measures-are-the-wrong-length"),
+            ("Guide ▸ BPM (beats per minute)", "bpm (beats per minute) speed tempo faster slower same number", "bpm-tempo-change-and-listening-speed"),
+            ("Guide ▸ Braille music", "braille music blind notation", "the-menus"),
+            ("Guide ▸ Chords too wide for one hand", "chords too wide for one hand span stretch six notes", "fix-chords"),
+            ("Guide ▸ Combine Tracks", "combine tracks merge instruments", "the-menus"),
+            ("Guide ▸ Compare with Original", "compare with original what changed difference sound same", "compare-with-original"),
+            ("Guide ▸ Composer", "composer title name printed", "setting-the-speed-time-key-and-title"),
+            ("Guide ▸ Drums", "drums channel 10 percussion volume", "something-not-working"),
+            ("Guide ▸ Easy to Play (hand over hand)", "easy to play (hand over hand) trill figure melody wrong hand", "easy-to-play-hand-over-hand"),
+            ("Guide ▸ Editing tabs", "editing tabs select apply note rest accidental dynamics articulation", "the-editing-tabs"),
+            ("Guide ▸ Fermata", "fermata pause hold", "marks-on-notes"),
+            ("Guide ▸ Fingering numbers", "fingering numbers fingers thumb 1 2 3 4 5 which finger", "fingering-numbers"),
+            ("Guide ▸ Fix Chords", "fix chords too many notes one hand", "fix-chords"),
+            ("Guide ▸ Fix Measures", "fix measures overflow barline tie cut lengthen", "fix-measures"),
+            ("Guide ▸ Follow: Page / Smooth", "follow: page / smooth red line scroll moving score slow computer", "buttons-at-the-top-of-the-score"),
+            ("Guide ▸ Grace Cleanup", "grace cleanup tiny notes delete grace", "the-menus"),
+            ("Guide ▸ Hands, separating", "hands, separating left right staff piano split", "separate-hands-piano-organ-accordion"),
+            ("Guide ▸ Hear selected notes", "hear selected notes click note sound", "the-menus"),
+            ("Guide ▸ Key signature", "key signature sharps flats", "setting-the-speed-time-key-and-title"),
+            ("Guide ▸ LilyPond", "lilypond print engraving download", "printing-a-score"),
+            ("Guide ▸ Lions Club and trademarks", "lions club and trademarks emblem logo sterling licence", "names-trademarks-and-what-has-been-tested"),
+            ("Guide ▸ Listening speed", "listening speed practise slow down slower faster hear percent", "bpm-tempo-change-and-listening-speed"),
+            ("Guide ▸ Marks on notes", "marks on notes articulation staccato tenuto portato marcato tremolo fermata pizzicato", "marks-on-notes"),
+            ("Guide ▸ Measures wanted", "measures wanted bar count wrong length", "when-the-measures-are-the-wrong-length"),
+            ("Guide ▸ Metronome click", "metronome click beat", "the-row-of-buttons-across-the-top"),
+            ("Guide ▸ MIDI output device (no sound)", "midi output device (no sound) synthesizer fluidsynth speaker silent", "something-not-working"),
+            ("Guide ▸ Mixer", "mixer volume mute solo instrument sound", "four-ways-of-looking-at-the-music"),
+            ("Guide ▸ MusicXML", "musicxml musescore sibelius finale export", "the-menus"),
+            ("Guide ▸ Mute and Solo", "mute and solo silence one instrument track list", "the-track-list"),
+            ("Guide ▸ Names of other products", "names of other products musescore midisoft microsoft apple compatibility tested macos", "names-trademarks-and-what-has-been-tested"),
+            ("Guide ▸ Pedal marks", "pedal marks ped sustain", "buttons-at-the-top-of-the-score"),
+            ("Guide ▸ Piano Roll", "piano roll bars notes view", "four-ways-of-looking-at-the-music"),
+            ("Guide ▸ Portato", "portato detached legato dot dash", "marks-on-notes"),
+            ("Guide ▸ Print a score", "print a score paper pdf sheet music title instrument names measure numbers", "printing-a-score"),
+            ("Guide ▸ Problem report", "problem report send bug error email zip", "telling-me-about-a-problem"),
+            ("Guide ▸ Quantize", "quantize snap grid timing rhythm early late", "quantize"),
+            ("Guide ▸ Rationalize Score", "rationalize score clean recording one step", "rationalize-score"),
+            ("Guide ▸ Recording from a keyboard (Rec)", "recording from a keyboard (rec) record midi keyboard", "the-row-of-buttons-across-the-top"),
+            ("Guide ▸ Remove Short Rests", "remove short rests sliver gaps tiny rests legato", "remove-short-rests"),
+            ("Guide ▸ Save As", "save as copy original edited file name", "the-menus"),
+            ("Guide ▸ Score Settings", "score settings title composer time signature tempo measures", "setting-the-speed-time-key-and-title"),
+            ("Guide ▸ Short rests (show or hide)", "short rests (show or hide) tick box clutter", "buttons-at-the-top-of-the-score"),
+            ("Guide ▸ Soft Notes", "soft notes quiet accidental faint velocity", "soft-notes"),
+            ("Guide ▸ Staccato", "staccato short detached", "marks-on-notes"),
+            ("Guide ▸ Suggest Marks", "suggest marks detect staccato accent", "suggest-marks"),
+            ("Guide ▸ Tempo change (%)", "tempo change (%) faster slower saved file", "bpm-tempo-change-and-listening-speed"),
+            ("Guide ▸ Tenuto", "tenuto held full length", "marks-on-notes"),
+            ("Guide ▸ Tester Log", "tester log diary log folder", "telling-me-about-a-problem"),
+            ("Guide ▸ Time signature", "time signature 4/4 3/4 meter", "setting-the-speed-time-key-and-title"),
+            ("Guide ▸ Tremolo", "tremolo repeated rapid", "marks-on-notes"),
+            ("Guide ▸ Undo and Redo", "undo and redo take back", "the-menus"),
+            ("Guide ▸ Uninstall", "uninstall remove program", "removing-the-program"),
+            ("Guide ▸ Updates (Check for Updates)", "updates (check for updates) new version", "the-menus"),
+            ("Guide ▸ Windows warning (protected your PC)", "windows warning (protected your pc) unknown publisher smartscreen", "windows-10-or-11-64-bit"),
+            ("Guide ▸ Zoom and Fit Width", "zoom and fit width bigger smaller score window", "buttons-at-the-top-of-the-score"),
         ]
         BG, FG = "#0d1117", "#f0f6fc"
         dlg = tk.Toplevel(self.root)
@@ -24137,12 +24202,15 @@ class MidisoftStudio:
         tk.Frame(dlg, bg="#21262d", height=1).pack(fill=tk.X, padx=28, pady=8)
 
         # ── Technical info ────────────────────────────────────────────────────
-        tk.Label(dlg, text="Built in Python 3 + tkinter + mido + python-rtmidi", bg=BG, fg=MUTED,
-                 font=("TkDefaultFont", 9), justify=tk.LEFT).pack(padx=28, pady=(0, 2), anchor="w")   # v22ze-254
+        _tech_lbl = tk.Label(dlg, text="Built in Python 3 + tkinter + mido + python-rtmidi", bg=BG, fg=MUTED,
+                 font=("TkDefaultFont", 9), justify=tk.LEFT)   # v22ze-254
+        _tech_lbl.pack(padx=28, pady=(0, 2), anchor="w")
         tk.Label(dlg, text="Michael F. Winthrop, Member of Sterling Lions Club, in collaboration with Claude Sonnet of Anthropic", bg=BG, fg="#e3b341",
                  font=("TkDefaultFont", 9, "bold"), justify=tk.LEFT).pack(padx=28, pady=(0, 2), anchor="w")
         tk.Label(dlg, text="Original inspiration: MidiSoft Studio4 © 1991–1995 MidiSoft\nCorporation, created by Raymond Bily", bg=BG, fg="#ffffff",
                  font=("TkDefaultFont", 9), justify=tk.LEFT).pack(padx=28, pady=(0, 2), anchor="w")
+        tk.Label(dlg, text="Other product and company names belong to their owners; see TRADEMARKS.md.", bg=BG, fg=MUTED,
+                 font=("TkDefaultFont", 9), justify=tk.LEFT).pack(padx=28, pady=(0, 2), anchor="w")   # v22ze-267: stays on a short screen
         info = (
             "Contains MIDI Studio code by Michael Winthrop for the Sterling Lions Club, Virginia, USA.\n"
             "see: https://github.com/winthrom/midi-studio\n"
@@ -24184,7 +24252,7 @@ class MidisoftStudio:
         # v22ze-264b: on a short screen drop the key list and credit links, never the buttons
         dlg.update_idletasks()
         _room = dlg.winfo_screenheight() - 90
-        for _w in (_info_lbl, _credit_lf):
+        for _w in (_info_lbl, _credit_lf, _tech_lbl):   # v22ze-267
             if dlg.winfo_reqheight() > _room:
                 _w.pack_forget()
                 dlg.update_idletasks()
