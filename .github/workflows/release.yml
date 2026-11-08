@@ -17,6 +17,8 @@ jobs:
   macos:
     uses: ./.github/workflows/macos.yml
     secrets: inherit
+    permissions:
+      contents: write   # the called workflow has a job that asks for it; it is skipped on tags
 
   publish:
     needs: [windows, linux, macos]
