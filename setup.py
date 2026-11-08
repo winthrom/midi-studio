@@ -3,8 +3,8 @@ from setuptools import setup, find_packages
 
 setup(
     name="midi-studio",
-    version="22.0.73",
-    description="A Synthesizer in the Spirit of MidiSoft Studio4",
+    version="0.4.0",
+    description="MIDI notation editor and synthesizer",
     author="Michael Winthrop",
     author_email="michael.f.winthrop@gmail.com",
     license="GPL-3.0-or-later",
