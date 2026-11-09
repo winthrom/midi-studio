@@ -6,7 +6,7 @@ OUT="$ROOT/build/linux/stage/midistudio"
 rm -rf "$OUT"
 mkdir -p "$OUT"
 
-REQUIRED="main gui midi_io audio_backend app_resources synth theory export sys_platform"
+REQUIRED="main gui midi_io audio_backend app_resources theory sys_platform"
 for m in $REQUIRED; do
     [ -f "$ROOT/$m.py" ] || { echo "ERROR: missing $m.py" >&2; exit 1; }
 done

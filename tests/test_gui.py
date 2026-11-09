@@ -78,8 +78,8 @@ class TestTransport(unittest.TestCase):
     def test_transport_creation(self):
         """Transport should initialize."""
         try:
-            from synth import Transport
-            transport = Transport()
+            from gui import Transport, Song
+            transport = Transport(Song())
             self.assertIsNotNone(transport)
         except (ImportError, Exception):
             self.skipTest("Transport test skipped")
@@ -92,7 +92,7 @@ class TestPianoRoll(unittest.TestCase):
         """PianoRoll should initialize with a song."""
         try:
             from gui import PianoRollView
-            from synth import Song
+            from gui import Song
             song = Song()
             # Skip actual creation since it needs real Tk
             self.assertIsNotNone(PianoRollView)

@@ -6687,11 +6687,6 @@ class Song:
         # v22ze-232: same rule as the screen -- gaps shorter than this are not printed as rests.
         _min_rest = (tpb // 8) if short_rests else tpb
 
-        def spacer_seq(ticks):
-            # invisible skip(s) of the given length (rest_seq tokens with 'r' -> 's')
-            toks, used = rest_seq(ticks)
-            return ['s' + t[1:] for t in toks], used
-
         def build_measure_str(notes_in_meas, cursor_start, measure_tpm):
             """Grid-based measure builder — guarantees clean standard note values.
 
@@ -8494,9 +8489,6 @@ class Transport:
     def _t2s(self, ticks):
         return (ticks / self.song.ticks_per_beat) * (self.song.tempo / self._eff_speed() / 1_000_000)
 
-    def _s2t(self, sec):
-        return sec * self.song.ticks_per_beat / (self.song.tempo / self._eff_speed() / 1_000_000)
-
     # ── Tempo map helpers ────────────────────────────────────────────────────
     def _build_tempo_map(self):
         """Build a list of (abs_tick, tempo_us) change points from track events.
@@ -9985,62 +9977,6 @@ class MixerView(tk.Frame):
 # ─────────────────────────────────────────────────────────────────────────────
 # Song Settings dialog
 # ─────────────────────────────────────────────────────────────────────────────
-
-
-class SongSettingsDlg(tk.Toplevel):
-    def __init__(self, parent, app):
-        super().__init__(parent)
-        self.app = app
-        self.title("Song Settings")
-        # v22ze-46: resizable + always-on-top per presentation request --
-        # also reported as too tall for the screen on some displays.
-        # v22ze-57: wrapped content in _make_scrollable so shrinking this
-        # window below its content shows a scrollbar instead of clipping
-        # rows with no way back to them (this dialog is small today, but
-        # the same policy applies here as everywhere else).
-        self.resizable(True, True)
-        self.attributes("-topmost", True)
-        self.grab_set()
-        content = _make_scrollable(self, bg=self.cget("bg"))
-        s = app.song
-        tk.Label(content, text="Tempo (BPM):").grid(row=0, column=0, padx=8, pady=4, sticky="w")
-        self.bpm_var = tk.IntVar(value=s.bpm)
-        tk.Spinbox(content, from_=20, to=300, textvariable=self.bpm_var, width=6).grid(
-            row=0, column=1, pady=4
-        )
-        tk.Label(content, text="Time Signature:").grid(row=1, column=0, padx=8, pady=4, sticky="w")
-        tf = tk.Frame(content)
-        tf.grid(row=1, column=1, pady=4)
-        self.ts_num = tk.IntVar(value=s.time_sig_num)
-        self.ts_den = tk.IntVar(value=s.time_sig_den)
-        tk.Spinbox(tf, from_=1, to=16, textvariable=self.ts_num, width=3).pack(side=tk.LEFT)
-        tk.Label(tf, text=" / ").pack(side=tk.LEFT)
-        ttk.Combobox(
-            tf,
-            textvariable=self.ts_den,
-            values=[1, 2, 4, 8, 16, 32],
-            width=4,
-            state="readonly",
-        ).pack(side=tk.LEFT)
-        tk.Label(content, text="Ticks per Beat:").grid(row=2, column=0, padx=8, pady=4, sticky="w")
-        self.tpb_var = tk.IntVar(value=s.ticks_per_beat)
-        tk.Spinbox(
-            content, from_=48, to=960, textvariable=self.tpb_var, increment=48, width=6
-        ).grid(row=2, column=1)
-        bf = tk.Frame(content)
-        bf.grid(row=3, column=0, columnspan=2, pady=8)
-        tk.Button(bf, text="OK", width=8, command=self._ok).pack(side=tk.LEFT, padx=4)
-        tk.Button(bf, text="Cancel", width=8, command=self.destroy).pack(side=tk.LEFT, padx=4)
-
-    def _ok(self):
-        s = self.app.song
-        s.bpm = self.bpm_var.get()
-        s.set_time_signature(self.ts_num.get(), self.ts_den.get())
-        s.ticks_per_beat = self.tpb_var.get()
-        s.modified = True
-        self.app._update_title()
-        self.app._update_status()
-        self.destroy()
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -14788,115 +14724,6 @@ class ScoreView(tk.Frame):
                 _tie_arc(x1, _out_end, y, tie_above)
                 _tie_arc(_in_start, x2, _y2, _above2)
 
-    def _draw_note(self, c, note, tt, bt, nr, tpb):
-        # Legacy single-note draw — kept for compatibility; chord path is used instead.
-        pos, acc = note_staff_pos(note, _song_uses_flats(self.app.song))
-        db = note.duration / tpb
-        use_treble = pos >= -2
-        if use_treble:
-            y = self._sp_to_y_treble(pos, tt)
-            top_y = tt
-            sp_to_y = self._sp_to_y_treble
-            bot_sp = -3
-            top_sp = 5
-        else:
-            y = self._sp_to_y_bass(pos, bt)
-            top_y = bt
-            sp_to_y = self._sp_to_y_bass
-            bot_sp = -10
-            top_sp = -4
-
-        x = int(self._tick_to_x(note.tick)) + nr + 2
-
-        # ledger lines below staff
-        lp = bot_sp - 1
-        while lp >= pos:
-            if (lp - bot_sp) % 2 == 0:
-                ly = sp_to_y(lp, top_y)
-                c.create_line(x - nr - 3, ly, x + nr + 3, ly, fill="black", width=1)
-            lp -= 1
-        # ledger lines above staff
-        lp = top_sp + 1
-        while lp <= pos:
-            if (lp - top_sp) % 2 == 0:
-                ly = sp_to_y(lp, top_y)
-                c.create_line(x - nr - 3, ly, x + nr + 3, ly, fill="black", width=1)
-            lp += 1
-        # middle C ledger
-        if note.pitch == 60:
-            ly = sp_to_y(0, tt) if use_treble else sp_to_y(0, bt)
-            c.create_line(x - nr - 3, ly, x + nr + 3, ly, fill="black", width=1)
-
-        # accidental
-        # v22ze fix: same font optical-center offset as the main chord
-        # drawing path above -- see that comment for the full reasoning.
-        # v22ze round 2: more lift + bold + larger, matching the main path.
-        _acc_y = y - self.SLG * 0.30
-        if acc == 1:
-            c.create_text(
-                x - nr - 9,
-                _acc_y,
-                text="♯",
-                font=("serif", int(self.SLG * 1.9), "bold"),
-                fill="black",
-                anchor="center",
-            )
-        elif acc == -1:
-            c.create_text(
-                x - nr - 9,
-                _acc_y,
-                text="♭",
-                font=("serif", int(self.SLG * 1.9), "bold"),
-                fill="black",
-                anchor="center",
-            )
-
-        # stem direction: up when note is below the middle line (B4=pos 2)
-        stem_up = pos < 2
-        sl = self.SLG * 3.5
-        sx = x + (nr if stem_up else -nr)
-
-        if db >= 4:  # whole
-            _draw_notehead(c, x, y, nr + 1, nr - 2, "black", "", width=2)
-        elif db >= 2:  # half
-            _draw_notehead(c, x, y, nr, nr - 1, "black", "", width=2)
-            sy = y - sl if stem_up else y + sl
-            c.create_line(sx, y, sx, sy, fill="black", width=2)
-        else:  # quarter or shorter — filled
-            _draw_notehead(c, x, y, nr, nr - 1, "black", "black")
-            sy = y - sl if stem_up else y + sl
-            c.create_line(sx, y, sx, sy, fill="black", width=2)
-            # flags (tails)
-            n_flags = 0
-            if db < 0.5:
-                n_flags = 1  # 8th
-            if db < 0.25:
-                n_flags = 2  # 16th
-            if db < 0.125:
-                n_flags = 3  # 32nd
-            # fd: direction flags stack FROM stem tip, always toward notehead
-            # stem_up → tip is high (small y), flags hang downward (+y)
-            # stem_down → tip is low (large y), flags go upward (-y)
-            fd = 1 if stem_up else -1
-            flag_sp = self.SLG * 0.85  # spacing between consecutive flags
-            for fi in range(n_flags):
-                fy0 = sy + fi * flag_sp * fd  # start of this flag at stem tip side
-                # Flag sweeps right then curls back; curve points go away then return
-                # All y offsets are relative to fy0, in the fd direction
-                c.create_line(
-                    sx,
-                    fy0,
-                    sx + 10,
-                    fy0 + self.SLG * 0.5 * fd,
-                    sx + 10,
-                    fy0 + self.SLG * 1.0 * fd,
-                    sx,
-                    fy0 + self.SLG * 1.2 * fd,
-                    fill="black",
-                    width=1.5,
-                    smooth=True,
-                )
-
     def _draw_rest_shape(self, c, rest_type, cx, y, slg):
         """Draw a rest symbol geometrically (no font dependency).
         rest_type: 'whole','half','quarter','eighth','16th','32nd'
@@ -15257,99 +15084,6 @@ class ScoreView(tk.Frame):
         step = total_d % 7
         semi = [0, 2, 4, 5, 7, 9, 11][max(0, min(6, step))]
         return max(0, min(127, oct_ * 12 + semi))
-
-    def _apply_duration_to_selection(self):
-        """Phase 1b: rewrite the selected span using the currently-picked
-        duration (self._dur_var). Per the confirmed rule: selected rests
-        are deleted; selected notes/chords are set to the picked duration;
-        the span's total length can grow or shrink; everything after the
-        span, within the same measure, shifts by the resulting delta.
-        """
-        if not self._selection:
-            return
-        song = self.app.song
-        tpb = song.ticks_per_beat
-        picked_ticks = self._dur_to_ticks(self._dur_var.get(), tpb)
-
-        # Group selected items by track index.
-        by_track = {}  # track_index -> list of ("note", tick, end) or ("rest", tick, end)
-        note_lookup = {}  # (track_index, tick) -> list of MidiNote (chord)
-        for item in self._selection:
-            if isinstance(item, tuple) and item[0] == "rest":
-                _, ti_sel, rtick, rdur = item
-                by_track.setdefault(ti_sel, []).append(("rest", rtick, rtick + rdur))
-            else:
-                note = item
-                ti_sel = None
-                for idx, tr in enumerate(song.tracks):
-                    if note in tr.notes:
-                        ti_sel = idx
-                        break
-                if ti_sel is None:
-                    continue  # stale selection entry (note no longer in the song)
-                by_track.setdefault(ti_sel, []).append(("note", note.tick, note.tick + note.duration))
-                note_lookup.setdefault((ti_sel, note.tick), []).append(note)
-
-        for ti_sel, items in by_track.items():
-            tr = song.tracks[ti_sel]
-            items.sort(key=lambda it: it[1])  # order by tick
-            span_start = items[0][1]
-            span_end = max(it[2] for it in items)
-            old_span = span_end - span_start
-
-            # Collapse consecutive "note" entries at the same tick into one
-            # chord entry (simultaneous notes move/resize together).
-            ordered = []
-            seen_ticks = set()
-            for kind, tick, end in items:
-                if kind == "note":
-                    if tick in seen_ticks:
-                        continue
-                    seen_ticks.add(tick)
-                    ordered.append(("note", tick))
-                else:
-                    ordered.append(("rest", tick))
-
-            new_span = sum(picked_ticks for kind, _ in ordered if kind == "note")
-            delta = new_span - old_span
-
-            # Find the measure span_end falls in, so the shift is bounded
-            # to that measure only -- never cascades into the rest of the
-            # track (matches the auto-fix plan's "never cascade" rule).
-            measure_end = None
-            mmap = getattr(song, "rationalized_measure_map", None)
-            if mmap:
-                for m_idx, ms, me, num, den, tpm in mmap:
-                    if ms <= span_end < me or (span_end == me and ms < me):
-                        measure_end = me
-                        break
-            if measure_end is None:
-                measure_end = max(
-                    (n.tick + n.duration for n in tr.notes if n.tick >= span_end),
-                    default=span_end,
-                )
-
-            # Shift everything after the span (within the measure) BEFORE
-            # touching the selected notes' own tick/duration -- otherwise
-            # their rewritten .tick values corrupt the >= span_end test.
-            if delta != 0:
-                for n in tr.notes:
-                    if span_end <= n.tick < measure_end:
-                        n.tick += delta
-
-            # Lay out the selected chords consecutively from span_start.
-            cursor = span_start
-            for kind, tick in ordered:
-                if kind == "rest":
-                    continue
-                for n in note_lookup.get((ti_sel, tick), []):
-                    n.tick = cursor
-                    n.duration = picked_ticks
-                cursor += picked_ticks
-
-        self._selection.clear()
-        self._refresh_selection_label()
-        self._draw()
 
     def _dur_to_ticks(self, name, tpb):
         return dur_ticks(name, tpb) or tpb   # v22ze-214
@@ -17076,36 +16810,6 @@ def _thin_hand_chord(pitches, hand, max_notes, max_span):
         removed.add(r)
         c.remove(r)
     return removed
-
-
-def _thin_two_hand_tracks(song, rh_i, lh_i, max_notes, max_span, win=20):
-    """Return (removed_keys, report).  removed_keys = {(track_index, tick, pitch)};
-    report = [(bar_number, 'R'|'L', notes_before, notes_after, 'G#4 D5')]."""
-    import bisect as _bs
-    mmap = song.get_measure_map()
-    starts = [m[1] for m in mmap]
-    removed_keys = set()
-    report = []
-    for ti, hand in ((rh_i, "R"), (lh_i, "L")):
-        ns = sorted(song.tracks[ti].notes, key=lambda n: n.tick)
-        i = 0
-        while i < len(ns):
-            j = i
-            while j + 1 < len(ns) and ns[j + 1].tick - ns[i].tick <= win:
-                j += 1
-            grp = ns[i:j + 1]
-            ps = sorted({n.pitch for n in grp})
-            rem = _thin_hand_chord(ps, hand, max_notes, max_span)
-            if rem:
-                for n in grp:
-                    if n.pitch in rem:
-                        removed_keys.add((ti, n.tick, n.pitch))
-                bar = max(0, _bs.bisect_right(starts, ns[i].tick) - 1) + 1
-                names = " ".join(NOTE_NAMES[p % 12] + str(p // 12 - 1) for p in sorted(rem))
-                report.append((bar, hand, len(ps), len(ps) - len(rem), names))
-            i = j + 1
-    report.sort(key=lambda r: (r[0], r[1]))
-    return removed_keys, report
 
 
 # v22ze-177: Fix Chords plan - one entry per chord a hand cannot play, with a
@@ -23009,8 +22713,6 @@ class MidisoftStudio:
                 pass
         else:
             self._mixer_pane.toggle()
-
-    def _song_settings(self): SongSettingsDlg(self.root,self)
 
     def _choose_midi_output(self):
         """Let the user switch MIDI output device without restarting.
