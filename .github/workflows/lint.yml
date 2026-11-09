@@ -33,10 +33,9 @@ jobs:
         isort --check-only sys_platform.py theory.py main.py
       continue-on-error: true
 
-    - name: Lint with flake8
+    - name: Lint with flake8 (real errors; this step fails the run)
       run: |
-        flake8 sys_platform.py theory.py main.py --count --select=E9,F63,F7,F82 --show-source --statistics
-      continue-on-error: true
+        flake8 gui.py midi_io.py audio_backend.py app_resources.py sys_platform.py theory.py main.py --count --select=E9,F63,F7,F82 --show-source --statistics
 
     - name: Lint with pylint
       run: |

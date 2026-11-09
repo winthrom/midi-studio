@@ -593,7 +593,6 @@ def _maybe_show_no_synth_dialog(root):
 def _launch_timidity():
     """Start TiMidity in ALSA-server mode with buffer flags that prevent buzz.
     Returns True if launched successfully, False if already running or failed."""
-    import re
     import shutil
     import subprocess
 
