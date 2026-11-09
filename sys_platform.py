@@ -11,7 +11,7 @@ import time
 from datetime import datetime
 
 # Application identity (update APP_VERSION each release)
-APP_VERSION = "22ze-269"
+APP_VERSION = "22ze-270"
 APP_RELEASE = "0.4.1-dev"
 APP_FULL_NAME = "Midi-Studio — a Synthesizer in the Spirit of MidiSoft Studio4"
 APP_TIMESTAMP = "2026-11-09"  # build date (was: launch time)
@@ -25,6 +25,7 @@ APP_RELEASES_API = "https://api.github.com/repos/winthrom/midi-studio/releases/l
 def release_tuple(v):
     """'v0.3.3', '0.4.0-dev', '0.10.1' -> (0, 3, 3) ... ; None when it is not a version number."""
     import re as _re
+
     m = _re.match(r"\s*v?(\d+)\.(\d+)\.(\d+)", str(v))
     return tuple(int(x) for x in m.groups()) if m else None
 
@@ -44,8 +45,11 @@ def fetch_latest_release(url=None, timeout=6):
     import json as _json
     import ssl as _ssl
     import urllib.request as _rq
-    req = _rq.Request(url or APP_RELEASES_API,
-                      headers={"User-Agent": "MIDI-Studio-update-check", "Accept": "application/vnd.github+json"})
+
+    req = _rq.Request(
+        url or APP_RELEASES_API,
+        headers={"User-Agent": "MIDI-Studio-update-check", "Accept": "application/vnd.github+json"},
+    )
     ctx = None
     try:
         ctx = _ssl.create_default_context()
@@ -54,17 +58,25 @@ def fetch_latest_release(url=None, timeout=6):
     except Exception:
         try:
             import certifi as _certifi
+
             ctx = _ssl.create_default_context(cafile=_certifi.where())
         except Exception:
             ctx = None
-    with _rq.urlopen(req, timeout=timeout, context=ctx) if ctx is not None else _rq.urlopen(req, timeout=timeout) as r:
+    with (
+        _rq.urlopen(req, timeout=timeout, context=ctx)
+        if ctx is not None
+        else _rq.urlopen(req, timeout=timeout)
+    ) as r:
         d = _json.loads(r.read().decode("utf-8"))
     tag = str(d.get("tag_name", ""))
     if not release_tuple(tag):
         raise ValueError("unexpected release tag: " + tag)
-    return {"tag": tag, "version": ".".join(str(x) for x in release_tuple(tag)),
-            "url": d.get("html_url") or "https://github.com/winthrom/midi-studio/releases/latest",
-            "name": d.get("name") or tag}
+    return {
+        "tag": tag,
+        "version": ".".join(str(x) for x in release_tuple(tag)),
+        "url": d.get("html_url") or "https://github.com/winthrom/midi-studio/releases/latest",
+        "name": d.get("name") or tag,
+    }
 
 
 # Sterling Lions Club links
