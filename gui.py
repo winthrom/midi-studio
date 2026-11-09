@@ -10246,8 +10246,8 @@ class SplashScreen(tk.Toplevel):
         for txt, url in [
             ("MidiSoft.com", "https://midisoft.com/"),
             (
-                "MIDISOFT Studio 4.0 @ vetusware.com",
-                "https://vetusware.com/download/MIDISOFT%20Studio%204.0%204.0/?id=5666",
+                "MIDISOFT Studio 4.0 @ archive.org",
+                "https://archive.org/download/midisoft-studio-4",
             ),
         ]:
             _clk = tk.Label(
@@ -24227,8 +24227,8 @@ class MidisoftStudio:
 
         _credit_lf = tk.Frame(dlg, bg=BG); _credit_lf.pack(pady=(0, 6))
         for txt, url in [("MidiSoft.com", "https://midisoft.com/"),
-                          ("MIDISOFT Studio 4.0 archive (vetusware.com)",
-                           "https://vetusware.com/download/MIDISOFT%20Studio%204.0%204.0/?id=5666")]:
+                          ("MIDISOFT Studio 4.0 archive (archive.org)",
+                           "https://archive.org/download/midisoft-studio-4")]:
             _clk = tk.Label(_credit_lf, text=txt, bg=BG, fg=MUTED,
                             font=("TkDefaultFont", 8, "underline"),
                             cursor="hand2")
