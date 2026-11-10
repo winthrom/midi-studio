@@ -407,7 +407,7 @@ It works on a score opened from a MIDI file. A new, empty score has nothing to c
 
 The **Playing** menu holds tools that help a person play or read the music. Like the **Fix File** tools, they change the written score only: the sound stays as recorded and **Edit ▸ Undo** takes each one back (except where noted).
 
-**Please read: these are suggestions, and they can be wrong.** Hands, fingers and marks are worked out from the notes alone. They can produce impossible results: hands or fingers that cannot be played. Check them by ear and eye with an expert such as a music teacher or performer. In the program's own tests the weakest places were very fast passages (the same finger given to two different keys struck almost together) and some left-hand scales. The tools are being improved.
+**Please read: these are suggestions, and they can be wrong.** Hands, fingers and marks are worked out from the notes alone. They can produce impossible results: hands or fingers that cannot be played. Check them by ear and eye with an expert such as a music teacher or performer. In the program's own tests the weakest places were left-hand scales over two octaves, and music where the hands cross or a melody lies low on the keyboard. The tools are being improved.
 
 ## Easy to Play (hand over hand)
 
@@ -430,7 +430,8 @@ Things to know:
 
 - **It starts Off for every file you open.** The setting is not saved in the file.
 - **It cannot be edited note by note.** It is on or off, nothing else.
-- **It is a suggestion from the notes alone,** not a teacher's fingering. It follows common rules: the thumb passes under the fingers going away from it, and the fingers cross over the thumb coming back, mirrored for the left hand.
+- **It is a suggestion from the notes alone,** not a teacher's fingering. It follows common rules: the thumb passes under the fingers going away from it, and the fingers cross over the thumb coming back, mirrored for the left hand. The thumb passes under finger 3 in preference to finger 4, and two different keys played close together are not given the same finger.
+- **How it is worked out.** The program looks for the easiest fingering of the whole passage, not note by note, using the published cost rules of Parncutt, Sloboda, Clarke, Raekallio and Desain ("An ergonomic model of keyboard fingering for melodic fragments", Music Perception 14, 1997), plus the usual textbook fingerings for scales and chords. It was checked against the 24 major and minor scales, and compared with pianists' fingerings in the PIG data set (Nakamura, Saito and Yoshii, "Statistical Learning and Estimation of Piano Fingering", Information Sciences 517, 2020), used with the authors' permission for evaluation only. That data is not part of this program.
 - **The numbers also appear in the printed score and in the MusicXML export** (section 9), following your setting. Nothing changes in the music, and nothing is saved in the MIDI file.
 - **It needs two hands.** If the file is one track with both hands, the program offers to run **Separate Hands** first. If there are several tracks, it asks you to use **Tracks ▸ Combine Tracks**, then **Separate Hands**.
 - **Check it** by ear and eye with an expert such as a music teacher or performer, as described at the top of this section.

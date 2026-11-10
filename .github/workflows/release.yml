@@ -48,12 +48,12 @@ jobs:
             MACLINE="- **Mac, Apple Silicon (M1 or newer), experimental:** [MIDI-Studio-macos-arm64.zip]($BASE/MIDI-Studio-macos-arm64.zip). Open the zip and read START HERE: the first start needs a one-time approval in System Settings > Privacy & Security. Intel Macs are not supported yet."
           fi
           cat > notes.md <<EOF
-          Test build $GITHUB_REF_NAME. Download the file for your computer:
+          MIDI Studio $GITHUB_REF_NAME. Download the file for your computer:
 
           - **Windows 10 / 11 (64-bit), easiest:** [MIDI-Studio-Setup.exe]($BASE/MIDI-Studio-Setup.exe)
           - **Windows 10 / 11 (64-bit), no install:** [MIDI-Studio-windows-x64.zip]($BASE/MIDI-Studio-windows-x64.zip)
           - **Linux (64-bit):** [MIDI-Studio-x86_64.AppImage]($BASE/MIDI-Studio-x86_64.AppImage)
-          - **Linux menu entry (optional):** [install-linux.sh]($BASE/install-linux.sh) and [uninstall-linux.sh]($BASE/uninstall-linux.sh); run with `bash install-linux.sh`
+          - **Linux menu entry (optional):** [install-linux.sh]($BASE/install-linux.sh) and [uninstall-linux.sh]($BASE/uninstall-linux.sh); run it with: bash install-linux.sh
           - **User Guide (PDF):** [MIDI-Studio-User-Guide.pdf]($BASE/MIDI-Studio-User-Guide.pdf)
           $MACLINE
 
