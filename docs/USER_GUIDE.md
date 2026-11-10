@@ -49,6 +49,7 @@ Click a line to jump to it.
 - [12. Names, trademarks and what has been tested](#names-trademarks-and-what-has-been-tested)
 - [Words used in this guide](#words-used-in-this-guide)
 - [Index](#index)
+- [Afterword: About MIDI files](#afterword-about-midi-files)
 
 # 1. What this program does
 
@@ -697,6 +698,40 @@ Topics in alphabetical order. The same list is searched by **Help ▸ Where do I
 **Z**
 
 - Zoom and Fit Width: [Buttons at the top of the Score](#buttons-at-the-top-of-the-score)
+
+# Afterword: About MIDI files
+
+## What is MIDI?
+
+A Musical Instrument Digital Interface (MIDI) file, ending in `.mid`, is not a recording. It is a list of instructions: "play this note, this loud, starting now, for this long." Most music players can play one. MIDI Studio reads that list and draws it as sheet music. You can then:
+
+1. Hear the music play.
+2. See the music notation (the score), with a red line moving across it to show the notes being played.
+3. Zoom the score in and out.
+4. Change the tempo.
+5. Mute instruments. This is useful for practice if you play an instrument in a group such as a band.
+6. Make your own score by playing a MIDI instrument, with MIDI Studio as the recorder.
+7. Tidy the score.
+8. Print it.
+
+## Why MIDI?
+
+1. MIDI files are very small compared with audio files, which is good for email.
+2. An audio file is a "final" product that is very hard to change.
+3. MIDI makes creativity much easier.
+
+## Where do I get MIDI files?
+
+1. Make them with a MIDI instrument, such as an electronic keyboard.
+2. Record an audio file and have an online program convert it to a `.mid` file.
+3. Look for free MIDI files online. Tens of thousands are available, of all kinds of music.
+
+## Limits of MIDI
+
+1. A MIDI file holds no sounds of its own. The program that plays it uses pre-recorded instrument sounds.
+2. Those pre-recorded sounds may not sound as good as your own instrument.
+3. Almost anything that can make a sound is used in music (washboards, spoons and so on), but the list of available pre-recorded sounds may not include an odd instrument from your audio recording (to convert to `.mid`) or from a MIDI file you found online.
+4. Some instruments, keyboards for example, record only one track, even though a musician needs a track for each hand to make a score another musician can play from. MIDI Studio has tools to fix that: see [Separate Hands](#separate-hands-piano-organ-accordion).
 
 ---
 
