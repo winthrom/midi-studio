@@ -16426,104 +16426,180 @@ def _easy_apply(song, plan, include):
     return len(add)
 
 
-_FING_BLACK = (1, 3, 6, 8, 10)
+# v22ze-272: fingering search.  Rules: Parncutt, Sloboda, Clarke, Raekallio and Desain (1997), "An ergonomic model of keyboard
+# fingering for melodic fragments", Music Perception 14(4); span table from that paper (rows 2-3, 3-4, 3-5, 4-5 read from a
+# garbled copy and partly inferred).  Two additions, each from standard teaching: (1) a thumb passing under or over finger 3
+# (or 4) is preferred to passing 2 or 5; (2) the same finger on two different keys within three notes means the whole hand has
+# moved, so it counts as a full position change (Parncutt's own definition of a position change).
+# The thumb passes under 4 only when the keys force it (F major, B flat major): it costs more than under 3 (cross_adj).
+# (3) chords take the textbook shapes (outer finger by span, a spread triad 1-3-5, a wide four-note chord 1-2-3-5) unless another
+# fingering is cheaper by more than a small margin.
+# The left hand is mirrored (pitch -> -pitch) so one set of rules serves both hands.  Fingers are SUGGESTIONS.
+_FP_BLACK = (1, 3, 6, 8, 10)
+# finger pair (i < j) -> (MinPrac, MinComf, MinRel, MaxRel, MaxComf, MaxPrac): pitch(j) - pitch(i) in semitones, right hand
+_FP_SPAN = {
+    (1, 2): (-5, -3, 1, 5, 8, 10), (1, 3): (-4, -2, 3, 7, 10, 12), (1, 4): (-3, -1, 5, 9, 12, 14), (1, 5): (-1, 1, 7, 10, 13, 15),
+    (2, 3): (1, 1, 1, 2, 3, 5), (2, 4): (1, 1, 3, 4, 5, 7), (2, 5): (2, 2, 5, 6, 8, 10),
+    (3, 4): (1, 1, 1, 2, 2, 4), (3, 5): (1, 1, 3, 4, 5, 6), (4, 5): (1, 1, 1, 2, 2, 4),
+}
+_FP_W = dict(stretch=2.0, small=1.0, small_nt=2.0, large=1.0, large_nt=2.0, poschg_full=2.0, poschg_half=1.0, poschg_size=1.0,
+             weak=1.0, f345=1.0, f34=1.0, f4black=1.0, thumb_black=1.0, thumb_black_w=2.0, five_black_w=2.0, thumb_pass=1.0,
+             thumb_pass_wb=3.0, same_finger=60.0, chord_shape=2.0, cross_adj={2: 2.5, 3: -2.0, 4: 1.0, 5: 0.0})
 
 
-def _fing_step_cost(f, g, a, b, hand):
-    """v22ze-259: how awkward it is to play pitch b with finger g right after pitch a with finger f.
-    Looked at from the right hand; for the left hand the direction is mirrored (so the same table fits).
-    Returns (cost, kind) where kind is "cross" for a thumb under/over, "leap" for a hand move, else ""."""
-    d = (b - a) if hand == "R" else (a - b)
-    if d == 0:
-        return (0.0 if f == g else 1.5), ""
-    black_g = (b % 12) in _FING_BLACK
-    black_f = (a % 12) in _FING_BLACK
+def _fp_d(fa, fb, qa, qb):
+    """the interval as the finger pair (lower number first) sees it"""
+    return (qb - qa) if fa < fb else (qa - qb)
+
+
+def _fp_pair(fa, fb, qa, qb, ba, bb, intra):
+    """rules 1-3 (spans) and 12 (thumb passing) between two notes played one after the other"""
+    w = _FP_W
+    if fa == fb:
+        return 0.0 if qa == qb else w["same_finger"]
+    lo, hi = (fa, fb) if fa < fb else (fb, fa)
+    _mnp, mnc, mnr, mxr, mxc, _mxp = _FP_SPAN[(lo, hi)]
+    d = _fp_d(fa, fb, qa, qb)
     c = 0.0
-    if g == 1 and black_g:
-        c += 1.0
-    if g == 5 and black_g:
-        c += 0.3
-    if abs(d) > 9:   # a leap: the hand moves, any fingers will do
-        return c + 1.5 + (0.5 if f == g else 0.0), "leap"
-    if f == g:
-        return c + 4.0, ""
-    steps = g - f
-    if (d > 0) == (steps > 0):   # going the way the fingers point: inside one hand position
-        n = abs(steps)
-        reach = {1: 4, 2: 6, 3: 8, 4: 12}[n]
-        if abs(d) > reach:
-            c += (abs(d) - reach) * 1.5
-        elif abs(d) < n:   # fingers need at least about a semitone each
-            c += (n - abs(d)) * 1.5
-        else:
-            c += 0.15 * abs(abs(d) - 2.0 * n)
-        return c, ""
-    # going against the fingers: only the thumb can cross (under going away from it, over coming back)
-    if (g == 1 or f == 1) and abs(d) <= 5:
-        other = f if g == 1 else g
-        c += 2.0 + {2: 1.5, 3: 0.0, 4: 0.3, 5: 1.0}.get(other, 2.0)
-        if g == 1 and black_g or f == 1 and black_f:
-            c += 1.0
-        return c, "cross"
-    return c + 30.0, ""
+    if d > mxc:
+        c += w["stretch"] * (d - mxc)
+    if d < mnc:
+        c += w["stretch"] * (mnc - d)
+    nt = 1 not in (fa, fb)
+    if d < mnr:
+        c += (w["small_nt"] if nt else w["small"]) * (mnr - d)
+    if d > mxr:
+        c += (w["large_nt"] if nt else w["large"]) * (d - mxr)
+    if not intra and not nt and d < 0:   # a thumb passing under, or a finger over the thumb
+        c += w["cross_adj"].get(fb if fa == 1 else fa, 0.0)
+        if ba == bb:
+            c += w["thumb_pass"]
+        if (not (ba if fb == 1 else bb)) and (bb if fb == 1 else ba):
+            c += w["thumb_pass_wb"]
+    return c
 
 
-def _fing_sequence(pitches, hand):
-    """v22ze-259: fingers 1-5 for a run of single notes (cheapest overall).  Returns [(finger, matters)]:
-    matters is True for the first note, after a thumb crossing, and after a leap."""
-    n = len(pitches)
-    if n == 0:
-        return []
-    INF = 1e18
-    cost = [[0.0 if (pitches[0] % 12 not in _FING_BLACK or f not in (1,)) else 1.0 for f in range(1, 6)]]
-    back = []
-    for i in range(1, n):
-        row, br = [], []
-        for g in range(1, 6):
-            best, bf = INF, 0
-            for f in range(1, 6):
-                s, _k = _fing_step_cost(f, g, pitches[i - 1], pitches[i], hand)
-                t = cost[-1][f - 1] + s
-                if t < best:
-                    best, bf = t, f
-            row.append(best)
-            br.append(bf)
-        cost.append(row)
-        back.append(br)
-    f = min(range(1, 6), key=lambda k: cost[-1][k - 1])
-    out = [f]
-    for i in range(n - 1, 0, -1):
-        f = back[i - 1][f - 1]
-        out.append(f)
-    out.reverse()
-    res = [(out[0], True)]
-    for i in range(1, n):
-        _c, kind = _fing_step_cost(out[i - 1], out[i], pitches[i - 1], pitches[i], hand)
-        res.append((out[i], bool(kind)))
-    return res
+def _fp_note(f, black, prev_black, next_black):
+    """rules 6, 10, 11: weak fingers, thumb and little finger on black keys"""
+    w = _FP_W
+    c = 0.0
+    if f in (4, 5):
+        c += w["weak"]
+    if f == 1 and black:
+        c += w["thumb_black"]
+        if prev_black is False:
+            c += w["thumb_black_w"]
+        if next_black is False:
+            c += w["thumb_black_w"]
+    if f == 5 and black:
+        if prev_black is False:
+            c += w["five_black_w"]
+        if next_black is False:
+            c += w["five_black_w"]
+    return c
 
 
-def _fing_chord(pitches_sorted, hand):
-    """v22ze-259: fingers for the notes of one chord (lowest first); None when there are more than five."""
-    k = len(pitches_sorted)
-    span = pitches_sorted[-1] - pitches_sorted[0]
-    if k < 2 or k > 5:
-        return None
+def _fp_triple(fa, fb, fc, qa, qb, qc, ba, bb, bc):
+    """rules 4, 5 (position change) and 7, 8, 9 (finger groups) over three notes in a row"""
+    w = _FP_W
+    c = 0.0
+    if {fa, fb, fc} == {3, 4, 5}:
+        c += w["f345"]
+    if fa == 3 and fb == 4:
+        c += w["f34"]
+    if fb == 3 and fc == 4:
+        c += w["f34"]
+    if (fa == 3 and fb == 4 and (not ba) and bb) or (fa == 4 and fb == 3 and ba and (not bb)):
+        c += w["f4black"]
+    if (fb == 3 and fc == 4 and (not bb) and bc) or (fb == 4 and fc == 3 and bb and (not bc)):
+        c += w["f4black"]
+    if fa != fc:
+        lo, hi = (fa, fc) if fa < fc else (fc, fa)
+        mnp, mnc, _mnr, _mxr, mxc, mxp = _FP_SPAN[(lo, hi)]
+        d = _fp_d(fa, fc, qa, qc)
+        if d > mxp or d < mnp:
+            c += w["poschg_full"] if (fb == 1 and min(qa, qc) < qb < max(qa, qc)) else w["poschg_half"]
+        if d > mxc:
+            c += w["poschg_size"] * (d - mxc)
+        if d < mnc:
+            c += w["poschg_size"] * (mnc - d)
+    elif qa != qc:   # the same finger twice in three notes, on different keys: the whole hand has moved
+        c += w["poschg_full"] + w["poschg_size"] * max(0, abs(qc - qa) - 2)
+    return c
+
+
+def _fp_shape(k, span):
+    """the textbook finger shape for a chord of k notes spanning `span` semitones (right hand, lowest note first)"""
     if k == 2:
-        fs = [1, 2 if span <= 2 else 3 if span <= 4 else 4 if span <= 6 else 5]
-    elif k == 3:
-        fs = [1, 2, 3] if span <= 4 else [1, 3, 5]
-    elif k == 4:
-        fs = [1, 2, 3, 5] if span >= 7 else [1, 2, 3, 4]
-    else:
-        fs = [1, 2, 3, 4, 5]
-    return fs if hand == "R" else fs[::-1]   # left hand: the thumb is on the highest note
+        return (1, 2 if span <= 2 else 3 if span <= 4 else 4 if span <= 6 else 5)
+    if k == 3:
+        return (1, 2, 3) if span <= 4 else (1, 3, 5)
+    if k == 4:
+        return (1, 2, 3, 5) if span >= 7 else (1, 2, 3, 4)
+    return (1, 2, 3, 4, 5) if k == 5 else None
+
+
+def _fp_search(events, hand):
+    """The cheapest fingering for one hand.  events: lists of MIDI pitches struck together (chords of 1-5 notes).
+    Returns one {pitch: finger} per event."""
+    import itertools as _it
+    sgn = 1 if hand == "R" else -1
+    ev = [sorted(((sgn * p), p) for p in set(ps)) for ps in events]   # ascending q: right hand low to high, left hand high to low
+    n_ev = len(ev)
+    if n_ev == 0:
+        return []
+    cands = [list(_it.combinations(range(1, 6), len(e))) for e in ev]   # fingers rise along q within a chord
+    black = lambda p: (p % 12) in _FP_BLACK   # noqa: E731
+
+    def intra(i, A):
+        qs = ev[i]
+        c = 0.0
+        for k, (q, p) in enumerate(qs):
+            pb = black(qs[k - 1][1]) if k > 0 else None
+            nb = black(qs[k + 1][1]) if k + 1 < len(qs) else None
+            c += _fp_note(A[k], black(p), pb, nb)
+            if k > 0:
+                c += _fp_pair(A[k - 1], A[k], qs[k - 1][0], q, black(qs[k - 1][1]), black(p), True)
+        if len(qs) > 1 and A != _fp_shape(len(qs), qs[-1][0] - qs[0][0]):
+            c += _FP_W["chord_shape"]
+        if len(qs) >= 3:
+            c += _fp_pair(A[0], A[-1], qs[0][0], qs[-1][0], black(qs[0][1]), black(qs[-1][1]), True) * 0.5
+        return c
+
+    prev = {(A, 0): intra(0, A) for A in cands[0]}
+    back = [None]
+    for i in range(1, n_ev):
+        qk, pk = ev[i][-1]   # the outer note of the chord: right hand top, left hand bottom
+        qj, pj = ev[i - 1][-1]
+        cur, bk = {}, {}
+        for (Ap, fpp), cp in prev.items():
+            fj = Ap[-1]
+            for A in cands[i]:
+                f = A[-1]
+                c = cp + _fp_pair(fj, f, qj, qk, black(pj), black(pk), False)
+                if fpp:
+                    qh, ph = ev[i - 2][-1]
+                    c += _fp_triple(fpp, fj, f, qh, qj, qk, black(ph), black(pj), black(pk))
+                st = (A, fj)
+                if st not in cur or c < cur[st] - 1e-12:
+                    cur[st] = c
+                    bk[st] = (Ap, fpp)
+        prev = {st: c + intra(i, st[0]) for st, c in cur.items()}
+        back.append(bk)
+    st = min(prev, key=prev.get)
+    seq = [st[0]]
+    for i in range(n_ev - 1, 0, -1):
+        st = back[i][st]
+        seq.append(st[0])
+    seq.reverse()
+    return [{p: seq[i][k] for k, (_q, p) in enumerate(ev[i])} for i in range(n_ev)]
 
 
 def _fingering(song, rh_i, lh_i):
-    """v22ze-259: suggested fingers for both hands.  Returns {id(note): (finger, matters, "R"/"L")}.  Looks only: no
-    note is changed.  Single notes: the cheapest fingering of each run (a gap of a beat or more, or a chord,
-    starts a new run).  Chords: by the shape of the chord; "matters" only for stretched or 4-5 note chords."""
+    """v22ze-272: suggested fingers for both hands.  Returns {id(note): (finger, matters, "R"/"L")}.  Looks only: no
+    note is changed.  A gap of a beat or more starts a new passage.  Chords of 1-5 notes are fingered together with the
+    notes around them (_fp_search); more than five notes in one hand gets no fingers.  "matters" (the numbers worth
+    printing): the first note of a passage, after a thumb crossing, after a leap, and for stretched or 4-5 note chords."""
     tpb = song.ticks_per_beat
     out = {}
     for ti, hand in ((rh_i, "R"), (lh_i, "L")):
@@ -16535,28 +16611,39 @@ def _fingering(song, rh_i, lh_i):
                 strikes[-1][1].append(n)
             else:
                 strikes.append((n.tick, [n]))
-        run, run_end = [], None
+        passage, p_end = [], None
 
         def _flush():
-            if run:
-                for nn, (f, m) in zip(run, _fing_sequence([x.pitch for x in run], hand)):
-                    out[id(nn)] = (f, m, hand)
-                del run[:]
+            if not passage:
+                return
+            res = _fp_search([[x.pitch for x in g] for _t, g in passage], hand)
+            prev_key = None
+            for k, ((_t, g), r) in enumerate(zip(passage, res)):
+                ps = sorted(set(x.pitch for x in g))
+                big = len(ps) >= 4 or (len(ps) > 1 and ps[-1] - ps[0] >= 9)
+                key_p = ps[-1] if hand == "R" else ps[0]   # the outer note, as in the search
+                matter = (k == 0) or big
+                if prev_key is not None and not matter:
+                    pp, pf = prev_key
+                    d = (key_p - pp) if hand == "R" else (pp - key_p)
+                    f = r[key_p]
+                    if abs(d) > 9:
+                        matter = True   # a leap: the hand moves
+                    elif d != 0 and f != pf and (f == 1 or pf == 1) and ((d > 0) != (f > pf)):
+                        matter = True   # the thumb passes under, or a finger over the thumb
+                prev_key = (key_p, r[key_p])
+                for x in g:
+                    out[id(x)] = (r[x.pitch], matter, hand)
+            del passage[:]
         for t, g in strikes:
-            if len(g) > 1:
+            if len(set(x.pitch for x in g)) > 5:   # more notes than fingers: no suggestion, and the passage restarts
                 _flush()
-                ps = sorted(g, key=lambda x: x.pitch)
-                fs = _fing_chord([x.pitch for x in ps], hand)
-                if fs:
-                    big = len(ps) >= 4 or ps[-1].pitch - ps[0].pitch >= 9
-                    for x, f in zip(ps, fs):
-                        out[id(x)] = (f, big, hand)
-                run_end = None
+                p_end = None
                 continue
-            if run and run_end is not None and t - run_end >= tpb:
+            if passage and p_end is not None and t - p_end >= tpb:
                 _flush()
-            run.append(g[0])
-            run_end = g[0].tick + max(1, g[0].duration)
+            passage.append((t, g))
+            p_end = max(x.tick + max(1, x.duration) for x in g)
         _flush()
     return out
 
