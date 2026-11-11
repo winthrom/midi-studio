@@ -213,8 +213,41 @@ rename a heading, update `_where_dialog` and the Index, or "Where do I find..." 
 5. Add a line to `_where_dialog`, a section and Index entry to the User Guide, rebuild the PDF.
 6. Add a test, preferably one that imports `gui`.
 
-## 12. Planned (0.4.1)
+## 12. Plan
 
-Hand and finger search with hard physical limits (rule-based, with textbook scale fingerings as the test), the
-PIG dataset for evaluation only (non-profit, academic-use data; never train on it or ship it), signed Windows
-build, and the `release.yml` notes fixes (section 8).
+### 0.4.1 (in progress)
+
+Done: repository tidy (269-271); new fingering search from published cost rules plus textbook scale and chord shapes
+(272, 273); release notes wording and User Guide fingering text (274); Afterword in the User Guide (275, 276).
+
+Decided: the hand-separation prototype (event search, physical limits and continuity only) scored 90.3 per cent
+against 88.6 per cent for the current code on the development half of the PIG pieces. The gain is too small to risk
+Auto-Correct, so hand separation is left alone for 0.4.1. It may return as an optional method later.
+Ideas tried and dropped: reusing the earlier fingering for repeated figures (pianists vary about as often as the
+program does); splitting repeated chords between the hands (changes the printed staves; not wanted).
+
+To do:
+- One final measurement on the held-out even-numbered PIG pieces (run once; report how many variants were tried).
+- Two-octave left-hand scales; fingering that knows note lengths.
+- Signed Windows build (SignPath, no reply yet); Mac tests (Apple Silicon, Intel); MuseScore 4 and Braille (OSMD) checks.
+- App tests by hand: start-up, About, load and score, playback, Listening speed, Auto-Correct and Undo, Where do I find, window resize.
+
+PIG rules (agreed with Dr. Nakamura's permission): evaluation only, non-profit. Use it to choose between published
+methods and as a scoreboard; never fit weights to it or copy the annotators' choices into rules; every rule names a
+public source in a code comment; the data never enters the repository, tests, program or release; cite Nakamura,
+Saito and Yoshii, "Statistical Learning and Estimation of Piano Fingering", Information Sciences 517 (2020), wherever
+a PIG result is quoted. Odd-numbered pieces are for development, even-numbered are the untouched test half.
+
+### After 0.4.1 (agreed order)
+
+1. **Lyrics, karaoke style.** Read the lyric text events already in a file and show each syllable under its note, one
+   syllable per note, with held notes for a melisma. The current syllable lights up under the red line during
+   playback. Typing lyrics by hand comes later. Display only; the sound is untouched. A sung voice is not planned.
+2. **Chord names.** Optional, Off by default, for songs and lead sheets, not classical works. Found from the notes by a
+   published method with the lowest note giving slash chords. A suggestion: carries the "check it" note.
+3. **Guitar chord boxes with capo.** Fret diagrams (strings, dots, open and muted marks, fret number) drawn from a table
+   of standard shapes, with the chord name. The capo is a setting; with a capo the box shows the shape played and the
+   name can show the sound. Shown on the Score, in print, in LilyPond and in MusicXML. Off by default. Needs chord names first.
+4. Later and optional: staff tablature (a string and fret for every note), and a suggested capo position.
+
+Every one of these changes the written score only, keeps the sound as recorded, works with Undo, and says it is a suggestion.
