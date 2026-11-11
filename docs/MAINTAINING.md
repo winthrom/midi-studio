@@ -222,7 +222,9 @@ Done: repository tidy (269-271); new fingering search from published cost rules 
 
 Decided: the hand-separation prototype (event search, physical limits and continuity only) scored 90.3 per cent
 against 88.6 per cent for the current code on the development half of the PIG pieces. The gain is too small to risk
-Auto-Correct, so hand separation is left alone for 0.4.1. It may return as an optional method later.
+Auto-Correct, so the current hand separation stays the default in 0.4.1. A repeated-draw (bootstrap) test of the 75
+development pieces put the prototype ahead by 1.8 points (sd 0.9) in nearly every draw. It will be built later as an
+optional method (see below).
 Ideas tried and dropped: reusing the earlier fingering for repeated figures (pianists vary about as often as the
 program does); splitting repeated chords between the hands (changes the printed staves; not wanted).
 
@@ -249,5 +251,19 @@ a PIG result is quoted. Odd-numbered pieces are for development, even-numbered a
    of standard shapes, with the chord name. The capo is a setting; with a capo the box shows the shape played and the
    name can show the sound. Shown on the Score, in print, in LilyPond and in MusicXML. Off by default. Needs chord names first.
 4. Later and optional: staff tablature (a string and fret for every note), and a suggested capo position.
+
+5. **Optional alternative hand method.** A choice in the Separate Hands window: the current method (default) or the
+   event search (physical limits and continuity only, no fitted weights). The stretch and notes-per-hand settings apply
+   to both. Arpeggio groups and held notes (already in the program) are checkboxes for the alternative; each is kept
+   only if it earns its place when scored on the development pieces. Undo restores the previous split.
+6. **Editing fingering.** Click a note, give it a finger 1 to 5; the search re-runs around the forced finger so the
+   neighbours adapt. Undo covers each edit. Open question: edits live in a small companion file next to the MIDI file
+   (a MIDI file has no place for fingering). The User Guide, which now says fingering cannot be edited, must change.
+7. Blue sky: contributed fingerings, if the program becomes popular. Needs consent and an open licence, no automatic
+   upload (the person sends the companion file), edits marked as unchecked until reviewed, and a separate decision
+   on any use beyond a scoreboard or examples for an expert to review.
+
+Scoring rule for everything above: report each result as a mean with one standard deviation and a 95 per cent range
+from repeated draws of the pieces (bootstrap), and compare methods on the same draws.
 
 Every one of these changes the written score only, keeps the sound as recorded, works with Undo, and says it is a suggestion.
