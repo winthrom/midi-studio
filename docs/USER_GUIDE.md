@@ -540,6 +540,8 @@ Other product and company names mentioned in this project (MuseScore, MidiSoft S
 
 MIDI Studio is an independent work-alike. It contains no code from MidiSoft Studio.
 
+**Music, recordings and copyright.** MIDI Studio makes no claim over anything you record or create with it. The program is only a tool: its licence covers the program, not your files. The rights in a piece of music stay with whoever owns them, which may be the composer, or no one if the music is in the public domain. A performance you play and record is normally yours; if more than one person is involved, agree in writing who owns it. Playing a protected piece for yourself is private, but sharing a recording or a score of it needs the owner's permission. Modern editions and arrangements of old music can be protected even when the music itself is not. This note is general information, not legal advice.
+
 **Compatibility notes:** MIDI Studio's MusicXML export has been tested by opening the files in MuseScore. It has not yet been tested whether a MIDI file saved by MIDI Studio opens in MidiSoft Studio, and the program has not yet been tested on macOS.
 
 # Words used in this guide
