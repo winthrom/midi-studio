@@ -10647,7 +10647,17 @@ class ScoreView(tk.Frame):
             pass
         self._apply_zoom()  # set self.SLG / SH / TPAD … from _vzoom
         self._build_ui()
-        self._draw()
+        # v22ze-280: when the Score is rebuilt with a long piece loaded (floating it out or docking it back) the canvas is
+        # not on screen yet, so a draw here is wasted: it is drawn again when the window appears.  Leave it to that one
+        # draw (scheduled by the canvas <Configure> handler) and keep the immediate draw for short pieces and start-up.
+        try:
+            _many = sum(len(_t.notes) for _t in self.app.song.tracks) > 1500
+        except Exception:
+            _many = False
+        if _many:
+            self._on_canvas_configure()
+        else:
+            self._draw()
 
     def _apply_zoom(self):
         """Recompute all vertical geometry from current _vzoom."""
@@ -11410,7 +11420,25 @@ class ScoreView(tk.Frame):
             cursor_tick = self.app.transport.position_ticks
         except Exception:
             cursor_tick = None
-        self._draw(cursor_tick=cursor_tick)
+        # v22ze-280: a long piece takes several seconds to draw; say so and show a busy cursor meanwhile.
+        _big = False
+        try:
+            _big = sum(len(_t.notes) for _t in self.app.song.tracks) > 1500
+            if _big:
+                self.canvas.configure(cursor="watch")
+                self.canvas.create_text(20, 20, anchor="nw", text="Drawing the score...", fill="#555555",
+                                        font=("TkDefaultFont", 12), tags="drawing_note")
+                self.canvas.update_idletasks()
+        except Exception:
+            pass
+        try:
+            self._draw(cursor_tick=cursor_tick)
+        finally:
+            if _big:
+                try:
+                    self.canvas.configure(cursor="crosshair")
+                except Exception:
+                    pass
 
     def _draw(self, cursor_tick=None):
         # Re-entrancy guard: <Configure> can fire while _draw() is running
