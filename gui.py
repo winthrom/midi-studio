@@ -2923,7 +2923,7 @@ def _soft_notes(song, cutoff=20, ratio=3.0, hood=3):
     return out
 
 
-def _strike_slots(song, grid, tpb):
+def _strike_slots(song, grid, tpb, split_close=False):
     """v22ze-247: {id(note): slot tick} -- one slot for every strike, shared by both hands.
 
     Notes (any hand) that start within half a grid step of the first note of a group are one strike and
@@ -2948,6 +2948,9 @@ def _strike_slots(song, grid, tpb):
             groups[-1].append(n)
         else:
             groups.append([n])
+    _prev_mean = None   # v22ze-281
+    _prev_slot = None
+    _prev_end = None
     for gr in groups:
         mean = sum(x.tick for x in gr) / float(len(gr))
         _lo = int(mean // g) * g            # v22ze-247b: the slot that moves the strike's notes least
@@ -2958,6 +2961,15 @@ def _strike_slots(song, grid, tpb):
         if int(round(s)) in bars and mean < s - fine / 2.0:
             s -= fine
         s = max(0, int(round(s)))
+        # v22ze-281: a strike that starts a 1/32 or more after the one before it must not share its slot (two quick
+        # notes of a trill or ornament would be drawn as one chord).  Use the finer 1/32 slot for it instead.
+        if (split_close and _prev_slot is not None and s == _prev_slot and mean - _prev_mean >= fine - 0.5
+                and _prev_end <= mean + win):   # the first note has ended: a trill or ornament, not a rolled chord
+            _s2 = max(0, int(round(round(mean / fine) * fine)))
+            if _s2 > _prev_slot and int(_s2) not in bars:
+                s = _s2
+        _prev_mean, _prev_slot = mean, s
+        _prev_end = max(x.tick + getattr(x, "duration", 0) for x in gr)
         for x in gr:
             out[id(x)] = s
     return out
@@ -7310,7 +7322,7 @@ class Song:
                     lvl[m_idx] = min(lvl[m_idx - 1], lvl[m_idx + 1])
             return lvl
 
-        _ly_slots = _strike_slots(self, max(1, tpb // NOTATION_DIVISION), tpb)   # v22ze-247
+        _ly_slots = _strike_slots(self, max(1, tpb // NOTATION_DIVISION), tpb, split_close=True)   # v22ze-247, 281
 
         def write_voice(f, vn, notes, clef_name, mmap, density_map=None, emit_spacing=False):
             """Write a single \\absolute voice variable with per-measure time sigs.
@@ -12463,7 +12475,7 @@ class ScoreView(tk.Frame):
         # that chord's early notes (live playing), not a separate chord.  Picture only.
         _bar_starts_245 = {int(_m[1]) for _m in mmap[1:]}
         _fine_245 = max(1.0, min(grid, tpb / 8.0))
-        _sl247 = _strike_slots(song, grid, tpb)   # v22ze-247: one slot per strike, both hands
+        _sl247 = _strike_slots(song, grid, tpb, split_close=True)   # v22ze-247: one slot per strike, both hands; 281
         _mg = []
         for _cl in _cls:
             if _mg:
