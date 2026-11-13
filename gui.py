@@ -21645,6 +21645,9 @@ class MidisoftStudio:
 
     def _dialog_help_button(self, dlg, frame, anchor):   # v22ze-284
         """A Help button (and the F1 key) for a dialog: opens the User Guide at the section named by `anchor`."""
+        note = tk.Label(frame.master, text="", bg="#0d1117", fg="#58a6ff", justify="left", anchor="w", wraplength=440,
+                        font=("TkDefaultFont", 9))   # v22ze-285: says where the guide opened
+
         def _help(_e=None):
             res = None
             try:
@@ -21654,6 +21657,15 @@ class MidisoftStudio:
             if res not in ("section", "page1", "online"):
                 messagebox.showinfo("Help", "I could not open the User Guide (MIDI-Studio-User-Guide.pdf in the docs folder).",
                                     parent=dlg)
+                return "break"
+            note.configure(text={
+                "section": "The User Guide is opening in your web browser, at the section for this window.",
+                "page1": "The User Guide is opening in your PDF viewer at its first page. Use its Contents to find this section.",
+                "online": "The online User Guide is opening in your web browser. Use its Contents to find this section.",
+            }[res] + "\nIt may open behind this window or in a new browser tab: look for your browser in the taskbar or dock. "
+                     "Close the browser tab to come back here.")
+            if not note.winfo_ismapped():
+                note.pack(fill="x", padx=16, pady=(0, 8))
             return "break"
         tk.Button(frame, text="Help", command=_help, relief=tk.FLAT, padx=14, pady=5, bg="#21262d", fg="#f0f6fc",
                   activebackground="#30363d", activeforeground="#f0f6fc").pack(side=tk.LEFT, padx=6)
