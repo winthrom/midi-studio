@@ -4034,6 +4034,36 @@ class Song:
         return ded
 
     # ── v22ze-137: hands without touching the sound ─────────────────────────
+    # sound numbers played from a keyboard: pianos, harpsichord, clavinet, celesta, organs, accordions
+    _KEYBOARD_SOUNDS = (0, 1, 2, 3, 4, 5, 6, 7, 8, 16, 17, 18, 19, 20, 21, 23)
+
+    def keyboard_choices(self):   # v22ze-283
+        """The keyboard instruments (sound numbers) among the notes of this file, which Separate Hands could sort.
+
+        Returns (rows, suggested).  rows: one dict per keyboard instrument, busiest first, with program, name, tracks (1-based
+        numbers), notes, lo, hi (lowest and highest pitch).  suggested: the likely one (pianos, harpsichord and clavinet first,
+        then the rest), or None when the file has no keyboard instrument.  Other instruments and the drum track are left out.
+        """
+        rows = {}
+        for ti, t in enumerate(self.tracks):
+            if not t.notes or t.channel == 9 or int(t.program) not in self._KEYBOARD_SOUNDS:
+                continue
+            r = rows.setdefault(int(t.program), {"program": int(t.program), "tracks": [], "notes": 0,
+                                                 "lo": 127, "hi": 0})
+            r["tracks"].append(ti + 1)
+            r["notes"] += len(t.notes)
+            r["lo"] = min(r["lo"], min(n.pitch for n in t.notes))
+            r["hi"] = max(r["hi"], max(n.pitch for n in t.notes))
+        out = sorted(rows.values(), key=lambda r: -r["notes"])
+        for r in out:
+            try:
+                r["name"] = GM_INSTRUMENTS[r["program"]]
+            except Exception:
+                r["name"] = "Instrument %d" % r["program"]
+        first = [r for r in out if r["program"] < 8]
+        suggested = (first or out or [{"program": None}])[0]["program"]
+        return out, suggested
+
     def rationalize_keep_audio(self, params=None, measure_range=None):
         """Like rationalize(), but the SOUND of the file is not changed.
 
@@ -4055,6 +4085,9 @@ class Song:
             return copy.deepcopy(self)
         piano = [t for t in cand if 0 <= t.program <= 7]
         pool = piano or cand
+        _kp = p.pop("keyboard_program", None)   # v22ze-283: the instrument the person picked in Separate Hands
+        if _kp is not None and any(t.program == _kp for t in cand):
+            pool = [t for t in cand if t.program == _kp]
         best = max(pool, key=lambda t: len(t.notes))
         sel = [t for t in pool if t.program == best.program]
         sel_ids = {id(t) for t in sel}
@@ -21609,6 +21642,76 @@ class MidisoftStudio:
         self.root.wait_window(dlg)
         return result[0]
 
+    def _ask_which_instrument(self):   # v22ze-283
+        """Which keyboard instrument should Separate Hands sort?  Returns False if there is none or the person cancelled,
+        the sound number of the only keyboard instrument, or the one chosen from a list when there are several."""
+        rows, suggested = self.song.keyboard_choices()
+        if not rows:
+            messagebox.showinfo(
+                "Separate Hands",
+                "This file has no keyboard instrument (piano, harpsichord, organ, accordion), so there is nothing to "
+                "sort into a right hand and a left hand. Nothing was changed.",
+                parent=self.root)
+            return False
+        if len(rows) == 1:
+            return rows[0]["program"]
+        BG, FG, MUTED = "#0d1117", "#f0f6fc", "#8b949e"
+        names = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
+
+        def _nn(p):
+            return "%s%d" % (names[p % 12], p // 12 - 1)
+
+        dlg = tk.Toplevel(self.root)
+        dlg.title("Separate Hands - which instrument?")
+        dlg.configure(bg=BG)
+        dlg.resizable(False, False)
+        try:
+            dlg.transient(self.root)
+        except Exception:
+            pass
+        bot = tk.Frame(dlg, bg=BG)
+        bot.pack(side="bottom", fill="x")
+        body = tk.Frame(dlg, bg=BG)
+        body.pack(side="top", fill="both", expand=True)
+        result = [False]
+        var = tk.IntVar(value=suggested if suggested is not None else -1)
+        tk.Label(body, text=("This file has more than one instrument. Pick the one to sort into a right-hand and a\n"
+                             "left-hand staff. Nothing changes until you press Continue. The other instruments\n"
+                             "stay exactly as they are, and the sound is not changed."),
+                 bg=BG, fg=FG, justify=tk.LEFT).pack(anchor="w", padx=16, pady=(14, 8))
+        if suggested is None:
+            tk.Label(body, text=("No keyboard instrument (piano, harpsichord, organ, accordion) was found in this file.\n"
+                                 "Pick one only if it really is played with two hands."),
+                     bg=BG, fg="#d29922", justify=tk.LEFT).pack(anchor="w", padx=16, pady=(0, 8))
+        cont = tk.Button(bot, text="Continue", relief=tk.FLAT, padx=14, pady=5, bg="#21262d", fg=FG,
+                         activebackground="#30363d", activeforeground=FG,
+                         state="normal")
+        for r in rows:
+            label = "%s  -  %d notes, %s to %s  (track%s %s)%s" % (
+                r["name"], r["notes"], _nn(r["lo"]), _nn(r["hi"]), "s" if len(r["tracks"]) > 1 else "",
+                ", ".join(str(x) for x in r["tracks"]), "   <- likely keyboard" if r["program"] == suggested else "")
+            tk.Radiobutton(body, text=label, value=r["program"], variable=var, bg=BG, fg=FG, selectcolor="#21262d",
+                           activebackground=BG, activeforeground=FG, anchor="w", justify=tk.LEFT,
+                           command=lambda: cont.configure(state="normal")).pack(anchor="w", padx=22, pady=1)
+
+        def _ok():
+            if var.get() >= 0:
+                result[0] = int(var.get())
+            dlg.destroy()
+
+        cont.configure(command=_ok)
+        bfrm = tk.Frame(bot, bg=BG)
+        bfrm.pack(pady=(10, 12))
+        cont.pack(in_=bfrm, side=tk.LEFT, padx=6)
+        tk.Button(bfrm, text="Cancel", command=dlg.destroy, relief=tk.FLAT, padx=14, pady=5, bg="#21262d", fg=FG,
+                  activebackground="#30363d", activeforeground=FG).pack(side=tk.LEFT, padx=6)
+        try:
+            dlg.grab_set()
+        except Exception:
+            pass
+        self.root.wait_window(dlg)
+        return result[0]
+
     def _separate_hands(self):
         """Standalone one-click hand separation.
 
@@ -21635,6 +21738,9 @@ class MidisoftStudio:
             return
         if not self._grand_staff_guard("Separate Hands"):   # v22ze-191
             return
+        _kb_program = self._ask_which_instrument()   # v22ze-283: False = no keyboard instrument, or cancelled
+        if _kb_program is False:
+            return
         _hand_opts = self._ask_separate_hands_options()  # v22ze-140
         if _hand_opts is None:
             return
@@ -21654,6 +21760,8 @@ class MidisoftStudio:
                                               # above; see gui.py step 0.5.
             }
             params["max_span"] = _hand_opts[0]  # v22ze-140
+            if _kb_program is not None:   # v22ze-283
+                params["keyboard_program"] = _kb_program
             params["max_notes_per_hand"] = _hand_opts[1]
             params["auto_move"] = False   # v22ze-198: Fix Chords offers each move instead
             # v22ze-137: keep every note's original start/length/velocity
