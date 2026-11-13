@@ -89,7 +89,7 @@ jobs:
         run: |
           ls -l dl
           test -f dl/MIDI-Studio-macos-arm64.zip
-          NOTES="Mac test build (Apple Silicon, experimental) from commit ${GITHUB_SHA::7}, $(date -u +%Y-%m-%d). This page is replaced by each newer good Mac build. Open the zip and read START HERE: the first start needs a one-time approval in System Settings > Privacy & Security. Please report problems with Help > Send a Problem Report."
+          NOTES="Mac test build (experimental) from commit ${GITHUB_SHA::7}, $(date -u +%Y-%m-%d). Apple Silicon (M1 or newer): MIDI-Studio-macos-arm64.zip. Intel Mac: MIDI-Studio-macos-x86_64.zip (appears a few minutes later; it may need a recent macOS, and its log line tells how recent). This page is replaced by each newer good Mac build. Open the zip and read START HERE: the first start needs a one-time approval in System Settings > Privacy & Security. Please report problems with Help > Send a Problem Report."
           if gh release view mac-test --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             gh release edit mac-test --repo "$GITHUB_REPOSITORY" --prerelease --notes "$NOTES"
           else
@@ -97,3 +97,114 @@ jobs:
               --title "Mac test build (rolling)" --notes "$NOTES"
           fi
           gh release upload mac-test dl/MIDI-Studio-macos-arm64.zip --repo "$GITHUB_REPOSITORY" --clobber
+
+  intel:
+    # test build for Intel Macs, from the rolling page only (never from a tagged release); experimental
+    if: ${{ github.ref_type == 'branch' }}
+    runs-on: macos-15-intel
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Unit tests
+        run: |
+          python -m pip install mido
+          python test_audio_backend.py
+          python test_app_resources.py
+
+      - name: Fetch payload (FluidSynth libraries + soundfont)
+        run: bash packaging/macos/fetch_payload.sh
+
+      - name: Add the Lions emblem (official builds only; skipped when the secret is not set)
+        env:
+          LIONS_EMBLEM_B64: ${{ secrets.LIONS_EMBLEM_B64 }}
+        run: |
+          if [ -n "$LIONS_EMBLEM_B64" ]; then echo "$LIONS_EMBLEM_B64" | base64 -d > lions_emblem.png; echo "emblem added"; else echo "no emblem secret: building without the emblem"; fi
+
+      - name: Build (PyInstaller)
+        run: bash packaging/macos/build_macos.sh
+
+      - name: Selftest the built app
+        run: |
+          out="$(dist/macos/MIDI-Studio.app/Contents/MacOS/MIDI-Studio-selftest 2>&1)" || { echo "$out"; echo "selftest reported FAIL"; exit 1; }
+          echo "$out"
+          for need in "[OK  ] bundled libfluidsynth" "[OK  ] pyfluidsynth + libfluidsynth loads" "[OK  ] bundled soundfont" "[OK  ] soundfont loads"; do
+            echo "$out" | grep -qF "$need" || { echo "selftest is missing: $need"; exit 1; }
+          done
+
+      - name: Report the architecture and the lowest macOS the app asks for
+        run: |
+          file dist/macos/MIDI-Studio.app/Contents/MacOS/MIDI-Studio | head -1
+          python3 - <<'PY' | tee -a "$GITHUB_STEP_SUMMARY"
+          import os, re, subprocess
+          app = "dist/macos/MIDI-Studio.app"
+          worst, who = (0, 0), ""
+          for root, _d, files in os.walk(app):
+              for f in files:
+                  p = os.path.join(root, f)
+                  if os.path.islink(p) or not (f.endswith((".dylib", ".so")) or root.endswith("MacOS")):
+                      continue
+                  out = subprocess.run(["otool", "-l", p], capture_output=True, text=True).stdout
+                  for m in re.finditer(r"minos (\d+)\.(\d+)", out):
+                      v = (int(m.group(1)), int(m.group(2)))
+                      if v > worst:
+                          worst, who = v, p
+          print("Intel build: the lowest macOS this app asks for is %d.%d (set by %s)" % (worst[0], worst[1], os.path.basename(who)))
+          PY
+
+      - name: Zip (app + START HERE note + guide)
+        run: |
+          mkdir -p stage/MIDI-Studio
+          ditto dist/macos/MIDI-Studio.app stage/MIDI-Studio/MIDI-Studio.app
+          cp docs/MIDI-Studio-User-Guide.pdf stage/MIDI-Studio/
+          cat > "stage/MIDI-Studio/START HERE.txt" <<'TXT'
+          MIDI Studio for Mac (Intel) - EXPERIMENTAL TEST BUILD
+
+          1. Drag MIDI-Studio.app into your Applications folder.
+          2. Double-click it. macOS will say it cannot verify the app, because this free program is not
+             signed with an Apple developer account. That is expected.
+          3. Open System Settings > Privacy & Security, scroll down to the message about MIDI-Studio,
+             click "Open Anyway", and confirm. You only need to do this once.
+             (Terminal alternative: xattr -dr com.apple.quarantine /Applications/MIDI-Studio.app )
+
+          This build may need a recent macOS (Sequoia 15 or newer). If it will not start, please say which
+          macOS version you have (Apple menu > About This Mac).
+          The User Guide (MIDI-Studio-User-Guide.pdf) is in this folder too.
+          Please tell me what does not work: Help > Send a Problem Report, then email the file.
+          TXT
+          (cd stage && ditto -c -k --keepParent MIDI-Studio ../MIDI-Studio-macos-x86_64.zip)
+          ls -l MIDI-Studio-macos-x86_64.zip
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: MIDI-Studio-macos-x86_64
+          path: MIDI-Studio-macos-x86_64.zip
+
+  publish-test-intel:
+    # adds the Intel zip to the rolling "mac-test" pre-release (a public download for testers without a GitHub login)
+    needs: [intel, publish-test]
+    if: ${{ always() && github.ref_type == 'branch' && needs.intel.result == 'success' }}
+    runs-on: ubuntu-24.04
+    continue-on-error: true
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: MIDI-Studio-macos-x86_64
+          path: dl
+      - name: Add the Intel build to the "mac-test" pre-release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ls -l dl
+          test -f dl/MIDI-Studio-macos-x86_64.zip
+          if ! gh release view mac-test --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release create mac-test --repo "$GITHUB_REPOSITORY" --prerelease --target "$GITHUB_SHA" \
+              --title "Mac test build (rolling)" --notes "Mac test build (experimental). Intel Mac: MIDI-Studio-macos-x86_64.zip."
+          fi
+          gh release upload mac-test dl/MIDI-Studio-macos-x86_64.zip --repo "$GITHUB_REPOSITORY" --clobber
