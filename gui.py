@@ -21627,6 +21627,7 @@ class MidisoftStudio:
                   activebackground="#30363d", activeforeground=FG)
         tk.Button(bfrm, text="Continue" if thin else "Separate", command=_ok, **bs).pack(side=tk.LEFT, padx=6)
         tk.Button(bfrm, text="Cancel", command=dlg.destroy, **bs).pack(side=tk.LEFT, padx=6)
+        self._dialog_help_button(dlg, bfrm, "fix-chords" if thin else "separate-hands-piano-organ-accordion")   # v22ze-284
         try:   # v22ze-266g: on a short screen drop the small hint lines, so the choices and Separate / Cancel show
             dlg.update_idletasks()
             if dlg.winfo_reqheight() > int(dlg.winfo_screenheight() * 0.60):
@@ -21641,6 +21642,25 @@ class MidisoftStudio:
             pass
         self.root.wait_window(dlg)
         return result[0]
+
+    def _dialog_help_button(self, dlg, frame, anchor):   # v22ze-284
+        """A Help button (and the F1 key) for a dialog: opens the User Guide at the section named by `anchor`."""
+        def _help(_e=None):
+            res = None
+            try:
+                res = self._open_user_guide(anchor)
+            except Exception:
+                pass
+            if res not in ("section", "page1", "online"):
+                messagebox.showinfo("Help", "I could not open the User Guide (MIDI-Studio-User-Guide.pdf in the docs folder).",
+                                    parent=dlg)
+            return "break"
+        tk.Button(frame, text="Help", command=_help, relief=tk.FLAT, padx=14, pady=5, bg="#21262d", fg="#f0f6fc",
+                  activebackground="#30363d", activeforeground="#f0f6fc").pack(side=tk.LEFT, padx=6)
+        try:
+            dlg.bind("<F1>", _help)
+        except Exception:
+            pass
 
     def _ask_which_instrument(self):   # v22ze-283
         """Which keyboard instrument should Separate Hands sort?  Returns False if there is none or the person cancelled,
@@ -21705,6 +21725,7 @@ class MidisoftStudio:
         cont.pack(in_=bfrm, side=tk.LEFT, padx=6)
         tk.Button(bfrm, text="Cancel", command=dlg.destroy, relief=tk.FLAT, padx=14, pady=5, bg="#21262d", fg=FG,
                   activebackground="#30363d", activeforeground=FG).pack(side=tk.LEFT, padx=6)
+        self._dialog_help_button(dlg, bfrm, "separate-hands-piano-organ-accordion")   # v22ze-284
         try:
             dlg.grab_set()
         except Exception:

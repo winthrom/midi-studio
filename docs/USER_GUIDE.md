@@ -313,6 +313,8 @@ Press **Run**. When it is done, the program shows the same report as **Compare w
 
 **Fix File ▸ Separate Hands…** sorts the notes into a **right-hand staff** and a **left-hand staff**, the way a printed piano score looks. It works for any two-handed keyboard-style instrument: one hand plays the higher notes, the other the lower. A file that is already on two tracks (right hand and left hand) is recognised without this step.
 
+- **Which instrument.** It sorts keyboard instruments only: pianos, harpsichord, clavinet, celesta, organs and accordion. A file with none of these (a violin concerto, say) gets the message "This file has no keyboard instrument" and nothing is changed. If the file holds exactly one keyboard instrument, that one is sorted without a question. If it holds several, a list shows each one with its number of notes, its range and its track numbers. The likely keyboard is marked and preselected, and nothing is split until you press **Continue**. Check what the list says: a clavinet, for example, counts as a keyboard even in a funk file where it plays single notes.
+- **Help.** Every Separate Hands and Fix Chords window has a **Help** button (or press **F1**) that opens this guide at the right section.
 - It asks two questions about the player's hand:
     - **Widest stretch of one hand**, in semitones (a semitone is the distance between neighbouring piano keys; 12 is one octave). The standard value is **12**. It can be raised for large hands (up to 30) or lowered for small hands such as a child's (down to 6).
     - **Most notes one hand plays at once.** The standard value is **5**, one per finger. It cannot go above 5. Lower it if a hand is injured, for example to 4, or to 1 for one finger.
