@@ -10508,6 +10508,7 @@ class QuantizeDlg(tk.Toplevel):
             activeforeground=FG,
             **btn_kw,
         ).pack(side=tk.LEFT, padx=8)
+        self.app._dialog_help_button(self, bf, "quantize")   # v22ze-286
 
         self._sync_range()
 
@@ -19029,6 +19030,7 @@ class MidisoftStudio:
         btn_row.pack(padx=16, pady=(4, 14), anchor="e")
         tk.Button(btn_row, text="Cancel", command=dlg.destroy, **bb).pack(side=tk.LEFT, padx=(0, 6))
         tk.Button(btn_row, text="Apply", command=_apply, **bb).pack(side=tk.LEFT)
+        self._dialog_help_button(dlg, btn_row, "setting-the-speed-time-key-and-title")   # v22ze-286
 
     def _open_score_setup(self):
         """Open (or raise) the Score Setup floating panel."""
@@ -19099,6 +19101,9 @@ class MidisoftStudio:
              "the correct number of beats, then apply cleanup.",
              fg=MUTED, font=("TkDefaultFont", 9),
              justify=tk.CENTER, anchor="center").pack(padx=20, pady=(0, 8))
+        _hrow = tk.Frame(content, bg=BG)   # v22ze-286
+        _hrow.pack(pady=(0, 6))
+        self._dialog_help_button(dlg, _hrow, "setting-the-speed-time-key-and-title")   # v22ze-286
 
         # ══ SECTION A — Global calibration ═══════════════════════════════
         _sep(content)
@@ -20426,6 +20431,7 @@ class MidisoftStudio:
             "changing your currently open song.").pack(side=tk.LEFT, padx=4)
         tk.Button(bfrm, text="Close",   bg="#21262d", fg=MUTED,
                   activebackground="#30363d", command=_close_dlg, **bs).pack(side=tk.LEFT, padx=4)
+        self._dialog_help_button(dlg, bfrm, "rationalize-score")   # v22ze-286
 
         dlg.protocol("WM_DELETE_WINDOW", _close_dlg)
 
@@ -21665,7 +21671,18 @@ class MidisoftStudio:
             }[res] + "\nIt may open behind this window or in a new browser tab: look for your browser in the taskbar or dock. "
                      "Close the browser tab to come back here.")
             if not note.winfo_ismapped():
-                note.pack(fill="x", padx=16, pady=(0, 8))
+                try:
+                    note.pack(after=frame, fill="x", padx=16, pady=(0, 8))   # v22ze-286: right under the button row
+                except Exception:
+                    note.pack(fill="x", padx=16, pady=(0, 8))
+                try:   # a window with a fixed size grows so the note shows
+                    dlg.update_idletasks()
+                    _h = min(dlg.winfo_reqheight(), int(dlg.winfo_screenheight() * 0.92))
+                    _w = max(dlg.winfo_width(), min(dlg.winfo_reqwidth(), int(dlg.winfo_screenwidth() * 0.95)))
+                    if dlg.winfo_height() < _h or dlg.winfo_width() < _w:
+                        dlg.geometry("%dx%d" % (_w, max(_h, dlg.winfo_height())))
+                except Exception:
+                    pass
             return "break"
         tk.Button(frame, text="Help", command=_help, relief=tk.FLAT, padx=14, pady=5, bg="#21262d", fg="#f0f6fc",
                   activebackground="#30363d", activeforeground="#f0f6fc").pack(side=tk.LEFT, padx=6)
@@ -22044,6 +22061,7 @@ class MidisoftStudio:
         tk.Button(row3, text="Refresh list", command=lambda: refill(), **bs).pack(side=tk.LEFT, padx=2)
         tk.Button(row3, text="Close", command=dlg.destroy, **bs).pack(side=tk.RIGHT, padx=2)
         tk.Label(row3, textvariable=status_n, bg=BG, fg="#8b949e").pack(side=tk.RIGHT, padx=8)
+        self._dialog_help_button(dlg, row3, "fix-measures")   # v22ze-286
         refill()
 
     def _tie_measure(self, mi):   # v22ze-215: Song.fix_measure_timing ties notes across the barline
@@ -22736,7 +22754,10 @@ class MidisoftStudio:
                 base.notes.extend(self.song.tracks[i].notes); self.song.tracks.pop(i)
             base.notes.sort(key=lambda n:n.tick); self.song.modified=True
             self._refresh_track_list(); self._update_title(); dlg.destroy()
-        tk.Button(dlg,text="Combine",command=do).pack(pady=6)
+        _crow = tk.Frame(dlg)   # v22ze-286
+        _crow.pack(pady=6)
+        tk.Button(_crow, text="Combine", command=do).pack(side=tk.LEFT, padx=6)
+        self._dialog_help_button(dlg, _crow, "the-track-list")   # v22ze-286
 
     def _separate_channels(self):
         idx=self._selected_track_idx()
@@ -23193,6 +23214,7 @@ class MidisoftStudio:
                   padx=12, pady=4).pack(side="left", padx=4)
         tk.Button(brow, text="Close", command=dlg.destroy, bg="#21262d", fg=FG, relief=tk.FLAT,
                   padx=12, pady=4).pack(side="left", padx=4)
+        self._dialog_help_button(dlg, brow, "remove-short-rests")   # v22ze-286
 
     def _soft_notes_apply(self, mode, cutoff, ratio):   # v22ze-248
         import copy as _copy
@@ -23352,6 +23374,7 @@ class MidisoftStudio:
                               ("Close", dlg.destroy, "#21262d")):
             tk.Button(brow, text=txt, command=cmd, bg=col, fg="white", relief=tk.FLAT,
                       padx=12, pady=4).pack(side="left", padx=4)
+        self._dialog_help_button(dlg, brow, "soft-notes")   # v22ze-286
         _show()
 
     def _easy_play(self):   # v22ze-250
@@ -23459,6 +23482,7 @@ class MidisoftStudio:
                               ("Close", dlg.destroy, "#21262d")):
             tk.Button(brow, text=txt, command=cmd, bg=col, fg="white", relief=tk.FLAT,
                       padx=12, pady=4).pack(side="left", padx=4)
+        self._dialog_help_button(dlg, brow, "easy-to-play-hand-over-hand")   # v22ze-286
         _find()
 
     def _suggest_marks_dialog(self):   # v22ze-265
@@ -23523,6 +23547,7 @@ class MidisoftStudio:
         bar.pack(pady=(10, 12))
         tk.Button(bar, text="Add Marks", command=_go, bg="#238636", fg="white", relief=tk.FLAT, padx=14, pady=4).pack(side=tk.LEFT, padx=6)
         tk.Button(bar, text="Cancel", command=dlg.destroy, bg="#21262d", fg="white", relief=tk.FLAT, padx=14, pady=4).pack(side=tk.LEFT, padx=6)
+        self._dialog_help_button(dlg, bar, "suggest-marks")   # v22ze-286
 
     def _fingering_dialog(self):   # v22ze-259
         old = getattr(self, "_finger_dlg", None)
@@ -23573,8 +23598,11 @@ class MidisoftStudio:
             _FINGER_MODE_LY[0] = self._finger_mode   # v22ze-266b: the print follows this choice
             self._soft_redraw()
         mode.trace_add("write", _set)
-        tk.Button(dlg, text="Close", command=dlg.destroy, bg="#21262d", fg="white", relief=tk.FLAT,
-                  padx=12, pady=4).pack(pady=(8, 10))
+        _frow = tk.Frame(dlg, bg="#0d1117")   # v22ze-286
+        _frow.pack(pady=(8, 10))
+        tk.Button(_frow, text="Close", command=dlg.destroy, bg="#21262d", fg="white", relief=tk.FLAT,
+                  padx=12, pady=4).pack(side=tk.LEFT, padx=6)
+        self._dialog_help_button(dlg, _frow, "fingering-numbers")   # v22ze-286
 
     def _set_listening_speed(self, pct):   # v22ze-262
         try:
@@ -23637,6 +23665,7 @@ class MidisoftStudio:
                       padx=12, pady=4).pack(side=tk.LEFT, padx=6)
         tk.Button(bar, text="Keep" if offer_undo else "Close", command=dlg.destroy, bg="#238636", fg="white",
                   relief=tk.FLAT, padx=12, pady=4).pack(side=tk.LEFT, padx=6)
+        self._dialog_help_button(dlg, bar, "compare-with-original")   # v22ze-286
 
     def _compare_original(self):   # v22ze-262
         self._show_compare()
@@ -23682,6 +23711,7 @@ class MidisoftStudio:
         bar.pack(pady=(10, 12))
         tk.Button(bar, text="Run", command=_go, bg="#238636", fg="white", relief=tk.FLAT, padx=14, pady=4).pack(side=tk.LEFT, padx=6)
         tk.Button(bar, text="Cancel", command=dlg.destroy, bg="#21262d", fg="white", relief=tk.FLAT, padx=14, pady=4).pack(side=tk.LEFT, padx=6)
+        self._dialog_help_button(dlg, bar, "auto-correct-score")   # v22ze-286
 
     def _auto_correct_run(self, sep, fix, rsr):   # v22ze-262
         import copy as _copy

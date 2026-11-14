@@ -140,6 +140,8 @@ That is all you need to listen. Everything else in this guide is optional.
 
 ## The menus
 
+Most windows that ask you to choose something have a **Help** button (or press **F1**). It opens this guide at the section for that window, in your web browser. The window then tells you where it opened, because the browser can open behind MIDI Studio.
+
 **File**
 
 - **New**, **Open…**, **Close Piece**: start fresh, open a file, or close the current one. Closing a piece also closes the correction windows that belonged to it.
