@@ -10369,6 +10369,7 @@ class QuantizeDlg(tk.Toplevel):
         # v22ze-57: content lives in a scrollable inner frame (not `self`
         # directly) so shrinking this window below its content shows a
         # scrollbar on the right edge instead of clipping controls.
+        self.app._dialog_help_bar(self, "quantize")   # v22ze-287
         content = _make_scrollable(self, bg=BG)
 
         # ── Target ────────────────────────────────────────────────────────────
@@ -10508,7 +10509,6 @@ class QuantizeDlg(tk.Toplevel):
             activeforeground=FG,
             **btn_kw,
         ).pack(side=tk.LEFT, padx=8)
-        self.app._dialog_help_button(self, bf, "quantize")   # v22ze-286
 
         self._sync_range()
 
@@ -19082,6 +19082,7 @@ class MidisoftStudio:
         dlg.lift()
         dlg.focus_force()
         self._score_setup_dlg = dlg
+        self._dialog_help_bar(dlg, "setting-the-speed-time-key-and-title")   # v22ze-287
         content = _make_scrollable(dlg, bg=BG)
 
         def _lbl(parent, text, fg=FG, font=None, **kw):
@@ -19101,9 +19102,6 @@ class MidisoftStudio:
              "the correct number of beats, then apply cleanup.",
              fg=MUTED, font=("TkDefaultFont", 9),
              justify=tk.CENTER, anchor="center").pack(padx=20, pady=(0, 8))
-        _hrow = tk.Frame(content, bg=BG)   # v22ze-286
-        _hrow.pack(pady=(0, 6))
-        self._dialog_help_button(dlg, _hrow, "setting-the-speed-time-key-and-title")   # v22ze-286
 
         # ══ SECTION A — Global calibration ═══════════════════════════════
         _sep(content)
@@ -19879,6 +19877,7 @@ class MidisoftStudio:
         # directly) — this dialog was specifically flagged as taller
         # than the screen on some displays; a scrollbar means shrinking
         # it no longer clips controls with no way back to them.
+        self._dialog_help_bar(dlg, "rationalize-score")   # v22ze-287
         content = _make_scrollable(dlg, bg=BG)
 
         tk.Label(content, text="♫  Rationalize Score",
@@ -20431,7 +20430,6 @@ class MidisoftStudio:
             "changing your currently open song.").pack(side=tk.LEFT, padx=4)
         tk.Button(bfrm, text="Close",   bg="#21262d", fg=MUTED,
                   activebackground="#30363d", command=_close_dlg, **bs).pack(side=tk.LEFT, padx=4)
-        self._dialog_help_button(dlg, bfrm, "rationalize-score")   # v22ze-286
 
         dlg.protocol("WM_DELETE_WINDOW", _close_dlg)
 
@@ -21649,6 +21647,59 @@ class MidisoftStudio:
         self.root.wait_window(dlg)
         return result[0]
 
+    def _let_browser_in_front(self, dlg):   # v22ze-287
+        """Some windows stay on top of every program (Quantize, Score Settings...). Lower them while the guide is read;
+        they go back on top as soon as the person clicks on them again."""
+        lowered = []
+        try:
+            for w in list(_APP_WINDOWS) + [dlg]:
+                try:
+                    if w.winfo_exists() and _win_is_top(w) and w not in lowered:
+                        w.attributes("-topmost", False)
+                        lowered.append(w)
+                except Exception:
+                    pass
+        except Exception:
+            return
+        if not lowered:
+            return
+        state = {"done": False}
+
+        def _back(_e=None):
+            if state["done"]:
+                return
+            state["done"] = True
+            for w in lowered:
+                try:
+                    if w.winfo_exists():
+                        w.attributes("-topmost", True)
+                        w.lift()
+                except Exception:
+                    pass
+
+        def _arm():
+            for w in lowered:
+                try:
+                    w.bind("<FocusIn>", _back, add="+")
+                except Exception:
+                    pass
+        try:
+            dlg.after(1500, _arm)   # not at once: lowering the window itself can raise a focus event
+        except Exception:
+            pass
+
+    def _dialog_help_bar(self, dlg, anchor):   # v22ze-287
+        """A fixed bar at the top of a scrolling window, holding the Help button, so it never needs scrolling to."""
+        bar = tk.Frame(dlg, bg="#0d1117")
+        first = dlg.pack_slaves()
+        try:
+            bar.pack(side="top", fill="x", before=first[0]) if first else bar.pack(side="top", fill="x")
+        except Exception:
+            bar.pack(side="top", fill="x")
+        row = tk.Frame(bar, bg="#0d1117")
+        row.pack(anchor="e", padx=6, pady=(4, 0))
+        self._dialog_help_button(dlg, row, anchor)
+
     def _dialog_help_button(self, dlg, frame, anchor):   # v22ze-284
         """A Help button (and the F1 key) for a dialog: opens the User Guide at the section named by `anchor`."""
         note = tk.Label(frame.master, text="", bg="#0d1117", fg="#58a6ff", justify="left", anchor="w", wraplength=440,
@@ -21656,6 +21707,7 @@ class MidisoftStudio:
 
         def _help(_e=None):
             res = None
+            self._let_browser_in_front(dlg)   # v22ze-287
             try:
                 res = self._open_user_guide(anchor)
             except Exception:
