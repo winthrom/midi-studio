@@ -1,7 +1,7 @@
 # Maintaining MIDI Studio
 
 For whoever opens this code next (including its author, a year from now). It says where things are, how the
-pieces connect, and which rules must not be broken. It describes build 22ze-269 (0.4.1 in progress). Line numbers
+pieces connect, and which rules must not be broken. It describes build 22ze-288 (0.4.1 in progress). Line numbers
 drift with every patch, so find things by name: `grep -n "def _auto_correct_run" gui.py`.
 
 If this file and the code disagree, the code is right; please fix this file.
@@ -218,7 +218,13 @@ rename a heading, update `_where_dialog` and the Index, or "Where do I find..." 
 ### 0.4.1 (in progress)
 
 Done: repository tidy (269-271); new fingering search from published cost rules plus textbook scale and chord shapes
-(272, 273); release notes wording and User Guide fingering text (274); Afterword in the User Guide (275, 276).
+(272, 273); release notes wording and User Guide fingering text (274); Afterword in the User Guide (275, 276);
+copyright note in the User Guide (279); faster Score window for long pieces (280); two quick notes close together
+(trills) drawn as separate notes in the Score and in print (281); an Intel Mac test build added to the Mac workflow
+(282, not yet tested on a real Mac); Separate Hands sorts keyboard instruments only and asks which one when the
+file has several (283); a Help button and the F1 key in 15 of the program's windows, opening the User Guide at the
+right section, with a note saying where it opened, and lowering always-on-top windows so the browser can come in
+front (284 to 287).
 
 Decided: the hand-separation prototype (event search, physical limits and continuity only) scored 90.3 per cent
 against 88.6 per cent for the current code on the development half of the PIG pieces. The gain is too small to risk
@@ -233,6 +239,11 @@ To do:
 - Two-octave left-hand scales; fingering that knows note lengths.
 - Signed Windows build (SignPath, no reply yet); Mac tests (Apple Silicon, Intel); MuseScore 4 and Braille (OSMD) checks.
 - App tests by hand: start-up, About, load and score, playback, Listening speed, Auto-Correct and Undo, Where do I find, window resize.
+- Help button with the browser closed (it should start the browser and show the guide), and on Windows and macOS;
+  tested so far only on Linux with KDE, browser already running.
+- Someone with legal training to read the copyright note in the User Guide (section 12).
+- Known: floating the Score out froze one Linux machine (KDE on Wayland, with graphics-buffer errors that appear
+  without the program too). Not reproduced, not filed. Leaving the Score docked avoids it.
 
 PIG rules (agreed with Dr. Nakamura's permission): evaluation only, non-profit. Use it to choose between published
 methods and as a scoreboard; never fit weights to it or copy the annotators' choices into rules; every rule names a
@@ -262,6 +273,26 @@ a PIG result is quoted. Odd-numbered pieces are for development, even-numbered a
 7. Blue sky: contributed fingerings, if the program becomes popular. Needs consent and an open licence, no automatic
    upload (the person sends the companion file), edits marked as unchecked until reviewed, and a separate decision
    on any use beyond a scoreboard or examples for an expert to review.
+
+### Design notes (agreed, not built)
+
+- **Printed score or performance.** A MIDI file does not say whether it was sequenced from a printed score. Plan: a question
+  in the Separate Hands window, "Is this file sequenced from a printed score, where the composer's staves are the target?"
+  Yes (and "Not sure", the default): keep the composer's staves; change them only when the person asks. No: the program's
+  best effort leads, with levels Standard, Easier and Easiest. The levels need the optional alternative method (item 5)
+  first. The effort cost would be tempo-aware (distance divided by time, squared; a physical principle, to be named in a
+  code comment). Never done as part of normal Separate Hands: the composer's staves are the authority.
+- **Effort flags.** First step, if wanted: mark fast octave runs and wide stretches as hard, changing no notes. An optional
+  "Easy to Play" suggestion tool (an easier version to share) comes later and says it is a suggestion.
+- **Help in windows.** Done for the windows that ask a question (284 to 287). Still open: the Help menu's User Guide entry
+  does not show the "opening in your browser" note, and a "Where do I find" list prefilled with the window's name is only
+  an idea. The Help button lowers always-on-top windows (Quantize, Rationalize Score, Score Settings) until clicked again.
+- **Intel Mac.** One-off build, not a release: the `intel` job in macos.yml (runner macos-15-intel) runs on branch pushes and
+  uploads a zip to the rolling `mac-test` pre-release. GitHub plans to end Intel macOS runners after macOS 15 retires
+  (autumn 2027). The lowest macOS the app asks for is printed in the job log (Homebrew's FluidSynth libraries may force
+  Sequoia). A real release for Intel only after someone with an Intel Mac has tested it.
+- **Later, if asked for:** a way to choose a non-keyboard sound number as the keyboard part (some files put the piano on
+  another sound); effort-based sharing suggestions.
 
 Scoring rule for everything above: report each result as a mean with one standard deviation and a 95 per cent range
 from repeated draws of the pieces (bootstrap), and compare methods on the same draws.
