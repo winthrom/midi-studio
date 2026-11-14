@@ -16518,7 +16518,8 @@ _FP_SPAN = {
 }
 _FP_W = dict(stretch=2.0, small=1.0, small_nt=2.0, large=1.0, large_nt=2.0, poschg_full=2.0, poschg_half=1.0, poschg_size=1.0,
              weak=1.0, f345=1.0, f34=1.0, f4black=1.0, thumb_black=1.0, thumb_black_w=2.0, five_black_w=2.0, thumb_pass=1.0,
-             thumb_pass_wb=3.0, same_finger=60.0, chord_shape=2.0, cross_adj={2: 2.5, 3: -2.0, 4: 1.0, 5: 0.0})
+             thumb_pass_wb=3.0, same_finger=60.0, chord_shape=2.0, cross_adj={2: 2.5, 3: -2.0, 4: 1.0, 5: 0.0},
+             scale_gap=6.0, scale_mono=3.0)   # v22ze-289: the last two are the scale-run rules (see _fp_search)
 
 
 def _fp_d(fa, fb, qa, qb):
@@ -16640,13 +16641,27 @@ def _fp_search(events, hand):
             c += _fp_pair(A[0], A[-1], qs[0][0], qs[-1][0], black(qs[0][1]), black(qs[-1][1]), True) * 0.5
         return c
 
-    prev = {(A, 0): intra(0, A) for A in cands[0]}
+    # v22ze-289: a plain scale run (single notes, steps of 1 or 2 semitones, one direction, never two half steps in a row)
+    # is fingered as scales are taught (graded-exam scale books, e.g. ABRSM Piano Scales & Arpeggios): the thumb every 3rd or
+    # 4th note, two gaps in a row adding up to 7 (each octave repeats), and fingers following the direction of the scale
+    # between thumb crossings.  Small extra costs; chromatic runs, leaps, chords and short fragments are not touched.
+    ok_run = [False] * n_ev
+    for i in range(1, n_ev):
+        if len(ev[i]) == 1 and len(ev[i - 1]) == 1:
+            d1 = ev[i][0][1] - ev[i - 1][0][1]
+            if abs(d1) in (1, 2):
+                ok_run[i] = True
+                if i >= 2 and len(ev[i - 2]) == 1:
+                    d0 = ev[i - 1][0][1] - ev[i - 2][0][1]
+                    if d0 * d1 < 0 or (abs(d0) == 1 and abs(d1) == 1):
+                        ok_run[i] = False
+    prev = {(A, 0, 0, 0): intra(0, A) for A in cands[0]}
     back = [None]
     for i in range(1, n_ev):
         qk, pk = ev[i][-1]   # the outer note of the chord: right hand top, left hand bottom
         qj, pj = ev[i - 1][-1]
         cur, bk = {}, {}
-        for (Ap, fpp), cp in prev.items():
+        for (Ap, fpp, gp, lgp), cp in prev.items():
             fj = Ap[-1]
             for A in cands[i]:
                 f = A[-1]
@@ -16654,10 +16669,27 @@ def _fp_search(events, hand):
                 if fpp:
                     qh, ph = ev[i - 2][-1]
                     c += _fp_triple(fpp, fj, f, qh, qj, qk, black(ph), black(pj), black(pk))
-                st = (A, fj)
+                ln = 0   # v22ze-289: gp = notes since the last thumb in this scale run (0 = none yet), lgp = the gap before it
+                if ok_run[i] and fj != 1 and f != 1 and (f - fj) * (qk - qj) < 0:
+                    c += _FP_W["scale_mono"]   # between thumb crossings the fingers follow the direction of the scale
+                if not ok_run[i]:
+                    gn = 1 if f == 1 else 0
+                elif f == 1:
+                    gn = 1
+                    if gp:
+                        if gp not in (3, 4):
+                            c += _FP_W["scale_gap"]
+                        else:
+                            if lgp and gp + lgp != 7:
+                                c += _FP_W["scale_gap"]
+                            ln = gp
+                else:
+                    gn = min(gp + 1, 5) if gp else 0
+                    ln = lgp
+                st = (A, fj, gn, ln)
                 if st not in cur or c < cur[st] - 1e-12:
                     cur[st] = c
-                    bk[st] = (Ap, fpp)
+                    bk[st] = (Ap, fpp, gp, lgp)
         prev = {st: c + intra(i, st[0]) for st, c in cur.items()}
         back.append(bk)
     st = min(prev, key=prev.get)
