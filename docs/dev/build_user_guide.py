@@ -9,7 +9,7 @@ The page jumps used by Help > Where do I find... are the headings' ids, made by 
 text ("## Fingering Numbers" becomes #fingering-numbers).  If you rename a heading, change its entries in
 gui.py (_where_dialog) and in the Index at the end of USER_GUIDE.md.
 """
-import os, subprocess, sys, tempfile
+import os, re, subprocess, sys, tempfile
 
 CSS = """
 @page { size: letter; margin: 0.75in 0.8in; }
@@ -38,6 +38,19 @@ def main():
     out = os.path.join(root, "docs", "MIDI-Studio-User-Guide.pdf")
     if not os.path.isfile(src):
         sys.exit("Run this from the repository root (docs/USER_GUIDE.md not found).")
+    stamp = ""
+    try:   # v22ze-293: put the build in the subtitle and the page footer, taken from sys_platform.py
+        sp = open(os.path.join(root, "sys_platform.py"), encoding="utf-8").read()
+        rel = re.search(r'APP_RELEASE = "([^"]*)"', sp).group(1)
+        ver = re.search(r'APP_VERSION = "[^"]*?(\d+)"', sp).group(1)
+        stamp = "%s v%s" % (rel, ver)
+        raw = open(src, "rb").read().decode("utf-8")
+        new = re.sub(r"(?m)^subtitle: .*$", "subtitle: For MIDI Studio " + stamp, raw, count=1)
+        if new != raw:
+            open(src, "wb").write(new.encode("utf-8"))
+    except Exception as e:
+        print("Could not stamp the version:", e)
+    footer = FOOTER.replace("MIDI Studio User Guide", "MIDI Studio User Guide " + stamp, 1) if stamp else FOOTER
     with tempfile.TemporaryDirectory() as tmp:
         css = os.path.join(tmp, "guide.css"); html = os.path.join(tmp, "guide.html")
         open(css, "w").write(CSS)
@@ -47,7 +60,7 @@ def main():
         with sync_playwright() as p:
             b = p.chromium.launch(); pg = b.new_page(); pg.goto("file://" + html); pg.wait_for_timeout(500)
             pg.pdf(path=out, format="Letter", print_background=True, prefer_css_page_size=True, tagged=True,
-                   outline=True, display_header_footer=True, header_template="<span></span>", footer_template=FOOTER,
+                   outline=True, display_header_footer=True, header_template="<span></span>", footer_template=footer,
                    margin={"top": "0.75in", "bottom": "0.8in", "left": "0.8in", "right": "0.8in"})
             b.close()
     print("Wrote", out)

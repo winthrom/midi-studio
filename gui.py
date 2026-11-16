@@ -11117,6 +11117,9 @@ class ScoreView(tk.Frame):
             font=("TkDefaultFont", 9),
         )
         self._score_rec_btn.pack(side=tk.LEFT, padx=1)
+        self._caution_btn = tk.Button(tb, text="Caution", command=self._caution_say, bg="#c62828", fg="white",
+                                      relief=tk.FLAT, padx=6, pady=1, font=("TkDefaultFont", 9, "bold"))
+        self._caution_on = False   # v22ze-293: shown only while the file is one keyboard track
         # Manual hand-split override (MIDI pitch; 0 = auto gap detection)
         tk.Frame(tb, width=1, bg="#aaa").pack(side=tk.LEFT, fill=tk.Y, padx=6, pady=2)
         tk.Label(tb, text="Split pitch:", bg="#e8e8e0").pack(side=tk.LEFT)
@@ -11498,6 +11501,21 @@ class ScoreView(tk.Frame):
             self._draw_inner(cursor_tick=cursor_tick)
         finally:
             self._drawing = False
+        self._update_caution()
+
+    def _update_caution(self):   # v22ze-293
+        try:
+            want = _is_one_keyboard_track(self.app.song)
+            if want and not self._caution_on:
+                self._caution_btn.pack(side=tk.LEFT, padx=4, after=self._score_rec_btn)
+            elif self._caution_on and not want:
+                self._caution_btn.pack_forget()
+            self._caution_on = want
+        except Exception:
+            pass
+
+    def _caution_say(self):   # v22ze-293
+        messagebox.showinfo("Caution", _ONE_TRACK_MSG, parent=self.app.root)
 
     def _draw_inner(self, cursor_tick=None):
         self._score_dirty = False
@@ -15585,8 +15603,7 @@ class ScoreView(tk.Frame):
         song = self.app.song
         rh, lh = _hand_tracks(song)   # v22ze-206
         if rh is None or lh is None:
-            messagebox.showinfo("Move to staff", "Run Fix File > Separate Hands first, so there is an "
-                                "upper and a lower staff to move between.", parent=self.app.root)
+            messagebox.showinfo("Move to staff", _need_hands_text(song), parent=self.app.root)
             return
         src, dst = (lh, rh) if where == "upper" else (rh, lh)
         sel = [n for n in song.tracks[src].notes if n in self._selection]
@@ -17138,6 +17155,28 @@ def _tie_chain(maps, n):   # v22ze-201: the note plus every tied piece before an
         chain.append(c)
         cur = c
     return chain
+
+
+_ONE_TRACK_MSG = ('This file is one track, drawn visually on two staves separated at middle C. '
+                  'Run "Fix File > Separate Hands" to split it into two tracks properly.')   # v22ze-293
+
+
+_KEYBOARD_PROGRAMS = frozenset(range(0, 8)) | frozenset(range(16, 24))   # same set the Score uses for a grand staff
+
+
+def _is_one_keyboard_track(song):   # v22ze-293
+    for t in song.tracks:
+        mode = getattr(t, "staff_mode", "auto")
+        if t.notes and (mode == "grand" or (mode != "single" and t.program in _KEYBOARD_PROGRAMS)):
+            return _hand_tracks(song) == (None, None)
+    return False
+
+
+def _need_hands_text(song):   # v22ze-293
+    if _is_one_keyboard_track(song):
+        return _ONE_TRACK_MSG
+    return ("Run Fix File ▸ Separate Hands first, so the music is split into a "
+            "right-hand part and a left-hand part.")
 
 
 def _hand_tracks(song):   # v22ze-206
@@ -22256,9 +22295,7 @@ class MidisoftStudio:
         song = self.song
         rh_i, lh_i = _hand_tracks(song)   # v22ze-206
         if rh_i is None or lh_i is None:
-            messagebox.showinfo("Fix Chords",
-                "Run Fix File \u25b8 Separate Hands first, so the music is split into a "
-                "right-hand part and a left-hand part.", parent=self.root)
+            messagebox.showinfo("Fix Chords", _need_hands_text(self.song), parent=self.root)
             return
         if opts is None:
             opts = self._ask_separate_hands_options(thin=True)
@@ -23558,9 +23595,7 @@ class MidisoftStudio:
         song = self.song
         rh_i, lh_i = _hand_tracks(song)
         if rh_i is None or lh_i is None:
-            messagebox.showinfo("Easy to Play",
-                "Run Fix File \u25b8 Separate Hands first, so the music is split into a "
-                "right-hand part and a left-hand part.", parent=self.root)
+            messagebox.showinfo("Easy to Play", _need_hands_text(self.song), parent=self.root)
             return
         opts = self._ask_separate_hands_options(thin=True)
         if opts is None:
@@ -23667,9 +23702,7 @@ class MidisoftStudio:
         song = self.song
         rh_i, lh_i = _hand_tracks(song)
         if rh_i is None or lh_i is None:
-            messagebox.showinfo("Octave Lines",
-                "Run Fix File \u25b8 Separate Hands first, so the music is split into a "
-                "right-hand part and a left-hand part.", parent=self.root)
+            messagebox.showinfo("Octave Lines", _need_hands_text(self.song), parent=self.root)
             return
         BG, FG, MUTED = "#0d1117", "#f0f6fc", "#8b949e"
         dlg = tk.Toplevel(self.root)

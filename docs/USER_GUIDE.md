@@ -1,6 +1,6 @@
 ---
 title: MIDI Studio User Guide
-subtitle: For MIDI Studio 0.4.0
+subtitle: For MIDI Studio 0.4.1-dev v293
 ---
 
 A program for turning a MIDI file into readable sheet music, listening to it, tidying it up and printing it.
@@ -326,6 +326,7 @@ Press **Run**. When it is done, the program shows the same report as **Compare w
 - **Chords of more than five notes, or too wide.** No hand has six fingers. When the split is finished, the program tells you how many measures hold chords one hand of that size cannot play, and **asks whether to open Fix Chords**.
 - **It does not change how the music sounds.** Every note keeps its original start, length and loudness. Pedal markings are kept. Other instruments in the file, such as drums and bass, are left exactly as they were. Only the piano part is split.
 - If the file is already on two staffs, the program asks before splitting it again.
+- **A file that is one track** is drawn on two staves split at middle C, but that is only the picture: the notes are still in one track. While the file is like that, a red **Caution** button shows on the Score toolbar. Press it for this message: "This file is one track, drawn visually on two staves separated at middle C. Run Fix File > Separate Hands to split it into two tracks properly." Fix Chords, Easy to Play, Octave Lines and Move to staff give the same message. The real split can differ from the middle-C picture, because it follows the hands.
 - To go back, use **Edit ▸ Undo**.
 - **Check the result.** The split is worked out from the notes alone and can put a note in the wrong hand, or give one hand a passage it cannot play. Check it by ear and eye with an expert such as a music teacher or performer.
 
