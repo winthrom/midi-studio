@@ -39,6 +39,7 @@ Click a line to jump to it.
     - [Compare with Original](#compare-with-original)
 - [8. Playing: hands, fingers and marks](#playing-hands-fingers-and-marks)
     - [Easy to Play (hand over hand)](#easy-to-play-hand-over-hand)
+    - [Octave Lines (two hands)](#octave-lines-two-hands)
     - [Fingering Numbers](#fingering-numbers)
     - [Suggest Marks](#suggest-marks)
     - [Marks on notes](#marks-on-notes)
@@ -178,6 +179,7 @@ Most windows that ask you to choose something have a **Help** button (or press *
 **Playing**: tools that make the music easier to play and read (section 8). Their results are suggestions.
 
 - **Easy to Play (hand over hand)…**: find places where the melody and a held figure are in the wrong hands.
+- **Octave Lines (two hands)…**: find fast runs of octave chords that two hands would play more easily.
 - **Fingering Numbers…**: show suggested fingers on the score. Off until you turn them on.
 - **Suggest Marks…**: suggest staccato and accent marks from how the music was played.
 - **Soft Notes…**: find notes played so softly they are probably accidents.
@@ -423,6 +425,17 @@ The **Playing** menu holds tools that help a person play or read the music. Like
 - **Edit ▸ Undo** takes it back.
 - It needs the music in two hand parts. If the file is not split, the program tells you to run **Separate Hands** first. It then asks the same two hand questions as Separate Hands (widest stretch, most notes at once).
 
+## Octave Lines (two hands)
+
+**Playing ▸ Octave Lines (two hands)…** finds fast runs of octave chords in one hand. A run is eight or more octave pairs in a row, about five or more a second, with the other hand free. A sequenced file holds only the chords, but composers often write such a line as two voices, one for each hand (Chopin's Revolutionary Etude does this), and two single lines are far easier to play than a fast run of octave chords in one hand.
+
+- Each line gives the measures, the number of pairs, the speed, and which hand has them now.
+- **Apply selected** or **Apply all** gives the upper note of each pair to the right hand and the lower note to the left hand.
+- Only the staff changes; the sound is exactly as recorded. Nothing changes until you press Apply, and **Edit ▸ Undo** takes it back.
+- It is a suggestion. Some octave runs are meant for one hand (virtuoso octave passages, for example), so apply it only where you want it.
+- It needs the music in two hand parts. If the file is not split, the program tells you to run **Separate Hands** first.
+- Fingering Numbers does not number an octave pair: it is always the thumb and the little finger.
+
 ## Fingering Numbers
 
 **Playing ▸ Fingering Numbers…** shows suggested fingers on the Score, in blue: **1 is the thumb and 5 the little finger**, for each hand. Choose one of three settings:
@@ -655,6 +668,10 @@ Topics in alphabetical order. The same list is searched by **Help ▸ Where do I
 **N**
 
 - Names of other products: [Names, trademarks and what has been tested](#names-trademarks-and-what-has-been-tested)
+
+**O**
+
+- Octave runs, two hands: [Octave Lines (two hands)](#octave-lines-two-hands)
 
 **P**
 

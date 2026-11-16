@@ -16466,6 +16466,85 @@ def _easy_passages(song, rh_i, lh_i, max_notes, max_span, min_notes=8):
     return plan
 
 
+def _octave_runs(song, rh_i, lh_i, min_strikes=8, max_gap_s=0.2):
+    """v22ze-291: fast runs of octave pairs that one hand has to play, where the other hand is free.  A pair is two notes
+    exactly an octave apart struck together (hands counted together, so a pair already split between the hands counts too).
+    A run is min_strikes or more pairs in a row, none more than max_gap_s apart.  Returns plan entries in the form
+    _easy_apply takes: the lower notes stay with (or go to) the left hand, the upper notes with the right.  Entries where
+    every note is already in the right hand are left out.  Nothing is changed here."""
+    import bisect as _bs
+    tpb = song.ticks_per_beat
+    ch = song.tempo_changes()
+    tks = [c[0] for c in ch]
+
+    def _us(t):
+        return ch[max(0, _bs.bisect_right(tks, t) - 1)][1] if ch else 500000
+
+    notes = []
+    for ti in (rh_i, lh_i):
+        for n in song.tracks[ti].notes:
+            if getattr(n, "articulation", "") != "tie_continuation":
+                notes.append((n.tick, n.pitch, ti, n))
+    notes.sort(key=lambda x: (x[0], x[1]))
+    strikes = []
+    for e in notes:
+        if strikes and e[0] - strikes[-1][0] <= 40:
+            strikes[-1][1].append(e)
+        else:
+            strikes.append((e[0], [e]))
+
+    for s in strikes:
+        s[1].sort(key=lambda x: x[1])   # the two notes of a pair are often a few ticks apart: lower note first
+
+    def _pair(s):
+        es = s[1]
+        return len(es) == 2 and es[1][1] - es[0][1] == 12
+
+    runs, cur = [], []
+    for s in strikes:
+        if _pair(s) and (not cur or (s[0] - cur[-1][0]) / tpb * _us(s[0]) / 1e6 <= max_gap_s):
+            cur.append(s)
+            continue
+        if len(cur) >= min_strikes:
+            runs.append(cur)
+        cur = [s] if _pair(s) else []
+    if len(cur) >= min_strikes:
+        runs.append(cur)
+    try:
+        mmap = song.get_measure_map()
+        starts = [m[1] for m in mmap]
+    except Exception:
+        starts = []
+    out = []
+    for run in runs:
+        own = {id(e[3]) for s in run for e in s[1]}
+        t0 = run[0][0]
+        t1 = run[-1][0] + max(1, tpb // 4)
+        free = True
+        for tk, _p, _ti, n in notes:
+            if tk >= t1:
+                break
+            if id(n) not in own and tk + max(1, n.duration) > t0:
+                free = False
+                break
+        if not free:
+            continue
+        lower = [(e[2], e[3]) for s in run for e in s[1][:1]]
+        upper = [(e[2], e[3]) for s in run for e in s[1][1:]]
+        moves = sum(1 for ti, _n in lower if ti != lh_i) + sum(1 for ti, _n in upper if ti != rh_i)
+        if not moves:
+            continue
+        span_s = (run[-1][0] - run[0][0]) / tpb * _us(t0) / 1e6
+        rate = (len(run) - 1) / span_s if span_s > 0 else 0.0
+        bar0 = max(0, _bs.bisect_right(starts, t0) - 1) + 1 if starts else 1
+        bar1 = max(0, _bs.bisect_right(starts, run[-1][0]) - 1) + 1 if starts else 1
+        homes = {ti for ti, _n in lower + upper}
+        out.append(dict(kind="octaves", bar=bar0, bar_to=bar1, tick=t0, tick_to=run[-1][0], pairs=len(run), rate=rate,
+                        moves=moves, figure=lower, melody=upper, fig_hand=lh_i, mel_hand=rh_i,
+                        now=("R.H." if homes == {rh_i} else "L.H." if homes == {lh_i} else "both hands")))
+    return out
+
+
 def _easy_apply(song, plan, include):
     """v22ze-250: move each included passage's notes to the hand chosen for them (staff only; time, length and
     loudness are kept; tied pieces go with their note).  Returns the number of notes moved."""
@@ -18270,6 +18349,7 @@ class MidisoftStudio:
         # Playing: making the music easier to play and read
         pm=TkPopupMenu(mb,tearoff=0); mb.add_cascade(label="Playing",menu=pm)
         pm.add_command(label="Easy to Play (hand over hand)…",command=self._easy_play, tooltip=_EXPERT_CHECK + "  Edit > Undo takes it back.")   # v22ze-250
+        pm.add_command(label="Octave Lines (two hands)…",command=self._octave_lines, tooltip=_EXPERT_CHECK + "  Edit > Undo takes it back.")   # v22ze-291
         pm.add_command(label="Fingering Numbers…",command=self._fingering_dialog, tooltip=_EXPERT_CHECK + "  They are off until you turn them on.")   # v22ze-259
         pm.add_command(label="Suggest Marks…",command=self._suggest_marks_dialog)   # v22ze-265
         pm.add_command(label="Soft Notes…",command=self._soft_notes_dialog)   # v22ze-248
@@ -23571,6 +23651,95 @@ class MidisoftStudio:
         self._dialog_help_button(dlg, brow, "easy-to-play-hand-over-hand")   # v22ze-286
         _find()
 
+    def _octave_lines(self):   # v22ze-291
+        old = getattr(self, "_octave_dlg", None)
+        try:
+            if old is not None and old.winfo_exists():
+                old.lift()
+                return
+        except Exception:
+            pass
+        if not self._grand_staff_guard("Octave Lines"):
+            return
+        song = self.song
+        rh_i, lh_i = _hand_tracks(song)
+        if rh_i is None or lh_i is None:
+            messagebox.showinfo("Octave Lines",
+                "Run Fix File \u25b8 Separate Hands first, so the music is split into a "
+                "right-hand part and a left-hand part.", parent=self.root)
+            return
+        BG, FG, MUTED = "#0d1117", "#f0f6fc", "#8b949e"
+        dlg = tk.Toplevel(self.root)
+        dlg.title("Octave Lines (two hands)")
+        dlg.configure(bg=BG)
+        self._octave_dlg = dlg
+        try:
+            self._work_dialogs = [w for w in getattr(self, "_work_dialogs", []) if w.winfo_exists()] + [dlg]
+        except Exception:
+            pass
+        tk.Label(dlg, text="Places where a fast run of octave chords is played by one hand. At this speed two hands, each "
+                           "playing a single line an octave apart, are much easier than octave chords in one hand, and "
+                           "composers often write such a line that way. Each line shows where it is and how fast; Apply "
+                           "gives the upper notes to the right hand and the lower notes to the left. Only the staff "
+                           "changes: the sound is exactly as recorded. Nothing changes until you press Apply; Edit > Undo "
+                           "takes it back. Some octave runs are meant for one hand: apply only where you want it. "
+                           + _EXPERT_CHECK,
+                 bg=BG, fg=MUTED, justify="left", anchor="w", wraplength=760).pack(fill="x", padx=12, pady=(10, 6))
+        lb = tk.Listbox(dlg, width=100, height=8, bg="#161b22", fg=FG, selectbackground="#1f3b73",
+                        exportselection=False, font=("TkFixedFont", 9))
+        lb.pack(fill="both", expand=True, padx=12, pady=4)
+        msg = tk.StringVar(value="")
+        tk.Label(dlg, textvariable=msg, bg=BG, fg="#3fb950", justify="left", anchor="w",
+                 wraplength=760).pack(fill="x", padx=12, pady=(2, 0))
+        plan = []
+
+        def _line(e):
+            return ("Measures %d-%d: %d octave pairs, %.1f a second, now in %s  ->  upper notes to R.H., lower to L.H. "
+                    "(%d notes change staff)" % (e["bar"], e["bar_to"], e["pairs"], e["rate"], e["now"], e["moves"]))
+
+        def _fill():
+            lb.delete(0, tk.END)
+            for e in plan:
+                lb.insert(tk.END, _line(e))
+
+        def _find():
+            plan[:] = _octave_runs(self.song, rh_i, lh_i)
+            _fill()
+            if plan:
+                msg.set(str(len(plan)) + " fast octave run" + ("" if len(plan) == 1 else "s") + " found.")
+            else:
+                msg.set("No fast octave runs found that the other hand could share.")
+
+        def _apply(only_selected):
+            import copy as _copy
+            idx = set(lb.curselection()) if only_selected else set(range(len(plan)))
+            if not idx:
+                msg.set("Select a line first.")
+                return
+            sel = {id(plan[i]) for i in idx}
+            before_tracks = _copy.deepcopy(self.song.tracks)
+            before_map = _copy.deepcopy(self.song.rationalized_measure_map)
+            n = _easy_apply(self.song, plan, lambda e: id(e) in sel)
+            self.song.modified = True
+            self._update_title()
+            self._push_undo(RationalizationAction(
+                description="Octave lines (two hands)",
+                before_tracks=before_tracks, after_tracks=_copy.deepcopy(self.song.tracks),
+                before_map=before_map, after_map=_copy.deepcopy(self.song.rationalized_measure_map)))
+            self._refresh_track_list()
+            self._soft_redraw()
+            _find()
+            msg.set("Moved " + str(n) + " notes to the other staff. The sound is unchanged. Edit > Undo takes it back.")
+        brow = tk.Frame(dlg, bg=BG)
+        brow.pack(pady=(6, 10))
+        for txt, cmd, col in (("Apply selected", lambda: _apply(True), "#238636"),
+                              ("Apply all", lambda: _apply(False), "#238636"),
+                              ("Close", dlg.destroy, "#21262d")):
+            tk.Button(brow, text=txt, command=cmd, bg=col, fg="white", relief=tk.FLAT,
+                      padx=12, pady=4).pack(side="left", padx=4)
+        self._dialog_help_button(dlg, brow, "octave-lines-two-hands")
+        _find()
+
     def _suggest_marks_dialog(self):   # v22ze-265
         import copy as _copy
         song = self.song
@@ -23958,6 +24127,7 @@ class MidisoftStudio:
             ("Fix File ▸ Auto-Correct Score…", "do everything one step repair separate hands short rests automatic fix the whole file", "auto-correct-score"),
             ("Fix File ▸ Compare with Original…", "what changed since loading sound same bars differ check", "compare-with-original"),
             ("Playing ▸ Easy to Play (hand over hand)…", "hand crossing figure one hand easier to play passages", "easy-to-play-hand-over-hand"),
+            ("Playing ▸ Octave Lines (two hands)…", "fast octave run octaves both hands too fast one hand easier two lines unison", "octave-lines-two-hands"),
             ("Playing ▸ Fingering Numbers…", "fingers numbers thumb 1 2 3 4 5 fingering", "fingering-numbers"),
             ("Playing ▸ Suggest Marks…", "staccato accent marks detect suggestions articulation", "suggest-marks"),
             ("Playing ▸ Soft Notes…", "quiet notes soft hide faint velocity screen", "soft-notes"),
