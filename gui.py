@@ -16738,6 +16738,8 @@ def _fingering(song, rh_i, lh_i):
                     elif d != 0 and f != pf and (f == 1 or pf == 1) and ((d > 0) != (f > pf)):
                         matter = True   # the thumb passes under, or a finger over the thumb
                 prev_key = (key_p, r[key_p])
+                if len(ps) == 2 and ps[1] - ps[0] == 12:   # v22ze-290: an octave pair is always 1 and 5: no numbers
+                    continue
                 for x in g:
                     out[id(x)] = (r[x.pitch], matter, hand)
             del passage[:]
