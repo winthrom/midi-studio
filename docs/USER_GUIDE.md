@@ -434,6 +434,7 @@ The **Playing** menu holds tools that help a person play or read the music. Like
 - Only the staff changes; the sound is exactly as recorded. Nothing changes until you press Apply, and **Edit ▸ Undo** takes it back.
 - It is a suggestion. Some octave runs are meant for one hand (virtuoso octave passages, for example), so apply it only where you want it.
 - It needs the music in two hand parts. If the file is not split, the program tells you to run **Separate Hands** first.
+- The lines it finds start selected. To choose your own stretch, select notes on the Score and press **Look again**: the window then offers the octave pairs in your selection, at any speed and any length, even where the other hand is busy. Clear the selection and press Look again to go back to the whole piece.
 - Fingering Numbers does not number an octave pair: it is always the thumb and the little finger.
 
 ## Fingering Numbers

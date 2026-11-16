@@ -16466,7 +16466,7 @@ def _easy_passages(song, rh_i, lh_i, max_notes, max_span, min_notes=8):
     return plan
 
 
-def _octave_runs(song, rh_i, lh_i, min_strikes=8, max_gap_s=0.2):
+def _octave_runs(song, rh_i, lh_i, min_strikes=8, max_gap_s=0.2, tick_range=None):
     """v22ze-291: fast runs of octave pairs that one hand has to play, where the other hand is free.  A pair is two notes
     exactly an octave apart struck together (hands counted together, so a pair already split between the hands counts too).
     A run is min_strikes or more pairs in a row, none more than max_gap_s apart.  Returns plan entries in the form
@@ -16495,6 +16495,9 @@ def _octave_runs(song, rh_i, lh_i, min_strikes=8, max_gap_s=0.2):
 
     for s in strikes:
         s[1].sort(key=lambda x: x[1])   # the two notes of a pair are often a few ticks apart: lower note first
+    if tick_range is not None:   # v22ze-292: the user picked this stretch on the Score: any speed, any length
+        strikes = [s for s in strikes if tick_range[0] - 40 <= s[0] <= tick_range[1] + 40]
+        min_strikes, max_gap_s = 1, 1e9
 
     def _pair(s):
         es = s[1]
@@ -16527,7 +16530,7 @@ def _octave_runs(song, rh_i, lh_i, min_strikes=8, max_gap_s=0.2):
             if id(n) not in own and tk + max(1, n.duration) > t0:
                 free = False
                 break
-        if not free:
+        if not free and tick_range is None:
             continue
         lower = [(e[2], e[3]) for s in run for e in s[1][:1]]
         upper = [(e[2], e[3]) for s in run for e in s[1][1:]]
@@ -16540,7 +16543,7 @@ def _octave_runs(song, rh_i, lh_i, min_strikes=8, max_gap_s=0.2):
         bar1 = max(0, _bs.bisect_right(starts, run[-1][0]) - 1) + 1 if starts else 1
         homes = {ti for ti, _n in lower + upper}
         out.append(dict(kind="octaves", bar=bar0, bar_to=bar1, tick=t0, tick_to=run[-1][0], pairs=len(run), rate=rate,
-                        moves=moves, figure=lower, melody=upper, fig_hand=lh_i, mel_hand=rh_i,
+                        moves=moves, picked=tick_range is not None, figure=lower, melody=upper, fig_hand=lh_i, mel_hand=rh_i,
                         now=("R.H." if homes == {rh_i} else "L.H." if homes == {lh_i} else "both hands")))
     return out
 
@@ -23694,21 +23697,48 @@ class MidisoftStudio:
         plan = []
 
         def _line(e):
-            return ("Measures %d-%d: %d octave pairs, %.1f a second, now in %s  ->  upper notes to R.H., lower to L.H. "
-                    "(%d notes change staff)" % (e["bar"], e["bar_to"], e["pairs"], e["rate"], e["now"], e["moves"]))
+            sp = (", %.1f a second" % e["rate"]) if e["rate"] > 0 else ""
+            return ("Measures %d-%d: %d octave pair%s%s, now in %s  ->  upper notes to R.H., lower to L.H. "
+                    "(%d notes change staff)" % (e["bar"], e["bar_to"], e["pairs"], "" if e["pairs"] == 1 else "s", sp,
+                                                e["now"], e["moves"]))
 
         def _fill():
             lb.delete(0, tk.END)
             for e in plan:
                 lb.insert(tk.END, _line(e))
+            if plan:
+                lb.selection_set(0, tk.END)   # v22ze-292: found lines start selected
+
+        def _score_range():
+            try:
+                sv = getattr(self, "_score_view", None)
+                sel = sv._live_selection() if sv is not None else []
+                if sel:
+                    return (min(n.tick for n in sel), max(n.tick for n in sel))
+            except Exception:
+                pass
+            return None
 
         def _find():
+            rng = _score_range()
+            if rng is not None:
+                plan[:] = _octave_runs(self.song, rh_i, lh_i, tick_range=rng)
+                _fill()
+                if plan:
+                    msg.set("Octave pairs in the notes you selected on the Score: " + str(len(plan)) + " stretch"
+                            + ("" if len(plan) == 1 else "es") + ".")
+                else:
+                    msg.set("The notes you selected have no octave pairs (two notes exactly an octave apart, struck "
+                            "together) that move to the other hand. Select fewer or other notes, or clear the selection "
+                            "to look at the whole piece.")
+                return
             plan[:] = _octave_runs(self.song, rh_i, lh_i)
             _fill()
             if plan:
                 msg.set(str(len(plan)) + " fast octave run" + ("" if len(plan) == 1 else "s") + " found.")
             else:
-                msg.set("No fast octave runs found that the other hand could share.")
+                msg.set("No fast octave runs found that the other hand could share (eight or more pairs, five or more a "
+                        "second). To use a different stretch, select the notes on the Score and press Look again.")
 
         def _apply(only_selected):
             import copy as _copy
@@ -23734,6 +23764,7 @@ class MidisoftStudio:
         brow.pack(pady=(6, 10))
         for txt, cmd, col in (("Apply selected", lambda: _apply(True), "#238636"),
                               ("Apply all", lambda: _apply(False), "#238636"),
+                              ("Look again", lambda: _find(), "#21262d"),
                               ("Close", dlg.destroy, "#21262d")):
             tk.Button(brow, text=txt, command=cmd, bg=col, fg="white", relief=tk.FLAT,
                       padx=12, pady=4).pack(side="left", padx=4)
