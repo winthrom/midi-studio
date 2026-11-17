@@ -16539,7 +16539,7 @@ def _octave_runs(song, rh_i, lh_i, min_strikes=8, max_gap_s=0.2, tick_range=None
     for run in runs:
         own = {id(e[3]) for s in run for e in s[1]}
         t0 = run[0][0]
-        t1 = run[-1][0] + max(1, tpb // 4)
+        t1 = run[-1][0] + 1   # v22ze-295: a note starting after the last pair does not make the hand busy
         free = True
         for tk, _p, _ti, n in notes:
             if tk >= t1:

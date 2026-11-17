@@ -56,7 +56,7 @@ Click a line to jump to it.
 
 A **Musical Instrument Digital Interface (MIDI) file** (ending in `.mid`) is not a recording. It is a list of instructions: "play this note, this loud, starting now, for this long." Most music players can play one. MIDI Studio reads that list and **draws it as sheet music**. You can then play it, watch a red line move across the score, zoom in, change the tempo, mute instruments, tidy the score, and print it.
 
-You do not need to read music to use the program, but it helps. Words you may not know are explained in the [word list](#words-used-in-this-guide) at the end.
+You do not need to read music to use the program, but it helps. Words you may not know are explained in the [word list](#words-used-in-this-guide) at the end. For what a MIDI file is and is not, and why a MIDI file never holds a finished score, read the [Afterword: About MIDI files](#afterword-about-midi-files).
 
 **Three rules to remember**
 
