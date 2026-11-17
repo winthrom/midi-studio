@@ -1,7 +1,7 @@
 # Maintaining MIDI Studio
 
 For whoever opens this code next (including its author, a year from now). It says where things are, how the
-pieces connect, and which rules must not be broken. It describes build 22ze-288 (0.4.1 in progress). Line numbers
+pieces connect, and which rules must not be broken. It describes build 22ze-294 (0.4.1 in progress). Line numbers
 drift with every patch, so find things by name: `grep -n "def _auto_correct_run" gui.py`.
 
 If this file and the code disagree, the code is right; please fix this file.
@@ -199,6 +199,9 @@ The maintainer's patch routine (one small script per change):
   bumps `APP_VERSION` and `APP_TIMESTAMP` in `sys_platform.py`.
 - Test on a fresh copy twice, then run the unit tests. Commit named files only (`git add <files>`, never
   `git add .`).
+- Send the guide PDF as `MIDI-Studio-User-Guide-vNNN.pdf` (the number is the build) and copy it over
+  `docs/MIDI-Studio-User-Guide.pdf` when applying, so downloads never collide. `build_user_guide.py` stamps the
+  subtitle and page footer from `sys_platform.py` (APP_RELEASE and the build number).
 
 **User Guide.** Source is `docs/USER_GUIDE.md`; `docs/dev/build_user_guide.py` makes the PDF (needs pandoc and
 Playwright). `_where_dialog` in `gui.py` and the guide's Index point at guide headings by anchor. **If you
@@ -224,19 +227,32 @@ copyright note in the User Guide (279); faster Score window for long pieces (280
 (282, not yet tested on a real Mac); Separate Hands sorts keyboard instruments only and asks which one when the
 file has several (283); a Help button and the F1 key in 15 of the program's windows, opening the User Guide at the
 right section, with a note saying where it opened, and lowering always-on-top windows so the browser can come in
-front (284 to 287).
+front (284 to 287); scale fingering by the textbook rule, octave pairs get no finger numbers, Playing >
+Octave Lines (two hands)… splits fast octave runs into the two hands as a suggestion (289 to 292); a one-track
+file now says it is only drawn on two staves, with a red Caution button on the Score (293); the User Guide and its
+PDF carry the build number (293).
 
 Decided: the hand-separation prototype (event search, physical limits and continuity only) scored 90.3 per cent
 against 88.6 per cent for the current code on the development half of the PIG pieces. The gain is too small to risk
 Auto-Correct, so the current hand separation stays the default in 0.4.1. A repeated-draw (bootstrap) test of the 75
 development pieces put the prototype ahead by 1.8 points (sd 0.9) in nearly every draw. It will be built later as an
 optional method (see below).
+Tried and not shipped: tempo-aware fingering (distance over time as an extra cost). Five variants on the development
+half scored 63.5 per cent at best against 63.4 per cent for the shipped scale rule, and the printed fingering looked
+worse. Not built.
 Ideas tried and dropped: reusing the earlier fingering for repeated figures (pianists vary about as often as the
 program does); splitting repeated chords between the hands (changes the printed staves; not wanted).
 
 To do:
 - One final measurement on the held-out even-numbered PIG pieces (run once; report how many variants were tried).
-- Two-octave left-hand scales; fingering that knows note lengths.
+- Fingering: scales are right for the right hand in C D E F G A B (two octaves, both ways) and for the left hand up in
+  C D E G A and down in E. Still wrong or unchecked: left hand down in C D F G A, left hand up in F, black-key
+  scales. Idea from the Revolutionary Etude: a figure repeated in a sequence should take the same fingering (the
+  composer writes 4/1 patterns); an earlier chord-repeat test showed no PIG gain, so test on the Etude first.
+- Check why Separate Hands put three stray notes in the right hand of the Revolutionary Etude (Octave Lines may
+  already cover it).
+- macOS 3.12 test job: GitHub's hosted runner was not acquired (infrastructure, not a test failure). Re-run later;
+  the 3.11 and the Linux and Windows jobs passed.
 - Signed Windows build (SignPath, no reply yet); Mac tests (Apple Silicon, Intel); MuseScore 4 and Braille (OSMD) checks.
 - App tests by hand: start-up, About, load and score, playback, Listening speed, Auto-Correct and Undo, Where do I find, window resize.
 - Help button with the browser closed (it should start the browser and show the guide), and on Windows and macOS;
@@ -253,23 +269,24 @@ a PIG result is quoted. Odd-numbered pieces are for development, even-numbered a
 
 ### After 0.4.1 (agreed order)
 
-1. **Lyrics, karaoke style.** Read the lyric text events already in a file and show each syllable under its note, one
+1. **Editing fingering** (before lyrics: teachers will want it). Click a note, give it a finger 1 to 5; the search
+   re-runs around the forced finger so the neighbours adapt. Undo covers each edit. Open question: edits live in a
+   small companion file next to the MIDI file (a MIDI file has no place for fingering). The User Guide, which now
+   says fingering cannot be edited, must change.
+2. **Lyrics, karaoke style.** Read the lyric text events already in a file and show each syllable under its note, one
    syllable per note, with held notes for a melisma. The current syllable lights up under the red line during
    playback. Typing lyrics by hand comes later. Display only; the sound is untouched. A sung voice is not planned.
-2. **Chord names.** Optional, Off by default, for songs and lead sheets, not classical works. Found from the notes by a
+3. **Chord names.** Optional, Off by default, for songs and lead sheets, not classical works. Found from the notes by a
    published method with the lowest note giving slash chords. A suggestion: carries the "check it" note.
-3. **Guitar chord boxes with capo.** Fret diagrams (strings, dots, open and muted marks, fret number) drawn from a table
+4. **Guitar chord boxes with capo.** Fret diagrams (strings, dots, open and muted marks, fret number) drawn from a table
    of standard shapes, with the chord name. The capo is a setting; with a capo the box shows the shape played and the
    name can show the sound. Shown on the Score, in print, in LilyPond and in MusicXML. Off by default. Needs chord names first.
-4. Later and optional: staff tablature (a string and fret for every note), and a suggested capo position.
+5. Later and optional: staff tablature (a string and fret for every note), and a suggested capo position.
 
-5. **Optional alternative hand method.** A choice in the Separate Hands window: the current method (default) or the
+6. **Optional alternative hand method.** A choice in the Separate Hands window: the current method (default) or the
    event search (physical limits and continuity only, no fitted weights). The stretch and notes-per-hand settings apply
    to both. Arpeggio groups and held notes (already in the program) are checkboxes for the alternative; each is kept
    only if it earns its place when scored on the development pieces. Undo restores the previous split.
-6. **Editing fingering.** Click a note, give it a finger 1 to 5; the search re-runs around the forced finger so the
-   neighbours adapt. Undo covers each edit. Open question: edits live in a small companion file next to the MIDI file
-   (a MIDI file has no place for fingering). The User Guide, which now says fingering cannot be edited, must change.
 7. Blue sky: contributed fingerings, if the program becomes popular. Needs consent and an open licence, no automatic
    upload (the person sends the companion file), edits marked as unchecked until reviewed, and a separate decision
    on any use beyond a scoreboard or examples for an expert to review.
@@ -287,6 +304,10 @@ a PIG result is quoted. Odd-numbered pieces are for development, even-numbered a
 - **Help in windows.** Done for the windows that ask a question (284 to 287). Still open: the Help menu's User Guide entry
   does not show the "opening in your browser" note, and a "Where do I find" list prefilled with the window's name is only
   an idea. The Help button lowers always-on-top windows (Quantize, Rationalize Score, Score Settings) until clicked again.
+- **One track, two staves.** A single-track keyboard file is drawn on two staves split at middle C, but the notes are
+  still one track; Separate Hands makes a different, real split. Done (293): Fix Chords, Easy to Play, Octave Lines and
+  Move to staff say so, and a red Caution button shows on the Score toolbar while the file is like that. Not done: any
+  change to what Separate Hands does on load.
 - **Intel Mac.** One-off build, not a release: the `intel` job in macos.yml (runner macos-15-intel) runs on branch pushes and
   uploads a zip to the rolling `mac-test` pre-release. GitHub plans to end Intel macOS runners after macOS 15 retires
   (autumn 2027). The lowest macOS the app asks for is printed in the job log (Homebrew's FluidSynth libraries may force
