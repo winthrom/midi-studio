@@ -8238,7 +8238,7 @@ def quantize_notes_per_measure(
     # of letting it silently merge into the earlier one.
     notes_quantized = 0
     for ms, me in active_measures:
-        gridf = tpb / float(div)          # v22ze-210: exact (fractional) grid, so e.g. 415 ticks/beat stays on the beat
+        gridf = 4.0 * tpb / float(div)    # v22ze-296: div is a NOTE VALUE (16 = sixteenth); exact (fractional) grid, so e.g. 415 ticks/beat stays on the beat
         grid = max(1, int(round(gridf)))
 
         notes_in_measure = [n for n in track.notes if ms <= n.tick < me]
@@ -8320,7 +8320,9 @@ def quantize_notes_per_measure(
                 q_dur = int(round(round(n.duration / gridf) * gridf))
                 if q_dur > 0:
                     n.duration = int(n.duration + strength * (q_dur - n.duration))
-                    n.duration = max(1, min(n.duration, me - n.tick))
+                    # v22ze-296: a note that snapped onto the next barline belongs to the next measure; the old cut to
+                    # (measure end - start) made it ONE tick long (49 such notes in a performance of the Revolutionary Etude)
+                    n.duration = max(1, min(n.duration, me - n.tick) if n.tick < me else n.duration)
                 # else: note is shorter than half a grid step — leave it unchanged
 
                 notes_quantized += 1
