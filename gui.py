@@ -2966,6 +2966,8 @@ def _strike_slots(song, grid, tpb, split_close=False):
         if (split_close and _prev_slot is not None and s == _prev_slot and mean - _prev_mean >= fine - 0.5
                 and _prev_end <= mean + win):   # the first note has ended: a trill or ornament, not a rolled chord
             _s2 = max(0, int(round(round(mean / fine) * fine)))
+            if _s2 <= _prev_slot:   # v22ze-297: an exact half (28.5) rounds down onto the first note's slot: take the next fine slot
+                _s2 = int(round(_prev_slot + fine))
             if _s2 > _prev_slot and int(_s2) not in bars:
                 s = _s2
         _prev_mean, _prev_slot = mean, s
