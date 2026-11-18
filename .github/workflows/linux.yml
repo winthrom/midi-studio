@@ -56,3 +56,30 @@ jobs:
         with:
           name: MIDI-Studio-linux-x86_64
           path: dist/linux/MIDI-Studio-x86_64.AppImage
+
+  publish-dev:
+    # a public download for testers without a GitHub login; main branch pushes only, never tagged releases
+    needs: appimage
+    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+    runs-on: ubuntu-24.04
+    continue-on-error: true
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: MIDI-Studio-linux-x86_64
+          path: dl
+      - name: Update the rolling "dev-build" pre-release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ls -l dl
+          test -f dl/MIDI-Studio-x86_64.AppImage
+          NOTES="Development build (untested, not for everyday use) from commit ${GITHUB_SHA::7}, $(date -u +%Y-%m-%d). This is the program as it is being worked on and it may have faults. For everyday use download the latest release instead. Windows: MIDI-Studio-Setup.exe (install) or MIDI-Studio-windows-x64.zip (no install). Linux: MIDI-Studio-x86_64.AppImage. The User Guide PDF is the current one. Windows shows unknown publisher because the build is not signed. This page is replaced by each newer good build. Please report problems with Help > Send a Problem Report."
+          if ! gh release create dev-build --repo "$GITHUB_REPOSITORY" --prerelease --target "$GITHUB_SHA" \
+              --title "Development build (rolling, untested)" --notes "$NOTES" 2>/dev/null; then
+            gh release edit dev-build --repo "$GITHUB_REPOSITORY" --prerelease --title "Development build (rolling, untested)" --notes "$NOTES"
+          fi
+          gh api -X PATCH "repos/$GITHUB_REPOSITORY/git/refs/tags/dev-build" -f sha="$GITHUB_SHA" -F force=true || true
+          gh release upload dev-build dl/MIDI-Studio-x86_64.AppImage --repo "$GITHUB_REPOSITORY" --clobber

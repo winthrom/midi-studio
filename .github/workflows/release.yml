@@ -9,10 +9,14 @@ jobs:
   windows:
     uses: ./.github/workflows/windows.yml
     secrets: inherit
+    permissions:
+      contents: write   # the called workflow has a job that asks for it; it is skipped on tags
 
   linux:
     uses: ./.github/workflows/linux.yml
     secrets: inherit
+    permissions:
+      contents: write   # the called workflow has a job that asks for it; it is skipped on tags
 
   macos:
     uses: ./.github/workflows/macos.yml

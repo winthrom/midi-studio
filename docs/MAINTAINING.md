@@ -259,6 +259,10 @@ To do:
   performance files (a staccato note draws as a 1/32 now). Rationalize with keep-sound may already do this; check first.
 - After Quantize at 1/16 about 16 per cent of starts in a performance file (chet1012) stay off the grid, because a note
   that would land on another note's slot keeps its time. Changing that rule risks splitting chords between the hands.
+- Development builds: `windows.yml` and `linux.yml` each end with a `publish-dev` job that updates the rolling `dev-build`
+  pre-release (public, marked untested) on every good push to main, as `macos.yml` does for `mac-test`. Link for testers:
+  https://github.com/winthrom/midi-studio/releases/tag/dev-build . Not run on tags. The callers in `release.yml` allow
+  `contents: write` for it; remove that line only together with the jobs.
 - macOS 3.12 test job: GitHub's hosted runner was not acquired (infrastructure, not a test failure). Re-run later;
   the 3.11 and the Linux and Windows jobs passed.
 - Signed Windows build (SignPath, no reply yet); Mac tests (Apple Silicon, Intel); MuseScore 4 and Braille (OSMD) checks.
