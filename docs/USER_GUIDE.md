@@ -428,7 +428,7 @@ The **Playing** menu holds tools that help a person play or read the music. Like
 
 ## Octave Lines (two hands)
 
-**Playing ▸ Octave Lines (two hands)…** finds fast runs of octave chords in one hand. A run is eight or more octave pairs in a row, about five or more a second, with the other hand free. A sequenced file holds only the chords, but composers often write such a line as two voices, one for each hand (Chopin's Revolutionary Etude does this), and two single lines are far easier to play than a fast run of octave chords in one hand.
+**Playing ▸ Octave Lines (two hands)…** finds fast runs of octave chords in one hand. A run is four or more octave pairs in a row, about five or more a second, with the other hand free. A sequenced file holds only the chords, but composers often write such a line as two voices, one for each hand (Chopin's Revolutionary Etude does this), and two single lines are far easier to play than a fast run of octave chords in one hand.
 
 - Each line gives the measures, the number of pairs, the speed, and which hand has them now.
 - **Apply selected** or **Apply all** gives the upper note of each pair to the right hand and the lower note to the left hand.

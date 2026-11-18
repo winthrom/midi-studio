@@ -16487,7 +16487,7 @@ def _easy_passages(song, rh_i, lh_i, max_notes, max_span, min_notes=8):
     return plan
 
 
-def _octave_runs(song, rh_i, lh_i, min_strikes=8, max_gap_s=0.2, tick_range=None):
+def _octave_runs(song, rh_i, lh_i, min_strikes=4, max_gap_s=0.2, tick_range=None):   # v22ze-299: was 8
     """v22ze-291: fast runs of octave pairs that one hand has to play, where the other hand is free.  A pair is two notes
     exactly an octave apart struck together (hands counted together, so a pair already split between the hands counts too).
     A run is min_strikes or more pairs in a row, none more than max_gap_s apart.  Returns plan entries in the form
@@ -23774,7 +23774,7 @@ class MidisoftStudio:
             if plan:
                 msg.set(str(len(plan)) + " fast octave run" + ("" if len(plan) == 1 else "s") + " found.")
             else:
-                msg.set("No fast octave runs found that the other hand could share (eight or more pairs, five or more a "
+                msg.set("No fast octave runs found that the other hand could share (four or more pairs, five or more a "
                         "second). To use a different stretch, select the notes on the Score and press Look again.")
 
         def _apply(only_selected):

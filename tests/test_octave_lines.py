@@ -58,13 +58,13 @@ class TestOctaveRuns(unittest.TestCase):
 
     def test_short_run_is_not_a_run(self):
         gui = _gui()
-        song = _song(gui, 6, gui.Song().ticks_per_beat // 4)
+        song = _song(gui, 3, gui.Song().ticks_per_beat // 4)
         self.assertEqual(gui._octave_runs(song, 0, 1), [])
 
     def test_other_hand_busy_means_no_offer(self):
         gui = _gui()
         q = gui.Song().ticks_per_beat // 4
-        song = _song(gui, 10, q, other=[(3 * q, 84, q)])
+        song = _song(gui, 7, q, other=[(3 * q, 84, q)])   # v22ze-299: three free pairs on each side of the busy note: no run of four
         self.assertEqual(gui._octave_runs(song, 0, 1), [])
 
     def test_already_split_needs_no_move(self):
