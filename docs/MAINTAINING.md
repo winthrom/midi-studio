@@ -290,6 +290,24 @@ a PIG result is quoted. Odd-numbered pieces are for development, even-numbered a
 7. Blue sky: contributed fingerings, if the program becomes popular. Needs consent and an open licence, no automatic
    upload (the person sends the companion file), edits marked as unchecked until reviewed, and a separate decision
    on any use beyond a scoreboard or examples for an expert to review.
+8. Blue sky: tablets (not planned; thinking only, 2026-11).
+   - The program is a desktop Python and Tkinter program (`mido`, `python-rtmidi`, `pyfluidsynth`). It does not install on
+     iPadOS or Android as it is. Samsung DeX is only an Android desktop mode (Android apps in windows on a TV or monitor);
+     it does not run desktop programs, and Samsung's Linux on DeX is gone.
+   - Today: remote desktop to a computer; or show exported PDF / MusicXML on the tablet.
+   - Android quick test: Pydroid 3 runs Tkinter. Expect the window, the Score drawing and the repair, Separate Hands and
+     fingering code to work, and `python-rtmidi` (live MIDI) and `pyfluidsynth` (sound) to fail to install. A small "no sound,
+     no live MIDI" start-up mode would let the program open without them (also useful on a Linux box with no synthesizer).
+     Touch use (right-click, drag-select) and the desktop window assumptions would still be rough. Termux with an X11
+     add-on is possible but a real project; not for teachers.
+   - Android sound: the FluidSynth MIDI Synthesizer app for Android tablets plays MIDI through SoundFont files with low
+     latency and can connect to MIDI devices. A tablet version could hand its MIDI to that app instead of bundling its own
+     synthesizer. Not tested; check its licence and how another app sends it MIDI before relying on it.
+   - iPad: no Tkinter route (Pythonista and Pyto have their own interface kits). Remote desktop, a cloud desktop, or a real
+     app. If it is ever done, a web app (logic ported or run with Pyodide, browser audio, Score redrawn in SVG) would reach iPad,
+     Android, Chromebooks and desktops from one build with nothing to install. The core (MIDI reading, repair, hands, fingering,
+     export) is plain Python and could be reused; the Score drawing, dialogs, sound and file handling would be new work.
+   - Not before 0.4.1, fingering editing and lyrics.
 
 ### Design notes (agreed, not built)
 
