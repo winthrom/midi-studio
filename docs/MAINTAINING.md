@@ -1,7 +1,7 @@
 # Maintaining MIDI Studio
 
 For whoever opens this code next (including its author, a year from now). It says where things are, how the
-pieces connect, and which rules must not be broken. It describes build 22ze-294 (0.4.1 in progress). Line numbers
+pieces connect, and which rules must not be broken. It describes build 22ze-300 (0.4.1 ready to release). Line numbers
 drift with every patch, so find things by name: `grep -n "def _auto_correct_run" gui.py`.
 
 If this file and the code disagree, the code is right; please fix this file.
@@ -172,6 +172,7 @@ those first. The MusicXML export has been tested with MuseScore only.
    `publish` needs Windows and Linux to succeed; a failed Mac build does not hold the release back.
 5. Check the page: every download, the PDF, the notes text.
 6. After a release set `APP_RELEASE` back to `X.Y.Z-dev`.
+   Before step 2, rebuild the PDF (`python3 docs/dev/build_user_guide.py`) so its subtitle and footer carry the release number.
 
 Lessons from 0.4.0:
 
@@ -230,7 +231,10 @@ right section, with a note saying where it opened, and lowering always-on-top wi
 front (284 to 287); scale fingering by the textbook rule, octave pairs get no finger numbers, Playing >
 Octave Lines (two hands)… splits fast octave runs into the two hands as a suggestion (289 to 292); a one-track
 file now says it is only drawn on two staves, with a red Caution button on the Score (293); the User Guide and its
-PDF carry the build number (293).
+PDF carry the build number (293); Octave Lines finds runs followed at once by a bass note, honours a Score selection
+and offers runs of four or more pairs (292, 295, 299); Fix File > Quantize grid names fixed (they were off by a factor
+of four) and notes snapped onto a barline keep their length (296); two quick notes in one sixteenth slot are drawn as two
+(297); tablet notes (298); release preparation (300).
 
 Decided: the hand-separation prototype (event search, physical limits and continuity only) scored 90.3 per cent
 against 88.6 per cent for the current code on the development half of the PIG pieces. The gain is too small to risk
@@ -251,6 +255,10 @@ To do:
   composer writes 4/1 patterns); an earlier chord-repeat test showed no PIG gain, so test on the Etude first.
 - Check why Separate Hands put three stray notes in the right hand of the Revolutionary Etude (Octave Lines may
   already cover it).
+- Undecided: a notation-only option that draws each note at the beat and keeps the real sounding length underneath, for
+  performance files (a staccato note draws as a 1/32 now). Rationalize with keep-sound may already do this; check first.
+- After Quantize at 1/16 about 16 per cent of starts in a performance file (chet1012) stay off the grid, because a note
+  that would land on another note's slot keeps its time. Changing that rule risks splitting chords between the hands.
 - macOS 3.12 test job: GitHub's hosted runner was not acquired (infrastructure, not a test failure). Re-run later;
   the 3.11 and the Linux and Windows jobs passed.
 - Signed Windows build (SignPath, no reply yet); Mac tests (Apple Silicon, Intel); MuseScore 4 and Braille (OSMD) checks.

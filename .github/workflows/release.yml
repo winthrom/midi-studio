@@ -57,6 +57,16 @@ jobs:
           - **User Guide (PDF):** [MIDI-Studio-User-Guide.pdf]($BASE/MIDI-Studio-User-Guide.pdf)
           $MACLINE
 
+          **What is new in 0.4.1**
+
+          - Fingering: a new search built from published cost rules, scales fingered by the textbook rule, no numbers on octave pairs.
+          - Playing > Octave Lines (two hands)...: suggests splitting fast octave runs between the hands. A suggestion only; Edit > Undo takes it back.
+          - Help button and the F1 key in the program's windows, opening the User Guide at the right section.
+          - Separate Hands works on keyboard instruments only and asks which one when a file has several. A file that is one track now says it is only drawn on two staves, with a red Caution button on the Score.
+          - Two quick notes close together are drawn as two notes, not as one chord, in the Score and in print.
+          - Fix File > Quantize: the grid names now mean what they say (1/16 is a sixteenth note). Results differ from 0.4.0, which snapped to a much finer grid. A note snapped onto a barline keeps its length.
+          - A faster Score window for long pieces. The User Guide shows its version.
+
           **Windows, easiest:** download MIDI-Studio-Setup.exe and double-click it. It installs for your user only (no administrator password) and can put an icon on your desktop. Windows will probably show a window titled "Windows protected your PC" because this program is not code-signed (it says the publisher is unknown). Click the small "More info" link, then "Run anyway".
           
           **Windows, without installing:** download the zip, right-click it, choose Extract All, open the new folder and double-click MIDI-Studio.exe. Do not run it from inside the zip window.
