@@ -279,9 +279,10 @@ public source in a code comment; the data never enters the repository, tests, pr
 Saito and Yoshii, "Statistical Learning and Estimation of Piano Fingering", Information Sciences 517 (2020), wherever
 a PIG result is quoted. Odd-numbered pieces are for development, even-numbered are the untouched test half.
 
-### 0.4.2 (planned)
+### 0.4.2 (planned): security and the fixes it needs
 
-0.4.1 is tagged. Next, in this order:
+0.4.1 is tagged. 0.4.2 is the security work and any fixes it requires; the command-line mode and everything else is 0.4.3
+(decided 2026-11-19).
 
 1. **Security hardening** (first pass done 2026-11-18, code search plus reading the network and program-launch places; no
    dedicated audit yet). Found clean: no eval, exec, pickle or shell strings; programs are started with argument lists;
@@ -297,7 +298,17 @@ a PIG result is quoted. Odd-numbered pieces are for development, even-numbered a
    - Still to review: how `midi_io.py` starts TiMidity; file-path handling on open, drag-in and export; what the problem-report
      zip contains; what a deliberately damaged MIDI file does to the loader (feed it broken files).
    - On GitHub (maintainer, free for a public repository): switch on Dependabot alerts and CodeQL in Settings > Code security.
-2. **Command-line mode, so a blind person can use the repairs** (accessibility). The program cannot be used with a screen
+2. **Help with the browser closed, Linux (open fault, NOT yet investigated).** On a downloaded Linux copy on Kubuntu, asking
+   for the User Guide with the browser closed opened the browser, which then said there was no User Guide file in the
+   temporary folder. On EndeavourOS the guide opened in a new window without trouble. Find out what differs (how the
+   guide is copied to the temporary folder and how the browser is started) and fix it here. Also still untested: Windows
+   and macOS with the browser closed.
+
+### 0.4.3 (planned): the command line and the rest
+
+The command-line mode, then the Braille and tactile notes below, then the feature list after them (agreed order).
+
+1. **Command-line mode, so a blind person can use the repairs** (accessibility). The program cannot be used with a screen
    reader today: the Score is drawn on a Tkinter canvas, so a screen reader sees no notes, and Tk's own screen-reader support
    is weak (Windows partial, Linux almost none, macOS partial; not measured here). MusicXML already gives Braille via a
    converter, but not the program's tools. Design: `midistudio check song.mid` (plain-sentence summary), `fix` (the same
@@ -309,17 +320,17 @@ a PIG result is quoted. Odd-numbered pieces are for development, even-numbered a
    command line both call (this also helps the tests); a second small console `.exe` on Windows (the main one has no
    terminal); first slice `check`, `read`, `fix`, `export`. Test with one blind user and a real screen reader before
    calling it accessible. Do not design for a tactile display until a blind musician who owns one asks (see below).
-3. Braille music file: look into MusicXML to music braille (BRF), for example whether MuseScore can write it, and check it on
+2. Braille music file: look into MusicXML to music braille (BRF), for example whether MuseScore can write it, and check it on
    a real device. The NLS Braille eReader (HumanWare and Zoomax models, free to eligible US patrons through NLS) reads BRF,
    PEF, TXT, HTML, DOCX, DAISY text and PDF from an SD card or USB drive and works as a display for NVDA, JAWS and
    VoiceOver (Android over Bluetooth not supported; Linux Orca not stated). NLS BARD offers no braille music, so a BRF music
    file would fill a real gap. Whether personal files can be read from the SD card or USB is not stated outright by NLS:
    test on a real device. No Braille tester yet.
-4. Tactile graphics displays (pin grids: APH/Orbit Graphiti 60 x 40, HumanWare Monarch about 96 x 40 at about 15,000
+3. Tactile graphics displays (pin grids: APH/Orbit Graphiti 60 x 40, HumanWare Monarch about 96 x 40 at about 15,000
    dollars, Dot Pad X 30 x 10 cells at about 6,000 dollars): none mentions music notation. A grid this size shows a few
    measures at a time. Blue sky; waiting for a user who owns one. Nothing is to be sent to Orbit.
 
-### After 0.4.1 (agreed order)
+### Feature order for 0.4.3 and later (agreed; editing fingering is first)
 
 1. **Editing fingering** (before lyrics: teachers will want it). Click a note, give it a finger 1 to 5; the search
    re-runs around the forced finger so the neighbours adapt. Undo covers each edit. Open question: edits live in a
