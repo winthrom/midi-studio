@@ -279,6 +279,46 @@ public source in a code comment; the data never enters the repository, tests, pr
 Saito and Yoshii, "Statistical Learning and Estimation of Piano Fingering", Information Sciences 517 (2020), wherever
 a PIG result is quoted. Odd-numbered pieces are for development, even-numbered are the untouched test half.
 
+### 0.4.2 (planned)
+
+0.4.1 is tagged. Next, in this order:
+
+1. **Security hardening** (first pass done 2026-11-18, code search plus reading the network and program-launch places; no
+   dedicated audit yet). Found clean: no eval, exec, pickle or shell strings; programs are started with argument lists;
+   no untrusted XML is read (only the program's own MusicXML is parsed); TLS checking is never turned off; zip unpacking
+   uses Python's own extractor. To do:
+   - The Windows LilyPond download (fixed GitLab address, `_LY_DL_URL`) has no checksum and the program then runs the
+     downloaded `lilypond.exe`: pin the SHA-256 of that zip and refuse any other file (the maintainer computes the hash on
+     the real zip; it cannot be fetched from the build container).
+   - The update check opens the address from GitHub's answer: open it only if it starts with
+     `https://github.com/winthrom/midi-studio/`.
+   - MuseScore is started by a bare program name (`subprocess.Popen([bin_name, path])`): look it up with `shutil.which` and
+     use the full path.
+   - Still to review: how `midi_io.py` starts TiMidity; file-path handling on open, drag-in and export; what the problem-report
+     zip contains; what a deliberately damaged MIDI file does to the loader (feed it broken files).
+   - On GitHub (maintainer, free for a public repository): switch on Dependabot alerts and CodeQL in Settings > Code security.
+2. **Command-line mode, so a blind person can use the repairs** (accessibility). The program cannot be used with a screen
+   reader today: the Score is drawn on a Tkinter canvas, so a screen reader sees no notes, and Tk's own screen-reader support
+   is weak (Windows partial, Linux almost none, macOS partial; not measured here). MusicXML already gives Braille via a
+   converter, but not the program's tools. Design: `midistudio check song.mid` (plain-sentence summary), `fix` (the same
+   repairs as the menus, each named on the command line, suggestions off unless named; writes a new file, never changes
+   the original; prints what changed in words), `read --measures 5-8` (speakable text: hand, note, length, finger),
+   `export` (MusicXML; BRF music braille if a converter is found), `listen` last. Rules: every message is words, never colour or
+   symbols alone; long option names and a `--help` page; no questions and no windows; exit codes say whether it worked.
+   Work: pull each repair step out of the menu methods (which also open dialogs) into plain functions that the menus and the
+   command line both call (this also helps the tests); a second small console `.exe` on Windows (the main one has no
+   terminal); first slice `check`, `read`, `fix`, `export`. Test with one blind user and a real screen reader before
+   calling it accessible. Do not design for a tactile display until a blind musician who owns one asks (see below).
+3. Braille music file: look into MusicXML to music braille (BRF), for example whether MuseScore can write it, and check it on
+   a real device. The NLS Braille eReader (HumanWare and Zoomax models, free to eligible US patrons through NLS) reads BRF,
+   PEF, TXT, HTML, DOCX, DAISY text and PDF from an SD card or USB drive and works as a display for NVDA, JAWS and
+   VoiceOver (Android over Bluetooth not supported; Linux Orca not stated). NLS BARD offers no braille music, so a BRF music
+   file would fill a real gap. Whether personal files can be read from the SD card or USB is not stated outright by NLS:
+   test on a real device. No Braille tester yet.
+4. Tactile graphics displays (pin grids: APH/Orbit Graphiti 60 x 40, HumanWare Monarch about 96 x 40 at about 15,000
+   dollars, Dot Pad X 30 x 10 cells at about 6,000 dollars): none mentions music notation. A grid this size shows a few
+   measures at a time. Blue sky; waiting for a user who owns one. Nothing is to be sent to Orbit.
+
 ### After 0.4.1 (agreed order)
 
 1. **Editing fingering** (before lyrics: teachers will want it). Click a note, give it a finger 1 to 5; the search
