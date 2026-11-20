@@ -24392,9 +24392,10 @@ class MidisoftStudio:
         _note, MidisoftStudio._guide_copy_note = MidisoftStudio._guide_copy_note, None
         if _note:
             try:
-                self.root.after(1200, lambda: messagebox.showinfo(
+                messagebox.showinfo(   # v22ze-305: shown first and waited for, so it cannot fight the viewer for focus
                     "User Guide", "A copy of the User Guide is now in this folder:\n\n%s\n\nYou can open it there "
-                    "any time, without running MIDI Studio." % os.path.dirname(_note), parent=self.root))
+                    "any time, without running MIDI Studio.\n\nClick OK and the guide will open." % os.path.dirname(_note),
+                    parent=self.root)
             except Exception:
                 pass
 
