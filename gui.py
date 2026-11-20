@@ -24346,6 +24346,33 @@ class MidisoftStudio:
                "to ensure only one TiMidity instance is active."
                if sys.platform.startswith("linux") else ""),parent=self.root)
 
+    _guide_copy_note = None
+
+    @staticmethod
+    def _guide_browser_copy(path, home=None, roots=None):
+        # v22ze-304: a snap browser (Kubuntu's default Firefox) cannot see this program's /tmp, where an AppImage
+        # mounts itself, so it says the guide does not exist.  Give it a copy in a plain, non-hidden home folder.
+        # Only when the guide is under a temporary folder or the AppImage's folder; any failure keeps the old path.
+        try:
+            if not sys.platform.startswith("linux") or not path:
+                return path
+            import shutil, tempfile
+            if roots is None:
+                roots = [tempfile.gettempdir(), "/tmp", os.environ.get("APPDIR", "")]
+            real = os.path.realpath(path)
+            if not any(r and (real == os.path.realpath(r) or real.startswith(os.path.realpath(r) + os.sep)) for r in roots):
+                return path
+            home = home or os.path.expanduser("~")
+            d = os.path.join(home, "Documents", "MIDI-Studio")
+            os.makedirs(d, exist_ok=True)
+            dst = os.path.join(d, os.path.basename(path))
+            if not os.path.isfile(dst) or os.path.getsize(dst) != os.path.getsize(path):
+                shutil.copyfile(path, dst)
+                MidisoftStudio._guide_copy_note = dst
+            return dst
+        except Exception:
+            return path
+
     def _open_user_guide(self, anchor=None):
         # v22ze-197: Help > User Guide - the PDF next to the program, else the online copy
         # v22ze-216: with `anchor`, open the PDF in a web browser at that section.  (The system's
@@ -24361,6 +24388,15 @@ class MidisoftStudio:
             dirs.append(sys._MEIPASS)
         dirs += [here, os.path.join(here, "docs"), os.path.join(os.path.dirname(here), "docs")]
         path = next((os.path.join(d, name) for d in dirs if os.path.isfile(os.path.join(d, name))), None)
+        path = self._guide_browser_copy(path)
+        _note, MidisoftStudio._guide_copy_note = MidisoftStudio._guide_copy_note, None
+        if _note:
+            try:
+                self.root.after(1200, lambda: messagebox.showinfo(
+                    "User Guide", "A copy of the User Guide is now in this folder:\n\n%s\n\nYou can open it there "
+                    "any time, without running MIDI Studio." % os.path.dirname(_note), parent=self.root))
+            except Exception:
+                pass
 
         def clean_env():   # an AppImage must not hand its own libraries to the browser it starts
             env = dict(os.environ)
