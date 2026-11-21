@@ -1037,6 +1037,34 @@ def _ly_download_and_setup(url, progress, cancel):
             shutil.rmtree(dest, ignore_errors=True)
 
 
+def _ly_install_command(osrelease=None):
+    # v22ze-306: the package-manager line for this computer, or None when we cannot tell.
+    # Linux distributions differ in how current their LilyPond is, so the system's own package is the best source.
+    if sys.platform == "darwin":
+        return "brew install lilypond"
+    if os.name == "nt":
+        return None
+    try:
+        txt = osrelease if osrelease is not None else open("/etc/os-release", encoding="utf-8").read()
+    except Exception:
+        return None
+    ids = set()
+    for line in txt.splitlines():
+        k, _, v = line.partition("=")
+        if k.strip() in ("ID", "ID_LIKE"):
+            ids.update(v.strip().strip('"').strip("'").lower().split())
+    for names, cmd in (
+            ({"debian", "ubuntu", "linuxmint", "pop", "raspbian", "kubuntu", "neon"}, "sudo apt install lilypond"),
+            ({"arch", "manjaro", "endeavouros", "garuda", "cachyos"}, "sudo pacman -S lilypond"),
+            ({"fedora", "rhel", "centos", "rocky", "almalinux"}, "sudo dnf install lilypond"),
+            ({"opensuse", "suse", "sles", "opensuse-leap", "opensuse-tumbleweed"}, "sudo zypper install lilypond"),
+            ({"alpine"}, "sudo apk add lilypond"),
+            ({"void"}, "sudo xbps-install lilypond")):
+        if ids & names:
+            return cmd
+    return None
+
+
 def _ly_missing_dialog(root):
     # One clear dialog: download it (Windows), point to an existing copy, or skip.
     # Returns the lilypond path, or None.
@@ -1153,11 +1181,48 @@ def _ly_missing_dialog(root):
     b.pack(fill=tk.X, pady=3)
     all_btns.append(b)
     if os.name != "nt":
-        tk.Label(dlg, text="  Linux : apt install lilypond   /   pacman -S lilypond\n"
-                           "  Mac   : brew install lilypond",
-                 bg="#161b22", fg=MUTED, font=("TkFixedFont", 9), justify=tk.LEFT,
-                 padx=12, pady=6).pack(fill=tk.X, padx=28, pady=(4, 6))
-    tk.Button(dlg, text="Open the LilyPond website", bg=BG, fg="#58a6ff", relief=tk.FLAT,
+        # v22ze-306: on Linux and Mac the system's own package is the best way to get LilyPond.
+        _cmd = _ly_install_command()
+        tk.Label(dlg, text="Easiest: install it with your system's package manager.\n"
+                           "Open a terminal, run this line, then click Check again.",
+                 bg=BG, fg=FG, font=("TkDefaultFont", 10), justify=tk.CENTER).pack(padx=28, pady=(8, 4))
+        if _cmd:
+            _box = tk.Entry(dlg, font=("TkFixedFont", 11), justify=tk.CENTER, bg="#161b22", fg="#f0f6fc",
+                            readonlybackground="#161b22", relief=tk.FLAT)
+            _box.insert(0, _cmd)
+            _box.configure(state="readonly")
+            _box.pack(fill=tk.X, padx=28, pady=(0, 4), ipady=6)
+        else:
+            tk.Label(dlg, text="  Debian, Ubuntu, Kubuntu, Mint : sudo apt install lilypond\n"
+                               "  Arch, EndeavourOS, Manjaro   : sudo pacman -S lilypond\n"
+                               "  Fedora                       : sudo dnf install lilypond\n"
+                               "  Mac                          : brew install lilypond",
+                     bg="#161b22", fg=FG, font=("TkFixedFont", 9), justify=tk.LEFT,
+                     padx=12, pady=6).pack(fill=tk.X, padx=28, pady=(0, 4))
+
+        def _copy_cmd():
+            try:
+                dlg.clipboard_clear()
+                dlg.clipboard_append(_cmd or "sudo apt install lilypond")
+            except Exception:
+                pass
+
+        def _check_again():
+            p = _find_lilypond()
+            if p:
+                finish(p)
+            else:
+                messagebox.showinfo("LilyPond", "LilyPond is still not found.\nWhen the install has finished, "
+                                    "click Check again.", parent=dlg)
+        _row = tk.Frame(dlg, bg=BG)
+        _row.pack(padx=28, pady=(0, 6))
+        if _cmd:
+            tk.Button(_row, text="Copy command", bg="#21262d", fg=FG, activebackground="#30363d",
+                      command=_copy_cmd, **bs).pack(side=tk.LEFT, padx=4)
+        tk.Button(_row, text="Check again", bg="#238636", fg="white", activebackground="#2ea043",
+                  command=_check_again, **bs).pack(side=tk.LEFT, padx=4)
+    tk.Button(dlg, text=("Other ways to get LilyPond (website)" if os.name != "nt" else "Open the LilyPond website"),
+              bg=BG, fg="#58a6ff", relief=tk.FLAT,
               activebackground=BG, cursor="hand2", font=("TkDefaultFont", 9, "underline"),
               command=lambda: webbrowser.open("https://lilypond.org")).pack(pady=(0, 12))
 
