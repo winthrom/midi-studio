@@ -380,6 +380,17 @@ The command-line mode, then the Braille and tactile notes below, then the featur
      export) is plain Python and could be reused; the Score drawing, dialogs, sound and file handling would be new work.
    - Not before 0.4.1, fingering editing and lyrics.
 
+### Cleanup after 0.4.2 (agreed 2026-11-21; not a feature, not security)
+
+- **Look for dead (unused) code.** Read-only first: run `vulture` (functions and classes nothing calls) and pylint's unused
+  checks (imports, variables, arguments; pylint already runs in `lint.yml`, check how strictly) over `gui.py` (about 24,000
+  lines, some leftovers from earlier versions are likely) and the other files, and give the maintainer a short list of
+  likely dead code. Expect false alarms in a Tk program (buttons and menus call functions by name, and tests call some
+  directly), so every hit needs a human look; nothing is deleted without showing it first. This is not the same as test
+  coverage (which lines the tests run): dead code is never run, but untested code is often in daily use.
+- Codecov was removed in v22ze-310 (the project was never set up there, nobody read the reports). If other people start
+  contributing, coverage numbers become more useful: add the step back with a Codecov token.
+
 ### Design notes (agreed, not built)
 
 - **Printed score or performance.** A MIDI file does not say whether it was sequenced from a printed score. Plan: a question
