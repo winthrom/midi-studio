@@ -22009,7 +22009,8 @@ class MidisoftStudio:
             tk.Label(body, text=("No keyboard instrument (piano, harpsichord, organ, accordion) was found in this file.\n"
                                  "Pick one only if it really is played with two hands."),
                      bg=BG, fg="#d29922", justify=tk.LEFT).pack(anchor="w", padx=16, pady=(0, 8))
-        cont = tk.Button(bot, text="Continue", relief=tk.FLAT, padx=14, pady=5, bg="#21262d", fg=FG,
+        bfrm = tk.Frame(bot, bg=BG)   # v22ze-307: the button row is made FIRST and Continue lives in it (it was hidden before)
+        cont = tk.Button(bfrm, text="Continue", relief=tk.FLAT, padx=14, pady=5, bg="#21262d", fg=FG,
                          activebackground="#30363d", activeforeground=FG,
                          state="normal")
         for r in rows:
@@ -22026,9 +22027,9 @@ class MidisoftStudio:
             dlg.destroy()
 
         cont.configure(command=_ok)
-        bfrm = tk.Frame(bot, bg=BG)
         bfrm.pack(pady=(10, 12))
-        cont.pack(in_=bfrm, side=tk.LEFT, padx=6)
+        cont.pack(side=tk.LEFT, padx=6)
+        dlg.bind("<Return>", lambda _e: _ok())
         tk.Button(bfrm, text="Cancel", command=dlg.destroy, relief=tk.FLAT, padx=14, pady=5, bg="#21262d", fg=FG,
                   activebackground="#30363d", activeforeground=FG).pack(side=tk.LEFT, padx=6)
         self._dialog_help_button(dlg, bfrm, "separate-hands-piano-organ-accordion")   # v22ze-284
