@@ -865,6 +865,13 @@ _LY_VERSION_CACHE = []
 _LY_DL_URL = ("https://gitlab.com/api/v4/projects/lilypond%2Flilypond/packages/"
               "generic/lilypond/2.26.0/lilypond-2.26.0-mingw-x86_64.zip")
 _LY_DL_MB = 45
+# v22ze-308: the checksum (SHA-256) of each file we are willing to download, keyed by its exact address.  The address
+# names the version and the platform, so a new version or platform is a new line here.  When _LY_DL_URL changes, add
+# the new file's checksum in the same commit (sha256sum / certutil -hashfile on the real file).  Computed by the
+# maintainer on 2026-11-20 for lilypond-2.26.0-mingw-x86_64.zip.
+_LY_PINS = {
+    _LY_DL_URL: "14ddddc233b469ef60d4ffc1c7f35520f15ac6b58e38cab458c60bdcc3af650c",
+}
 _LY_FOUND = []
 
 
@@ -977,7 +984,7 @@ def _find_lilypond():
 def _ly_download_and_setup(url, progress, cancel):
     # Download + unpack + check.  Returns (exe_path, None) or (None, message).
     # progress(phase, done, total) and cancel() are supplied by the caller.
-    import urllib.request, zipfile, shutil
+    import urllib.request, zipfile, shutil, hashlib
     d = _ly_data_dir()
     tmp = os.path.join(d, "download.part")
     dest = os.path.join(d, "unpack")
@@ -987,6 +994,10 @@ def _ly_download_and_setup(url, progress, cancel):
             os.makedirs(d, exist_ok=True)
         except Exception as e:
             return None, "Could not create the folder " + d + " (" + str(e) + ")."
+        want = _LY_PINS.get(url)   # v22ze-308: nothing is downloaded, unpacked or run without a known checksum
+        if not want:
+            return None, "There is no checksum on file for this LilyPond download, so it was not downloaded."
+        hasher = hashlib.sha256()
         req = urllib.request.Request(url, headers={"User-Agent": "MIDI-Studio"})
         with urllib.request.urlopen(req, timeout=30) as r, open(tmp, "wb") as f:
             total = int(r.headers.get("Content-Length") or 0)
@@ -998,8 +1009,13 @@ def _ly_download_and_setup(url, progress, cancel):
                 if not chunk:
                     break
                 f.write(chunk)
+                hasher.update(chunk)
                 got += len(chunk)
                 progress("Downloading", got, total)
+        if hasher.hexdigest().lower() != want.lower():
+            return None, ("The downloaded file does not match the checksum this program expects, so it was NOT used. "
+                          "It may be damaged or may have been altered. Try again. If it keeps happening, install "
+                          "LilyPond yourself from lilypond.org and use \"I already have it - find lilypond...\".")
         if not zipfile.is_zipfile(tmp):
             return None, "The downloaded file was not a valid zip file."
         if os.path.isdir(dest):

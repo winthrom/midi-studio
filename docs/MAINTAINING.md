@@ -288,9 +288,12 @@ a PIG result is quoted. Odd-numbered pieces are for development, even-numbered a
    dedicated audit yet). Found clean: no eval, exec, pickle or shell strings; programs are started with argument lists;
    no untrusted XML is read (only the program's own MusicXML is parsed); TLS checking is never turned off; zip unpacking
    uses Python's own extractor. To do:
-   - The Windows LilyPond download (fixed GitLab address, `_LY_DL_URL`) has no checksum and the program then runs the
-     downloaded `lilypond.exe`: pin the SHA-256 of that zip and refuse any other file (the maintainer computes the hash on
-     the real zip; it cannot be fetched from the build container).
+   - DONE (v22ze-308): the Windows LilyPond download (fixed GitLab address, `_LY_DL_URL`) is checked against a pinned
+     SHA-256 (`_LY_PINS`, keyed by the exact address) before anything is unpacked or run; a mismatch or an address with no
+     entry is refused. The hash was computed by the maintainer on 2026-11-20 on a Linux machine (a file he downloaded
+     himself; it cannot be fetched from the build container). NOT YET TRIED on Windows: run "Download and set it up for
+     me" once on a real Windows machine and confirm it passes. Updating LilyPond later means a new address AND a new line
+     in `_LY_PINS`, in the same commit.
    - The update check opens the address from GitHub's answer: open it only if it starts with
      `https://github.com/winthrom/midi-studio/`.
    - MuseScore is started by a bare program name (`subprocess.Popen([bin_name, path])`): look it up with `shutil.which` and
@@ -298,10 +301,15 @@ a PIG result is quoted. Odd-numbered pieces are for development, even-numbered a
    - Still to review: how `midi_io.py` starts TiMidity; file-path handling on open, drag-in and export; what the problem-report
      zip contains; what a deliberately damaged MIDI file does to the loader (feed it broken files).
    - On GitHub (maintainer, free for a public repository): switch on Dependabot alerts and CodeQL in Settings > Code security.
-2. **Help with the browser closed, Linux (open fault, NOT yet investigated).** On a downloaded Linux copy on Kubuntu, asking
+2. **Help with the browser closed, Linux (FIXED, v22ze-304/305, tested 2026-11-20 on two Kubuntu machines, one with snap
+   Firefox).** Cause: the AppImage mounts itself under /tmp, and a snap browser cannot see that /tmp. The guide is now copied
+   to ~/Documents/MIDI-Studio and a notice (shown first, then the guide opens) says so. Also fixed in 0.4.2: the
+   "LilyPond Not Found" dialog on Linux and Mac now leads with the install command for the person's own system (306), and
+   the Separate Hands "which instrument?" dialog had no Continue button, hidden under its button row (307; affected every
+   platform since v283). Original report: On a downloaded Linux copy on Kubuntu, asking
    for the User Guide with the browser closed opened the browser, which then said there was no User Guide file in the
    temporary folder. On EndeavourOS the guide opened in a new window without trouble. Find out what differs (how the
-   guide is copied to the temporary folder and how the browser is started) and fix it here. Also still untested: Windows
+   guide is copied to the temporary folder and how the browser is started) and fix it here. Still untested: Windows
    and macOS with the browser closed.
 
 ### 0.4.3 (planned): the command line and the rest
