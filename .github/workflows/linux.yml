@@ -11,11 +11,11 @@ jobs:
   appimage:
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Cache libfluidsynth build
         id: libcache
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: packaging/linux/payload/lib
           key: linux-libs-${{ hashFiles('packaging/linux/build_fluidsynth.sh', 'packaging/linux/collect_libs.sh') }}
@@ -52,7 +52,7 @@ jobs:
             echo "$out" | grep -qF "$need" || { echo "selftest is missing: $need"; exit 1; }
           done
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: MIDI-Studio-linux-x86_64
           path: dist/linux/MIDI-Studio-x86_64.AppImage
@@ -66,7 +66,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v7
         with:
           name: MIDI-Studio-linux-x86_64
           path: dl

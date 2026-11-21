@@ -12,9 +12,9 @@ jobs:
     # experimental: a failure here is visible in the log but does not turn the commit red
     continue-on-error: true
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
 
@@ -65,7 +65,7 @@ jobs:
           (cd stage && ditto -c -k --keepParent MIDI-Studio ../MIDI-Studio-macos-arm64.zip)
           ls -l MIDI-Studio-macos-arm64.zip
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: MIDI-Studio-macos-arm64
           path: MIDI-Studio-macos-arm64.zip
@@ -79,7 +79,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v7
         with:
           name: MIDI-Studio-macos-arm64
           path: dl
@@ -104,9 +104,9 @@ jobs:
     runs-on: macos-15-intel
     continue-on-error: true
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
 
@@ -179,7 +179,7 @@ jobs:
           (cd stage && ditto -c -k --keepParent MIDI-Studio ../MIDI-Studio-macos-x86_64.zip)
           ls -l MIDI-Studio-macos-x86_64.zip
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: MIDI-Studio-macos-x86_64
           path: MIDI-Studio-macos-x86_64.zip
@@ -193,7 +193,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v7
         with:
           name: MIDI-Studio-macos-x86_64
           path: dl
