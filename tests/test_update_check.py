@@ -25,7 +25,7 @@ class TestUpdateCheck(unittest.TestCase):
         self.assertFalse(update_is_newer("junk", "0.3.3"))
 
     def test_fetch_from_local_server(self):
-        body = json.dumps({"tag_name": "v0.4.1", "html_url": "http://x/y", "name": "Test"}).encode()
+        body = json.dumps({"tag_name": "v0.4.1", "html_url": "https://github.com/winthrom/midi-studio/releases/tag/v0.4.1", "name": "Test"}).encode()
 
         class H(BaseHTTPRequestHandler):
             def do_GET(self):
@@ -40,7 +40,8 @@ class TestUpdateCheck(unittest.TestCase):
         finally:
             srv.shutdown()
         self.assertEqual(r["version"], "0.4.1")
-        self.assertEqual(r["url"], "http://x/y")
+        # v22ze-312: only the project's own address is passed on (see tests/test_safe_urls.py for the rest)
+        self.assertEqual(r["url"], "https://github.com/winthrom/midi-studio/releases/tag/v0.4.1")
 
     def test_fetch_failure_raises(self):
         with self.assertRaises(Exception):

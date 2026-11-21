@@ -11,10 +11,10 @@ import time
 from datetime import datetime
 
 # Application identity (update APP_VERSION each release)
-APP_VERSION = "22ze-308"
+APP_VERSION = "22ze-312"
 APP_RELEASE = "0.4.2-dev"
 APP_FULL_NAME = "Midi-Studio — a Synthesizer in the Spirit of MidiSoft Studio4"
-APP_TIMESTAMP = "2026-11-20"  # build date (was: launch time)
+APP_TIMESTAMP = "2026-11-21"  # build date (was: launch time)
 APP_TITLE = f"{APP_FULL_NAME}  —  v{APP_RELEASE} (build {APP_VERSION})  {APP_TIMESTAMP}"
 
 # v22ze-218: APP_RELEASE (above) is the number users see and tags are named after; "-dev" while the
@@ -37,6 +37,19 @@ def update_is_newer(latest, current):
     if not a or not b:
         return False
     return a > b
+
+
+_RELEASE_PREFIX = "https://github.com/winthrom/midi-studio/"
+_RELEASE_FALLBACK = "https://github.com/winthrom/midi-studio/releases/latest"
+
+
+def safe_release_url(u):
+    """v22ze-312: the address to open for an update, or the project's own releases page.  An address is accepted only if
+    it is text, begins with the project's own GitHub address, and has no spaces or control characters."""
+    if isinstance(u, str) and u.startswith(_RELEASE_PREFIX) and len(u) < 300 \
+            and all(32 < ord(c) < 127 for c in u):
+        return u
+    return _RELEASE_FALLBACK
 
 
 def fetch_latest_release(url=None, timeout=6):
@@ -74,7 +87,7 @@ def fetch_latest_release(url=None, timeout=6):
     return {
         "tag": tag,
         "version": ".".join(str(x) for x in release_tuple(tag)),
-        "url": d.get("html_url") or "https://github.com/winthrom/midi-studio/releases/latest",
+        "url": safe_release_url(d.get("html_url")),
         "name": d.get("name") or tag,
     }
 

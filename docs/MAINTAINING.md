@@ -294,10 +294,12 @@ a PIG result is quoted. Odd-numbered pieces are for development, even-numbered a
      himself; it cannot be fetched from the build container). NOT YET TRIED on Windows: run "Download and set it up for
      me" once on a real Windows machine and confirm it passes. Updating LilyPond later means a new address AND a new line
      in `_LY_PINS`, in the same commit.
-   - The update check opens the address from GitHub's answer: open it only if it starts with
-     `https://github.com/winthrom/midi-studio/`.
-   - MuseScore is started by a bare program name (`subprocess.Popen([bin_name, path])`): look it up with `shutil.which` and
-     use the full path.
+   - DONE (v22ze-312): the update check opens the address from GitHub's answer only if it starts with
+     `https://github.com/winthrom/midi-studio/` (`sys_platform.safe_release_url`, checked when the answer is read and
+     again before the browser is opened); anything else becomes the project's releases page.
+   - DONE (v22ze-312): MuseScore is looked up with `shutil.which` and started by its full path (`_musescore_paths`). On
+     Windows and macOS MuseScore is usually not on the search path, so the person still gets the "open it yourself"
+     instructions there; looking in the usual install folders is a possible later improvement.
    - Still to review: how `midi_io.py` starts TiMidity; file-path handling on open, drag-in and export; what the problem-report
      zip contains; what a deliberately damaged MIDI file does to the loader (feed it broken files).
    - On GitHub (maintainer, free for a public repository): switch on Dependabot alerts and CodeQL in Settings > Code security.

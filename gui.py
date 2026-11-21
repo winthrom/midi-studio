@@ -277,6 +277,7 @@ from sys_platform import (
     LIONS_DONATE_URL,
     LIONS_WEBSITE_URL,
     fetch_latest_release,
+    safe_release_url,
     update_is_newer,
 )
 
@@ -1051,6 +1052,18 @@ def _ly_download_and_setup(url, progress, cancel):
             pass
         if exe is None:
             shutil.rmtree(dest, ignore_errors=True)
+
+
+def _musescore_paths(which=None):
+    # v22ze-312: full paths of the MuseScore programs found on this computer (shutil.which), best name first.
+    import shutil
+    which = which or shutil.which
+    out = []
+    for name in ("mscore4", "musescore4", "mscore", "musescore", "MuseScore4"):
+        p = which(name)
+        if p and p not in out:
+            out.append(p)
+    return out
 
 
 def _ly_install_command(osrelease=None):
@@ -21376,14 +21389,13 @@ class MidisoftStudio:
             return
 
         # Try to open MuseScore automatically; fall back to instructions.
-        musescore_bins = ["mscore4", "musescore4", "mscore", "musescore", "MuseScore4"]
         launched = False
-        for bin_name in musescore_bins:
+        for exe in _musescore_paths():   # v22ze-312: full path from shutil.which, not a bare name
             try:
-                subprocess.Popen([bin_name, path])
+                subprocess.Popen([exe, path])
                 launched = True
                 break
-            except FileNotFoundError:
+            except OSError:
                 continue
 
         if launched:
@@ -24611,7 +24623,7 @@ class MidisoftStudio:
                         "(Your pieces and settings are kept when you install the new version.)",
                         parent=self.root):
                     import webbrowser
-                    webbrowser.open(info["url"])
+                    webbrowser.open(safe_release_url(info["url"]))
             elif manual:
                 messagebox.showinfo("Check for Updates",
                                     f"You have the newest version ({APP_RELEASE}).", parent=self.root)
