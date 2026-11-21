@@ -53,9 +53,3 @@ jobs:
     - name: Run unit tests
       run: |
         pytest tests/ -v --cov=. --cov-report=xml --tb=short
-
-    - name: Upload coverage
-      uses: codecov/codecov-action@v5
-      with:
-        files: ./coverage.xml
-        fail_ci_if_error: false
