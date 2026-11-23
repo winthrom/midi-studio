@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import struct
 import bisect
 import math
 import os
@@ -1052,6 +1053,16 @@ def _ly_download_and_setup(url, progress, cancel):
             pass
         if exe is None:
             shutil.rmtree(dest, ignore_errors=True)
+
+
+def _load_error_text(exc):
+    # v22ze-314: what the person reads when a file cannot be read: one plain sentence, then a short technical detail
+    # (damaged files make the MIDI library print huge numbers; keep it short).
+    detail = " ".join(str(exc).split())
+    if len(detail) > 160:
+        detail = detail[:157] + "..."
+    return ("This file could not be opened. It may be damaged, or it may not be a standard MIDI file.\n\n"
+            "Detail: %s" % (detail or type(exc).__name__))
 
 
 def _musescore_paths(which=None):
@@ -3520,6 +3531,13 @@ class Song:
         cannot decode (e.g. "3 flats and mode 255"), repair that one meta
         message in memory (major key, or C if the count is impossible) and
         read it again.  The file on disk is never changed."""
+        # v22ze-314: a header that claims to be gigantic made the MIDI library try to reserve that much memory (found by
+        # feeding the loader damaged files); a real MIDI header is 6 bytes long.
+        with open(path, "rb") as _fh:
+            _head = _fh.read(8)
+        if _head[:4] == b"MThd" and len(_head) == 8 and int.from_bytes(_head[4:8], "big") > 1000:
+            raise ValueError("The MIDI header of this file is damaged (it claims to be %d bytes long; a real one is 6)."
+                             % int.from_bytes(_head[4:8], "big"))
         try:
             return mido.MidiFile(path)
         except Exception as exc:
@@ -3546,7 +3564,12 @@ class Song:
 
     @classmethod
     def from_mid(cls, path):
-        mid = cls._read_midi_tolerant(path)
+        try:
+            mid = cls._read_midi_tolerant(path)
+        except (FileNotFoundError, PermissionError, IsADirectoryError):
+            raise
+        except (OSError, EOFError, ValueError, IndexError, KeyError, struct.error) as _exc314:
+            raise ValueError(_load_error_text(_exc314)) from _exc314   # v22ze-314: one plain sentence for any damaged file
         song = cls()
         song.filename = path
         song.ticks_per_beat = mid.ticks_per_beat

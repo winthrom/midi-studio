@@ -301,8 +301,16 @@ roll plan below (decided 2026-11-21). Fixes to a patch are numbered with letters
    - DONE (v22ze-312): MuseScore is looked up with `shutil.which` and started by its full path (`_musescore_paths`). On
      Windows and macOS MuseScore is usually not on the search path, so the person still gets the "open it yourself"
      instructions there; looking in the usual install folders is a possible later improvement.
+   - DONE (v22ze-314): damaged MIDI files. 4,505 deliberately damaged files (truncated, corrupted bytes, lying chunk
+     lengths, absurd timing values, 33 hand-made cases such as a 5-byte delta time, tempo 0, division 0, 200,000 notes
+     at once) went through `Song.from_mid` and the quick checks that follow a load: no hangs, no runaway recursion; every
+     failure was an ordinary exception (which the Open command already shows in a message box). One real problem: a
+     header claiming to be gigantic (a 14-byte file saying "4 GB") made the MIDI library reserve that much memory.
+     Now refused up front (a real header is 6 bytes), and every reading problem shows one plain sentence plus a short
+     detail. NOT covered: the Score drawing, Separate Hands and Quantize on strange-but-valid files (tempo 0, division 1,
+     many notes): a second, deeper round could feed those through the tools.
    - Still to review: how `midi_io.py` starts TiMidity; file-path handling on open, drag-in and export; what the problem-report
-     zip contains; what a deliberately damaged MIDI file does to the loader (feed it broken files).
+     zip contains.
    - On GitHub (maintainer, free for a public repository): switch on Dependabot alerts and CodeQL in Settings > Code security.
 2. **Help with the browser closed, Linux (FIXED, v22ze-304/305, tested 2026-11-20 on two Kubuntu machines, one with snap
    Firefox).** Cause: the AppImage mounts itself under /tmp, and a snap browser cannot see that /tmp. The guide is now copied
