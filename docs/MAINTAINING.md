@@ -281,8 +281,9 @@ a PIG result is quoted. Odd-numbered pieces are for development, even-numbered a
 
 ### 0.4.2 (planned): security and the fixes it needs
 
-0.4.1 is tagged. 0.4.2 is the security work and any fixes it requires; the command-line mode and everything else is 0.4.3
-(decided 2026-11-19).
+0.4.1 is tagged. 0.4.2 is the security work and any fixes it requires (decided 2026-11-19), plus steps 1 to 3 of the piano
+roll plan below (decided 2026-11-21). Fixes to a patch are numbered with letters (312a, 312b ...). Remaining security work
+(about 3 or 4 patches): how `midi_io.py` starts TiMidity, file-path handling, the problem-report zip, broken MIDI files.
 
 1. **Security hardening** (first pass done 2026-11-18, code search plus reading the network and program-launch places; no
    dedicated audit yet). Found clean: no eval, exec, pickle or shell strings; programs are started with argument lists;
@@ -316,7 +317,10 @@ a PIG result is quoted. Odd-numbered pieces are for development, even-numbered a
 
 ### 0.4.3 (planned): the command line and the rest
 
-The command-line mode, then the Braille and tactile notes below, then the feature list after them (agreed order).
+Decided 2026-11-21: 0.4.3 starts with steps 4 to 7 of the piano roll plan (finger numbers, reach check, stylised hand,
+fingering editing on the roll with the companion file); feature 1 below (Editing fingering) is the same work as step 7.
+Then the command-line mode, the Braille and tactile notes below, and the feature list after them (agreed order). Which
+release carries the command line is not yet decided.
 
 1. **Command-line mode, so a blind person can use the repairs** (accessibility). The program cannot be used with a screen
    reader today: the Score is drawn on a Tkinter canvas, so a screen reader sees no notes, and Tk's own screen-reader support
@@ -381,6 +385,46 @@ The command-line mode, then the Braille and tactile notes below, then the featur
      Android, Chromebooks and desktops from one build with nothing to install. The core (MIDI reading, repair, hands, fingering,
      export) is plain Python and could be reused; the Score drawing, dialogs, sound and file handling would be new work.
    - Not before 0.4.1, fingering editing and lyrics.
+
+### Piano roll plan (agreed 2026-11-21; steps 1 to 3 are in 0.4.2, steps 4 to 7 in 0.4.3)
+
+What the roll does today (read from the code 2026-11-21; Undo not yet confirmed by a test): it shows ONE track in one colour
+(a selected note is yellow). A click on an empty spot adds a short (1/16) note; a right-click on a note deletes it; the
+toolbar has Select All, Delete, Quantize (raw ticks) and Transpose. None of these is recorded for Undo, and the User Guide
+describes the roll as a way of looking only. The maintainer uses it only for viewing.
+
+1. **View-only by default** with an "Edit notes" switch that turns on click-to-add and right-click-to-delete; every roll edit
+   goes on the Undo list. (A fix: a stray click must not change the music.) Later, note editing is dropped from the roll
+   and the only editing there is fingering (step 7), only while fingering numbers are shown.
+2. **Hand colours**: when a file has a right-hand and a left-hand track, an optional "Show both hands" draws both, one
+   colour each. Blue for the left hand and orange for the right (not red against green: about 1 man in 12 cannot tell
+   those apart; blue and orange also hold up in a black-and-white print). Off by default; the Score is unchanged (the
+   grand staff already shows the hands). The selected note keeps a yellow outline.
+3. **Vertical view, view-only**: time runs down, the keyboard sits at the bottom, notes fall onto it while playing, keys
+   light up; hand colours apply. A second way of drawing the same roll, not a second window. The roll's drawing code
+   assumes time runs left to right (`_tx`, `_py`, `_xt`, `_yp`), so this redoes the drawing and the mouse handling.
+4. **Finger numbers** on the roll notes and on the keys when played. Carries the "suggestion, check it" caution.
+5. **Reach check**: from the finger numbers and key positions, mark notes that need a stretch beyond a comfortable reach
+   for a hand-size setting, and awkward moves (thumb under, finger passing over, a hand jump faster than a hand can move
+   in the time available). Marks use a shape or outline as well as colour. Reach figures need a public source named in a
+   code comment. Compare with the effort cost the fingering search uses: they can disagree, which is the point (check
+   what the search really measures before claiming it looks for the least difficult fingering).
+6. **Stylised hand** at each strike (five fingertip dots per hand over the keys), shown only as a snapshot at each strike:
+   nothing between strikes is known, so no invented in-between movement. The time between strikes is used as a computed
+   measure (distance and time available). A smooth, clearly schematic glide is an optional later extra. A drawn,
+   realistic hand is not planned. The picture needs the "suggestion, check it" caution because a moving hand looks authoritative.
+7. **Fingering editing on the roll**, with the companion file (a MIDI file has nowhere to keep fingering; this is feature 1
+   in the list below).
+
+Estimate: about 13 to 20 patches in all (steps 1 to 3 about 5 to 9). The maintainer tests the `dev-build` after steps 1, 2
+and 3. Each step also updates the User Guide and adds tests.
+
+**Considered, not planned (2026-11-21): video to hands.** Using a video of the player (own camera over own keyboard, audio for
+the notes and timing) to decide which hand played each note, and perhaps the fingers. Reasons: two heavy machine-learning
+libraries (audio transcription and hand tracking), larger installers on every platform, needs a straight-down camera
+angle, crossing hands confuse trackers, and Separate Hands already does well from the notes alone; typing fingerings is
+covered by step 7. Scraping YouTube is out (terms of use and copyright). Reopen if teachers ask. For getting MIDI from
+a recording, services such as pianotomidi.app exist (paid, closed, no API, uploads audio, we have not tested it).
 
 ### Cleanup after 0.4.2 (agreed 2026-11-21; not a feature, not security)
 
