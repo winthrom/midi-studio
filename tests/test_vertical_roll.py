@@ -33,8 +33,10 @@ app = A(); app.song = song; app.transport = T(); app._open_windows = []; app._sc
 root.geometry("200x100+0+0")
 vr = gui.VerticalRollView(root, app)
 vr.geometry("1100x720+0+0")
-for _ in range(10):
-    root.update()
+import time
+_end = time.time() + 0.6        # the first draw is immediate, a resize is drawn 0.15 s after it stops
+while time.time() < _end:
+    root.update(); time.sleep(0.01)
 c = vr.canvas
 H = c.winfo_height()
 y_now = H - vr.KEYB_H
@@ -64,7 +66,7 @@ vr.update_playhead(500)      # now the right-hand note at 480 and the left-hand 
 root.update()
 if len(c.find_withtag("lit")) < 3:
     fail("keys were not lit while playing")
-vr.update_playhead(3000)     # past the end
+time.sleep(0.12); vr.update_playhead(3000)     # past the end
 root.update()
 if c.find_withtag("lit"):
     fail("keys stay lit after the notes ended")

@@ -8975,6 +8975,10 @@ class VerticalRollView(tk.Toplevel):
         self._geo = None
         self._last_key = None
         self._lit_prev = None
+        self._cfg_job = None
+        self._drawn_size = None
+        self._last_play_draw = 0.0
+        self._play_interval = 0.033
         nm = app.song.title or os.path.basename(app.song.filename or "") or "untitled"
         self.title("Piano Roll (vertical) — " + nm)
         self.geometry("1100x720")
@@ -8991,7 +8995,7 @@ class VerticalRollView(tk.Toplevel):
         self._legend.pack(side=tk.RIGHT, padx=6)
         self.canvas = tk.Canvas(self, bg=self.BG, highlightthickness=0)
         self.canvas.pack(fill=tk.BOTH, expand=True)
-        self.canvas.bind("<Configure>", lambda e: self._draw())
+        self.canvas.bind("<Configure>", self._on_configure)
         self.canvas.bind("<MouseWheel>", self._on_wheel)
         self.canvas.bind("<Button-4>", self._on_wheel)
         self.canvas.bind("<Button-5>", self._on_wheel)
@@ -9002,6 +9006,35 @@ class VerticalRollView(tk.Toplevel):
         self.canvas.focus_set()
 
     # ── movement ──────────────────────────────────────────────────────────
+    # v22ze-318: no redraw while the window is being resized; one draw when the resizing pauses
+    def _on_configure(self, e=None):
+        if self._geo is None:                 # first appearance: draw at once
+            self._draw()
+            return
+        try:
+            if self._cfg_job is not None:
+                self.after_cancel(self._cfg_job)
+            self._cfg_job = self.after(150, self._configure_done)
+        except Exception:
+            self._cfg_job = None
+
+    def _configure_done(self):
+        self._cfg_job = None
+        try:
+            if self.winfo_exists():
+                self._draw()
+        except Exception:
+            pass
+
+    def destroy(self):
+        try:
+            if self._cfg_job is not None:
+                self.after_cancel(self._cfg_job)
+        except Exception:
+            pass
+        self._cfg_job = None
+        super().destroy()
+
     def _playing(self):
         try:
             return bool(self.app.transport.is_playing())
@@ -9051,7 +9084,12 @@ class VerticalRollView(tk.Toplevel):
         except Exception:
             return
         self._tick = float(tick)
+        now = time.perf_counter()                       # v22ze-318: at most about 30 redraws a second
+        if self._playing() and now - self._last_play_draw < self._play_interval:   # (a stopped roll always redraws)
+            return
+        self._last_play_draw = now
         self._draw_dynamic()
+        self._play_interval = min(0.1, max(0.033, 3.0 * (time.perf_counter() - now)))
 
     def update_active_notes(self, active_pitches):
         pass    # the lit keys are worked out here, per track, so each takes its track's colour
@@ -9108,6 +9146,7 @@ class VerticalRollView(tk.Toplevel):
             if blk:
                 c.create_rectangle(x0, y_now, x1, y_now + kh * 0.62, fill="#222", outline="#000", tags=("static", "key"))
         c.create_line(0, y_now, W, y_now, fill="#9aa7b4", width=2, tags="static")   # the line the notes fall onto
+        self._drawn_size = (W, H)
         self._last_key = None
         self._lit_prev = None
         self._draw_dynamic(force=True)
@@ -9118,6 +9157,8 @@ class VerticalRollView(tk.Toplevel):
         if not geo:
             return
         W, H = c.winfo_width(), c.winfo_height()
+        if self._drawn_size != (W, H):            # being resized: wait for the redraw
+            return
         kh = self.KEYB_H
         y_now = H - kh
         song = self.app.song
@@ -9212,7 +9253,7 @@ class HorizontalRollView(VerticalRollView):
         super()._build_ui()
         for seq, d in (("<Right>", 1), ("<Left>", -1)):
             self.bind(seq, lambda e, d=d: self._scroll_beats(d))
-        self.canvas.bind("<Configure>", lambda e: self._draw())
+        self.canvas.bind("<Configure>", self._on_configure)
 
     def _draw(self):
         c = self.canvas
@@ -9240,6 +9281,7 @@ class HorizontalRollView(VerticalRollView):
             if blk:
                 c.create_rectangle(x_now - kw * 0.62, y0, x_now, y1, fill="#222", outline="#000", tags=("static", "key"))
         c.create_line(x_now, 0, x_now, H, fill="#9aa7b4", width=2, tags="static")   # the line the notes slide onto
+        self._drawn_size = (W, H)
         self._last_key = None
         self._lit_prev = None
         self._draw_dynamic(force=True)
@@ -9250,6 +9292,8 @@ class HorizontalRollView(VerticalRollView):
         if not geo:
             return
         W, H = c.winfo_width(), c.winfo_height()
+        if self._drawn_size != (W, H):            # being resized: wait for the redraw
+            return
         kw = self.KEYB_W
         x_now = kw
         song = self.app.song
