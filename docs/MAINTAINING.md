@@ -408,7 +408,7 @@ describes the roll as a way of looking only. The maintainer uses it only for vie
    colour each. Blue for the left hand and orange for the right (not red against green: about 1 man in 12 cannot tell
    those apart; blue and orange also hold up in a black-and-white print). Off by default; the Score is unchanged (the
    grand staff already shows the hands). The selected note keeps a yellow outline.
-3. **Vertical view, view-only**: time runs down, the keyboard sits at the bottom, notes fall onto it while playing, keys
+3. **Vertical view, view-only** (first version v22ze-315, a separate window, View > Piano Roll (vertical)): time runs down, the keyboard sits at the bottom, notes fall onto it while playing, keys
    light up; hand colours apply. A second way of drawing the same roll, not a second window. The roll's drawing code
    assumes time runs left to right (`_tx`, `_py`, `_xt`, `_yp`), so this redoes the drawing and the mouse handling.
 4. **Finger numbers** on the roll notes and on the keys when played. Carries the "suggestion, check it" caution.

@@ -8902,6 +8902,301 @@ class Transport:
 # ─────────────────────────────────────────────────────────────────────────────
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Piano Roll, vertical (v22ze-315)
+# ─────────────────────────────────────────────────────────────────────────────
+# The keyboard sits at the bottom, low notes at the left (as the keys sit in front of a player); time runs up the
+# screen and the notes fall onto the keyboard while the music plays.  View only: nothing here changes the music.
+# Colours: the Okabe-Ito colour-blind-safe palette (Okabe and Ito, "Color Universal Design", 2002): right hand orange,
+# left hand sky blue, any other track bluish green, reddish purple, blue, grey in turn.  Never red against green.
+
+_VROLL_RH = "#E69F00"
+_VROLL_LH = "#56B4E9"
+_VROLL_OTHER = ("#009E73", "#CC79A7", "#0072B2", "#999999")
+
+
+def _vroll_key_geometry(width):
+    """{pitch: (x0, x1, is_black)} for the 88 keys A0 (21) to C8 (108) laid across `width` pixels: 52 white keys of
+    equal width, each black key centred on the line between two white keys."""
+    black_pcs = (1, 3, 6, 8, 10)
+    whites = [p for p in range(21, 109) if p % 12 not in black_pcs]
+    wk = width / float(len(whites))
+    geo = {}
+    index = {}
+    for i, p in enumerate(whites):
+        geo[p] = (i * wk, (i + 1) * wk, False)
+        index[p] = i
+    for p in range(21, 109):
+        if p % 12 in black_pcs:
+            cx = (index[p - 1] + 1) * wk      # the key just below a black key is always a white one
+            bw = wk * 0.6
+            geo[p] = (cx - bw / 2.0, cx + bw / 2.0, True)
+    return geo
+
+
+def _vroll_shown_tracks(song):
+    """[(track_index, track, colour, label)] of the tracks the vertical roll draws: tracks with notes that are not
+    muted (and, if any track is soloed, only the soloed ones); drums are left out.  A track keeps its colour when
+    another is muted."""
+    has_solo = any(t.solo for t in song.tracks)
+    rh, lh = _hand_tracks(song)
+    other = 0
+    out = []
+    for i, t in enumerate(song.tracks):
+        if i == rh:
+            col, label = _VROLL_RH, "Right hand"
+        elif i == lh:
+            col, label = _VROLL_LH, "Left hand"
+        else:
+            col = _VROLL_OTHER[other % len(_VROLL_OTHER)]
+            other += 1
+            label = t.name or "Track %d" % (i + 1)
+        if not t.notes or t.mute or (has_solo and not t.solo) or getattr(t, "channel", 0) == 9:
+            continue
+        out.append((i, t, col, label))
+    return out
+
+
+class VerticalRollView(tk.Toplevel):
+    KEYB_H = 84
+    BG = "#101820"
+
+    def __init__(self, parent, app):
+        super().__init__(parent)
+        self.app = app
+        self._ppb = 90.0                 # pixels per beat (zoom)
+        try:
+            self._tick = float(app.transport.position_ticks or 0)
+        except Exception:
+            self._tick = 0.0
+        self._index = []
+        self._sig = None
+        self._sig_t = 0.0
+        self._geo = None
+        self._last_key = None
+        self._lit_prev = None
+        nm = app.song.title or os.path.basename(app.song.filename or "") or "untitled"
+        self.title("Piano Roll (vertical) — " + nm)
+        self.geometry("1100x720")
+        self._build_ui()
+
+    def _build_ui(self):
+        tb = tk.Frame(self, bd=1, relief=tk.RAISED)
+        tb.pack(fill=tk.X)
+        tk.Button(tb, text="Zoom +", command=self._zoom_in).pack(side=tk.LEFT, padx=2, pady=2)
+        tk.Button(tb, text="Zoom −", command=self._zoom_out).pack(side=tk.LEFT, padx=2, pady=2)
+        tk.Label(tb, text="   View only. Mouse wheel or Up/Down keys scroll.",
+                 fg="#555").pack(side=tk.LEFT)
+        self._legend = tk.Frame(tb)
+        self._legend.pack(side=tk.RIGHT, padx=6)
+        self.canvas = tk.Canvas(self, bg=self.BG, highlightthickness=0)
+        self.canvas.pack(fill=tk.BOTH, expand=True)
+        self.canvas.bind("<Configure>", lambda e: self._draw())
+        self.canvas.bind("<MouseWheel>", self._on_wheel)
+        self.canvas.bind("<Button-4>", self._on_wheel)
+        self.canvas.bind("<Button-5>", self._on_wheel)
+        self.canvas.bind("<Button-1>", lambda e: self.canvas.focus_set())
+        for seq, d in (("<Up>", 1), ("<Down>", -1), ("<Prior>", 8), ("<Next>", -8)):
+            self.bind(seq, lambda e, d=d: self._scroll_beats(d))
+        self.bind("<Home>", lambda e: self._scroll_to(0))
+        self.canvas.focus_set()
+
+    # ── movement ──────────────────────────────────────────────────────────
+    def _playing(self):
+        try:
+            return bool(self.app.transport.is_playing())
+        except Exception:
+            return False
+
+    def _on_wheel(self, e):
+        up = getattr(e, "num", 0) == 4 or getattr(e, "delta", 0) > 0
+        self._scroll_beats(1 if up else -1)
+
+    def _scroll_beats(self, n):
+        if self._playing():
+            return
+        song = self.app.song
+        top = float(song.total_ticks_fast())
+        self._scroll_to(max(0.0, min(top, self._tick + n * song.ticks_per_beat)))
+
+    def _scroll_to(self, t):
+        if self._playing():
+            return
+        self._tick = float(t)
+        try:
+            self.app.transport.position_ticks = int(t)
+        except Exception:
+            pass
+        try:
+            sv = getattr(self.app, "_score_view", None)
+            if sv is not None and sv.winfo_exists():
+                sv.update_cursor(int(t))
+        except Exception:
+            pass
+        self._draw_dynamic()
+
+    def _zoom_in(self):
+        self._ppb = min(400.0, self._ppb * 1.4)
+        self._draw_dynamic(force=True)
+
+    def _zoom_out(self):
+        self._ppb = max(20.0, self._ppb / 1.4)
+        self._draw_dynamic(force=True)
+
+    # ── called by the program's tick loop while playing ──────────────────
+    def update_playhead(self, tick):
+        try:
+            if not self.winfo_exists():
+                return
+        except Exception:
+            return
+        self._tick = float(tick)
+        self._draw_dynamic()
+
+    def update_active_notes(self, active_pitches):
+        pass    # the lit keys are worked out here, per track, so each takes its track's colour
+
+    # ── drawing ───────────────────────────────────────────────────────────
+    def _signature(self):
+        return tuple((len(t.notes), t.mute, t.solo, sum(n.tick + n.pitch + n.duration for n in t.notes))
+                     for t in self.app.song.tracks)
+
+    def _rebuild_index(self):
+        self._index = []
+        shown = _vroll_shown_tracks(self.app.song)
+        for i, t, col, label in shown:
+            notes = sorted(((n.tick, n.duration, n.pitch) for n in t.notes if n.duration > 0), key=lambda x: x[0])
+            if notes:
+                self._index.append((col, [x[0] for x in notes], notes, max(x[1] for x in notes)))
+        self._sig = self._signature()
+        self._sig_t = time.time()
+        for w in self._legend.winfo_children():
+            w.destroy()
+        for i, t, col, label in shown:
+            tk.Label(self._legend, text="■ " + label, fg=col, bg="#101820", padx=6).pack(side=tk.LEFT, padx=2)
+
+    def _check_index(self):
+        if time.time() - self._sig_t > 0.5:
+            self._sig_t = time.time()
+            if self._signature() != self._sig:
+                self._rebuild_index()
+                self._last_key = None
+
+    def _draw(self):
+        c = self.canvas
+        W, H = c.winfo_width(), c.winfo_height()
+        if W < 100 or H < self.KEYB_H + 120:
+            return
+        self._rebuild_index()
+        c.delete("all")
+        self._geo = geo = _vroll_key_geometry(W)
+        kh = self.KEYB_H
+        y_now = H - kh
+        for p in range(24, 109, 12):                       # a faint line at every C
+            x0 = geo[p][0]
+            c.create_line(x0, 0, x0, y_now, fill="#1c2a38", tags="static")
+        for p in sorted(geo):                               # white keys first, black keys over them
+            x0, x1, blk = geo[p]
+            if not blk:
+                c.create_rectangle(x0, y_now, x1, H, fill="#f2f2f2", outline="#555", tags=("static", "key"))
+        for p in range(24, 109, 12):
+            x0, x1, blk = geo[p]
+            c.create_text((x0 + x1) / 2.0, H - 4, text="C%d" % (p // 12 - 1), anchor="s", fill="#666",
+                          font=("TkFixedFont", 7), tags="static")
+        for p in sorted(geo):
+            x0, x1, blk = geo[p]
+            if blk:
+                c.create_rectangle(x0, y_now, x1, y_now + kh * 0.62, fill="#222", outline="#000", tags=("static", "key"))
+        c.create_line(0, y_now, W, y_now, fill="#9aa7b4", width=2, tags="static")   # the line the notes fall onto
+        self._last_key = None
+        self._lit_prev = None
+        self._draw_dynamic(force=True)
+
+    def _draw_dynamic(self, force=False):
+        c = self.canvas
+        geo = self._geo
+        if not geo:
+            return
+        W, H = c.winfo_width(), c.winfo_height()
+        kh = self.KEYB_H
+        y_now = H - kh
+        song = self.app.song
+        self._check_index()
+        tpb = float(song.ticks_per_beat or 480)
+        k = self._ppb / tpb
+        tick = self._tick
+        key = (int(round(tick * k)), round(self._ppb, 2), W, H)
+        if force or key != self._last_key:
+            self._last_key = key
+            c.delete("dyn")
+            t_end = tick + y_now / k
+            tpm = song.ticks_per_measure()
+            if tpm > 0:
+                if self._ppb >= 50:                         # beat lines, fainter than bar lines
+                    b = int(tick // tpb)
+                    while True:
+                        ty = b * tpb
+                        y = y_now - (ty - tick) * k
+                        if y < 0:
+                            break
+                        if ty >= tick and (ty % tpm):
+                            c.create_line(0, y, W, y, fill="#1d2b3b", tags="dyn")
+                        b += 1
+                b = int(tick // tpm)
+                while True:
+                    ty = b * tpm
+                    y = y_now - (ty - tick) * k
+                    if y < 0:
+                        break
+                    if ty >= tick:
+                        c.create_line(0, y, W, y, fill="#4a5f78", tags="dyn")
+                        c.create_text(4, y - 2, text=str(b + 1), anchor="sw", fill="#9db2c8",
+                                      font=("TkFixedFont", 8), tags="dyn")
+                    b += 1
+            for col, starts, notes, maxdur in self._index:
+                lo = bisect.bisect_left(starts, tick - maxdur)
+                hi = bisect.bisect_right(starts, t_end)
+                for j in range(lo, hi):
+                    t0, dur, p = notes[j]
+                    t1 = t0 + dur
+                    if t1 <= tick:
+                        continue
+                    g = geo.get(p)
+                    if g is None:
+                        continue
+                    y_bot = y_now - (max(t0, tick) - tick) * k
+                    y_top = max(0.0, y_now - (t1 - tick) * k)
+                    if y_bot - y_top < 4:
+                        y_top = y_bot - 4
+                    c.create_rectangle(g[0] + 1, y_top, g[1] - 1, y_bot - 1, fill=col, outline="#0b1118",
+                                       tags=("dyn", "vnote"))
+        # keys lit while playing, each in its track's colour
+        lit = {}
+        if self._playing():
+            for col, starts, notes, maxdur in self._index:
+                lo = bisect.bisect_left(starts, tick - maxdur)
+                hi = bisect.bisect_right(starts, tick)
+                for j in range(lo, hi):
+                    t0, dur, p = notes[j]
+                    if t0 <= tick < t0 + dur:
+                        lit[p] = col
+        if lit != self._lit_prev:
+            c.delete("lit")
+            self._lit_prev = dict(lit)
+            if lit:
+                for p, col in lit.items():
+                    g = geo.get(p)
+                    if g and not g[2]:
+                        c.create_rectangle(g[0] + 1, y_now + 1, g[1] - 1, H - 1, fill=col, outline="#333", tags="lit")
+                for p in sorted(geo):                        # black keys again, over the lit white ones
+                    g = geo[p]
+                    if g[2]:
+                        c.create_rectangle(g[0], y_now, g[1], y_now + kh * 0.62, fill=lit.get(p, "#222"),
+                                           outline="#000", tags="lit")
+
+
+
+
 class PianoRollView(tk.Toplevel):
     CELL_W = 2
     CELL_H = 10
@@ -18409,7 +18704,7 @@ class MidisoftStudio:
                         active.add(n.pitch)
             for w in self._open_windows:
                 try:
-                    if isinstance(w, PianoRollView) and _winfo_exists(w):
+                    if isinstance(w, (PianoRollView, VerticalRollView)) and _winfo_exists(w):
                         w.update_active_notes(active)
                         w.update_playhead(tick)
                 except: pass
@@ -18524,6 +18819,7 @@ class MidisoftStudio:
         vm=TkPopupMenu(mb,tearoff=0); mb.add_cascade(label="View",menu=vm)
         vm.add_command(label="Score View\tCtrl+1",command=self._open_score_view,accelerator="Ctrl+1")
         vm.add_command(label="Piano Roll\tCtrl+2",command=self._open_piano_roll,accelerator="Ctrl+2")
+        vm.add_command(label="Piano Roll (vertical)",command=self._open_vertical_roll)
         vm.add_command(label="MIDI List\tCtrl+3",command=self._open_list_view,accelerator="Ctrl+3")
         vm.add_command(label="Mixer",command=self._open_mixer)
         vm.add_separator()
@@ -23292,6 +23588,18 @@ class MidisoftStudio:
             except: pass
         pr = PianoRollView(self.root,self,idx)
         self._open_windows.append(pr)
+
+    def _open_vertical_roll(self):
+        self.root.focus_set()   # dismiss any open menu
+        if not self.song or not self.song.tracks:
+            messagebox.showinfo("Piano Roll (vertical)", "Open a file first.", parent=self.root); return
+        for w in self._open_windows:
+            try:
+                if isinstance(w, VerticalRollView) and w.winfo_exists():
+                    w.lift(); w.focus_force(); return
+            except Exception: pass
+        vr = VerticalRollView(self.root, self)
+        self._open_windows.append(vr)
 
     def _open_list_view(self):
         self.root.focus_set()   # dismiss any open menu

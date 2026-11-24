@@ -193,7 +193,7 @@ Most windows that ask you to choose something have a **Help** button (or press *
 
 **View**
 
-- **Score View** (Ctrl+1), **Piano Roll** (Ctrl+2), **MIDI List** (Ctrl+3) and **Mixer**.
+- **Score View** (Ctrl+1), **Piano Roll** (Ctrl+2), **Piano Roll (vertical)**, **MIDI List** (Ctrl+3) and **Mixer**.
 - **Listening speed ▸**: 50%, 60%, 70%, 80%, 90% or 100% (as written), or **Other speed…** to type any value in Score Settings. It changes only what you hear (section 6).
 
 **Setup**
@@ -219,6 +219,7 @@ The list of instruments is a panel that can be **docked** (fixed in the main win
 
 - **Score (♫)**: ordinary sheet music, one staff per instrument. A two-handed keyboard instrument (piano, organ, accordion…) gets two staffs joined together (right hand on top, left hand below). This is the view most people use.
 - **Piano Roll (♬)**: each note is a bar. Higher notes are higher on the screen; longer notes are longer bars. Easy to see exactly when each note starts and stops.
+- **Piano Roll, vertical** (View menu): the keyboard is at the bottom, low notes at the left and high notes at the right. Time runs up the screen and the notes fall toward the keyboard while the music plays; the key lights up as each note arrives. Right hand is orange and left hand is blue; other instruments have their own colours. It shows every instrument that is not muted (or only the soloed ones). It is for looking only: nothing you do in this window changes the music. Scroll with the mouse wheel, the Up and Down keys or Page Up and Page Down; Zoom + and - change how much time fits on the screen.
 - **MIDI List (📋)**: a plain table of every note in the file, with its measure. For checking details.
 - **Mixer (🎚)**: a volume control, a Mute and a Solo for each instrument, and a place to choose its instrument sound. If there are more instruments than fit, use the scroll bars at the bottom and right of the Mixer to reach them all (including the drums).
 
