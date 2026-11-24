@@ -396,6 +396,11 @@ release carries the command line is not yet decided.
 
 ### Piano roll plan (agreed 2026-11-21; steps 1 to 3 are in 0.4.2, steps 4 to 7 in 0.4.3)
 
+**Update 2026-11-24 (v22ze-317):** the older roll (one track, click to add and right-click to delete, no Undo) is
+removed. Steps 1 and 2 are therefore finished: the rolls are view-only and show both hands in colour (315 vertical,
+316 horizontal, turned a quarter turn: keyboard at the left, low notes at the top). Fingering editing on the roll stays in
+step 7.
+
 What the roll does today (read from the code 2026-11-21; Undo not yet confirmed by a test): it shows ONE track in one colour
 (a selected note is yellow). A click on an empty spot adds a short (1/16) note; a right-click on a note deletes it; the
 toolbar has Select All, Delete, Quantize (raw ticks) and Transpose. None of these is recorded for Undo, and the User Guide

@@ -88,17 +88,6 @@ class TestTransport(unittest.TestCase):
 class TestPianoRoll(unittest.TestCase):
     """Test PianoRoll widget."""
 
-    def test_pianoroll_creation(self):
-        """PianoRoll should initialize with a song."""
-        try:
-            from gui import PianoRollView
-            from gui import Song
-            song = Song()
-            # Skip actual creation since it needs real Tk
-            self.assertIsNotNone(PianoRollView)
-        except (ImportError, Exception):
-            self.skipTest("PianoRoll test skipped")
-
 
 if __name__ == "__main__":
     unittest.main()
