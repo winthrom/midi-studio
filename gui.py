@@ -8985,7 +8985,7 @@ class VerticalRollView(tk.Toplevel):
         tb.pack(fill=tk.X)
         tk.Button(tb, text="Zoom +", command=self._zoom_in).pack(side=tk.LEFT, padx=2, pady=2)
         tk.Button(tb, text="Zoom −", command=self._zoom_out).pack(side=tk.LEFT, padx=2, pady=2)
-        tk.Label(tb, text="   View only. Mouse wheel or Up/Down keys scroll.",
+        tk.Label(tb, text="   View only. Mouse wheel or arrow keys scroll.",
                  fg="#555").pack(side=tk.LEFT)
         self._legend = tk.Frame(tb)
         self._legend.pack(side=tk.RIGHT, padx=6)
@@ -9195,6 +9195,135 @@ class VerticalRollView(tk.Toplevel):
                                            outline="#000", tags="lit")
 
 
+
+
+class HorizontalRollView(VerticalRollView):
+    """The vertical roll turned a quarter turn: the keyboard is at the LEFT, low notes at the TOP and high notes at the
+    BOTTOM (the way a player sitting at that keyboard sees it), time runs from the right toward the keyboard, so the
+    notes slide left onto the keys.  Same tracks, colours, lit keys and view-only rule as the vertical roll."""
+    KEYB_W = 84
+
+    def __init__(self, parent, app):
+        super().__init__(parent, app)
+        nm = app.song.title or os.path.basename(app.song.filename or "") or "untitled"
+        self.title("Piano Roll — " + nm)
+
+    def _build_ui(self):
+        super()._build_ui()
+        for seq, d in (("<Right>", 1), ("<Left>", -1)):
+            self.bind(seq, lambda e, d=d: self._scroll_beats(d))
+        self.canvas.bind("<Configure>", lambda e: self._draw())
+
+    def _draw(self):
+        c = self.canvas
+        W, H = c.winfo_width(), c.winfo_height()
+        kw = self.KEYB_W
+        if H < 100 or W < kw + 120:
+            return
+        self._rebuild_index()
+        c.delete("all")
+        self._geo = geo = _vroll_key_geometry(H)           # here the "x" of a key is its distance from the top
+        x_now = kw
+        for p in range(24, 109, 12):                       # a faint line at every C
+            y0 = geo[p][0]
+            c.create_line(x_now, y0, W, y0, fill="#1c2a38", tags="static")
+        for p in sorted(geo):                               # white keys first, black keys over them
+            y0, y1, blk = geo[p]
+            if not blk:
+                c.create_rectangle(0, y0, x_now, y1, fill="#f2f2f2", outline="#555", tags=("static", "key"))
+        for p in range(24, 109, 12):
+            y0, y1, blk = geo[p]
+            c.create_text(4, (y0 + y1) / 2.0, text="C%d" % (p // 12 - 1), anchor="w", fill="#666",
+                          font=("TkFixedFont", 7), tags="static")
+        for p in sorted(geo):
+            y0, y1, blk = geo[p]
+            if blk:
+                c.create_rectangle(x_now - kw * 0.62, y0, x_now, y1, fill="#222", outline="#000", tags=("static", "key"))
+        c.create_line(x_now, 0, x_now, H, fill="#9aa7b4", width=2, tags="static")   # the line the notes slide onto
+        self._last_key = None
+        self._lit_prev = None
+        self._draw_dynamic(force=True)
+
+    def _draw_dynamic(self, force=False):
+        c = self.canvas
+        geo = self._geo
+        if not geo:
+            return
+        W, H = c.winfo_width(), c.winfo_height()
+        kw = self.KEYB_W
+        x_now = kw
+        song = self.app.song
+        self._check_index()
+        tpb = float(song.ticks_per_beat or 480)
+        k = self._ppb / tpb
+        tick = self._tick
+        key = (int(round(tick * k)), round(self._ppb, 2), W, H)
+        if force or key != self._last_key:
+            self._last_key = key
+            c.delete("dyn")
+            t_end = tick + (W - x_now) / k
+            tpm = song.ticks_per_measure()
+            if tpm > 0:
+                if self._ppb >= 50:                         # beat lines, fainter than bar lines
+                    b = int(tick // tpb)
+                    while True:
+                        tx = b * tpb
+                        x = x_now + (tx - tick) * k
+                        if x > W:
+                            break
+                        if tx >= tick and (tx % tpm):
+                            c.create_line(x, 0, x, H, fill="#1d2b3b", tags="dyn")
+                        b += 1
+                b = int(tick // tpm)
+                while True:
+                    tx = b * tpm
+                    x = x_now + (tx - tick) * k
+                    if x > W:
+                        break
+                    if tx >= tick:
+                        c.create_line(x, 0, x, H, fill="#4a5f78", tags="dyn")
+                        c.create_text(x + 3, 2, text=str(b + 1), anchor="nw", fill="#9db2c8",
+                                      font=("TkFixedFont", 8), tags="dyn")
+                    b += 1
+            for col, starts, notes, maxdur in self._index:
+                lo = bisect.bisect_left(starts, tick - maxdur)
+                hi = bisect.bisect_right(starts, t_end)
+                for j in range(lo, hi):
+                    t0, dur, p = notes[j]
+                    t1 = t0 + dur
+                    if t1 <= tick:
+                        continue
+                    g = geo.get(p)
+                    if g is None:
+                        continue
+                    x_l = x_now + (max(t0, tick) - tick) * k
+                    x_r = min(float(W), x_now + (t1 - tick) * k)
+                    if x_r - x_l < 4:
+                        x_r = x_l + 4
+                    c.create_rectangle(x_l + 1, g[0] + 1, x_r, g[1] - 1, fill=col, outline="#0b1118",
+                                       tags=("dyn", "vnote"))
+        lit = {}
+        if self._playing():
+            for col, starts, notes, maxdur in self._index:
+                lo = bisect.bisect_left(starts, tick - maxdur)
+                hi = bisect.bisect_right(starts, tick)
+                for j in range(lo, hi):
+                    t0, dur, p = notes[j]
+                    if t0 <= tick < t0 + dur:
+                        lit[p] = col
+        if lit != self._lit_prev:
+            c.delete("lit")
+            self._lit_prev = dict(lit)
+            if lit:
+                for p, col in lit.items():
+                    g = geo.get(p)
+                    if g and not g[2]:
+                        c.create_rectangle(1, g[0] + 1, x_now - 1, g[1] - 1, fill=col, outline="#333", tags="lit")
+                for p in sorted(geo):                        # black keys again, over the lit white ones
+                    g = geo[p]
+                    if g[2]:
+                        c.create_rectangle(x_now - kw * 0.62, g[0], x_now, g[1], fill=lit.get(p, "#222"),
+                                           outline="#000", tags="lit")
 
 
 class PianoRollView(tk.Toplevel):
@@ -10121,7 +10250,7 @@ class TracksView(tk.Frame):
         app.track_list.configure(yscrollcommand=vsb.set)
         vsb.pack(side=tk.RIGHT, fill=tk.Y)
         app.track_list.pack(fill=tk.BOTH, expand=True)
-        app.track_list.bind("<Double-1>", lambda e: app._open_piano_roll())
+        app.track_list.bind("<Double-1>", lambda e: app._open_horizontal_roll())
         app.track_list.bind("<Button-3>", app._track_ctx)
         right = tk.Frame(pane, bg="#0d1117")
         pane.add(right, minsize=300)
@@ -18818,7 +18947,8 @@ class MidisoftStudio:
         scm.add_separator()
         vm=TkPopupMenu(mb,tearoff=0); mb.add_cascade(label="View",menu=vm)
         vm.add_command(label="Score View\tCtrl+1",command=self._open_score_view,accelerator="Ctrl+1")
-        vm.add_command(label="Piano Roll\tCtrl+2",command=self._open_piano_roll,accelerator="Ctrl+2")
+        vm.add_command(label="Piano Roll\tCtrl+2",command=self._open_horizontal_roll,accelerator="Ctrl+2")
+        vm.add_command(label="Piano Roll (edit notes, older)",command=self._open_piano_roll)
         vm.add_command(label="Piano Roll (vertical)",command=self._open_vertical_roll)
         vm.add_command(label="MIDI List\tCtrl+3",command=self._open_list_view,accelerator="Ctrl+3")
         vm.add_command(label="Mixer",command=self._open_mixer)
@@ -18903,7 +19033,7 @@ class MidisoftStudio:
         ucm.add_radiobutton(label="Off",value=0,variable=self._upd_var,command=self._set_update_check)
         hm.add_command(label="About…",command=self._about)
         binds=[("<Control-n>",self._new),("<Control-o>",self._open),("<Control-s>",self._save),
-               ("<Control-1>",self._open_score_view),("<Control-2>",self._open_piano_roll),
+               ("<Control-1>",self._open_score_view),("<Control-2>",self._open_horizontal_roll),
                ("<Control-3>",self._open_list_view),("<space>",self._toggle_play),
                ("<Home>",self._rewind_to_start),
                ("<Left>",lambda e=None:self._seek(-1)),("<Right>",lambda e=None:self._seek(1)),
@@ -18945,7 +19075,7 @@ class MidisoftStudio:
         tk.Frame(tb,width=8,bg="#161b22").pack(side=tk.LEFT)
         tk.Button(tb,text="+ Track",command=self._add_track,**bc).pack(side=tk.LEFT,padx=1)
         tk.Button(tb,text="♫ Score",command=self._open_score_view,**bc).pack(side=tk.LEFT,padx=1)
-        tk.Button(tb,text="♬ Roll",command=self._open_piano_roll,**bc).pack(side=tk.LEFT,padx=1)
+        tk.Button(tb,text="♬ Roll",command=self._open_horizontal_roll,**bc).pack(side=tk.LEFT,padx=1)
         tk.Button(tb,text="📋 List",command=self._open_list_view,**bc).pack(side=tk.LEFT,padx=1)
         tk.Button(tb,text="🎚 Mixer",command=self._open_mixer,**bc).pack(side=tk.LEFT,padx=1)
         tk.Frame(tb,width=8,bg="#161b22").pack(side=tk.LEFT)
@@ -21209,13 +21339,13 @@ class MidisoftStudio:
         H=self.overview.winfo_height(); n=len(self.song.tracks)
         idx=min(int(event.y/H*n),n-1)
         self.track_list.selection_clear(0,tk.END); self.track_list.selection_set(idx)
-        self._open_piano_roll()
+        self._open_horizontal_roll()
 
     def _track_ctx(self,event):
         # v22ze-56 fix: was tk.Menu — see TkPopupMenu's docstring.
         m=TkPopupMenu(self.root,tearoff=0)
         m.add_command(label="Score View",command=self._open_score_view)
-        m.add_command(label="Piano Roll",command=self._open_piano_roll)
+        m.add_command(label="Piano Roll",command=self._open_horizontal_roll)
         m.add_command(label="MIDI List",command=self._open_list_view)
         m.add_separator()
         m.add_command(label="Rename",command=self._rename_track)
@@ -23588,6 +23718,18 @@ class MidisoftStudio:
             except: pass
         pr = PianoRollView(self.root,self,idx)
         self._open_windows.append(pr)
+
+    def _open_horizontal_roll(self):
+        self.root.focus_set()   # dismiss any open menu
+        if not self.song or not self.song.tracks:
+            messagebox.showinfo("Piano Roll", "Open a file first.", parent=self.root); return
+        for w in self._open_windows:
+            try:
+                if type(w) is HorizontalRollView and w.winfo_exists():
+                    w.lift(); w.focus_force(); return
+            except Exception: pass
+        hr = HorizontalRollView(self.root, self)
+        self._open_windows.append(hr)
 
     def _open_vertical_roll(self):
         self.root.focus_set()   # dismiss any open menu
