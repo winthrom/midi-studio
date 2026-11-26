@@ -10,6 +10,7 @@ Provides:
 
 from __future__ import annotations
 
+import atexit
 import json
 import os
 import platform
@@ -90,6 +91,50 @@ TIMIDITY_ARGS = [
 TIMIDITY_HINT = "timidity " + " ".join(TIMIDITY_ARGS)
 
 _timidity_proc = None  # subprocess.Popen handle if we launched it ourselves
+
+
+def _child_env():
+    """The environment for a program started from here.  An AppImage must not hand its own libraries to it."""
+    env = dict(os.environ)
+    app = env.get("APPDIR", "")
+    for k in ("LD_LIBRARY_PATH", "LD_PRELOAD", "PYTHONHOME", "PYTHONPATH", "QT_PLUGIN_PATH"):
+        v = env.get(k)
+        if v and app:
+            keep = [p for p in v.split(os.pathsep) if p and not p.startswith(app)]
+            if keep:
+                env[k] = os.pathsep.join(keep)
+            else:
+                env.pop(k, None)
+    return env
+
+
+def _trusted_executable(path):
+    """True for an absolute path to a runnable file whose folder is not writable by everyone (POSIX)."""
+    try:
+        if not path or not os.path.isabs(path) or not os.path.isfile(path) or not os.access(path, os.X_OK):
+            return False
+        if not sys.platform.startswith("win") and os.stat(os.path.dirname(path)).st_mode & 0o002:
+            return False
+        return True
+    except OSError:
+        return False
+
+
+def _stop_timidity():
+    """Stop a TiMidity that this program started (never one that was already running)."""
+    p = _timidity_proc
+    try:
+        if p is not None and p.poll() is None:
+            p.terminate()
+            try:
+                p.wait(timeout=2)
+            except Exception:
+                p.kill()
+    except Exception:
+        pass
+
+
+atexit.register(_stop_timidity)
 
 # ─────────────────────────────────────────────────────────────────────────────
 # FluidSynth soft-synth backend
@@ -598,11 +643,16 @@ def _launch_timidity():
 
     global _timidity_proc
 
-    if not shutil.which("timidity"):
+    exe = shutil.which("timidity")
+    if not exe:
         print(
             "[TiMidity] Not found on PATH — install timidity or timidity++",
             file=sys.stderr,
         )
+        return False
+
+    if not _trusted_executable(exe):   # v22ze-319: full path only, never from "." or a folder anyone can write to
+        print(f"[TiMidity] Not started: {exe!r} is not an absolute path in a protected folder", file=sys.stderr)
         return False
 
     # Check if a TiMidity port already exists — if so, nothing to do
@@ -616,7 +666,9 @@ def _launch_timidity():
 
     try:
         _timidity_proc = subprocess.Popen(
-            ["timidity"] + TIMIDITY_ARGS,
+            [exe] + TIMIDITY_ARGS,
+            env=_child_env(),
+            stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
         )

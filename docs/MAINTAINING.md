@@ -309,8 +309,10 @@ roll plan below (decided 2026-11-21). Fixes to a patch are numbered with letters
      Now refused up front (a real header is 6 bytes), and every reading problem shows one plain sentence plus a short
      detail. NOT covered: the Score drawing, Separate Hands and Quantize on strange-but-valid files (tempo 0, division 1,
      many notes): a second, deeper round could feed those through the tools.
-   - Still to review: how `midi_io.py` starts TiMidity; file-path handling on open, drag-in and export; what the problem-report
-     zip contains.
+   - TiMidity start reviewed (v22ze-319): runs the full path found once (refused when relative or in a folder anyone can
+     write to), with the AppImage's library settings removed, and is stopped at exit when this program started it.
+     The settings are fixed strings; no user text reaches the command.
+   - Still to review: file-path handling on open, drag-in and export; what the problem-report zip contains.
    - On GitHub (maintainer, free for a public repository): switch on Dependabot alerts and CodeQL in Settings > Code security.
 2. **Help with the browser closed, Linux (FIXED, v22ze-304/305, tested 2026-11-20 on two Kubuntu machines, one with snap
    Firefox).** Cause: the AppImage mounts itself under /tmp, and a snap browser cannot see that /tmp. The guide is now copied
