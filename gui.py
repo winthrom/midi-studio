@@ -277,6 +277,7 @@ from sys_platform import (
     APP_VERSION,
     LIONS_DONATE_URL,
     LIONS_WEBSITE_URL,
+    check_midi_path,
     fetch_latest_release,
     safe_release_url,
     update_is_newer,
@@ -21181,9 +21182,16 @@ class MidisoftStudio:
                 midi_io._save_settings(_st)
             except Exception:
                 pass
+            _why = check_midi_path(path)   # v22ze-321: checked BEFORE the open piece is closed
+            if _why:
+                messagebox.showerror("Open MIDI", _why, parent=self.root); return
             self._close_current(); self._load_file(path)
 
     def _load_file(self,path):   # v22ze-253: busy cursor; clicks on the score are ignored while loading
+        _why = check_midi_path(path)   # v22ze-321: also covers a file named on the command line
+        if _why:
+            messagebox.showerror("Open MIDI", _why, parent=self.root)
+            return None
         self._loading = True
         try:
             self.root.config(cursor="watch")

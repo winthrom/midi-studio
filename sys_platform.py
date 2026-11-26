@@ -11,7 +11,7 @@ import time
 from datetime import datetime
 
 # Application identity (update APP_VERSION each release)
-APP_VERSION = "22ze-320"
+APP_VERSION = "22ze-321"
 APP_RELEASE = "0.4.2-dev"
 APP_FULL_NAME = "Midi-Studio — a Synthesizer in the Spirit of MidiSoft Studio4"
 APP_TIMESTAMP = "2026-11-23"  # build date (was: launch time)
@@ -50,6 +50,81 @@ def safe_release_url(u):
             and all(32 < ord(c) < 127 for c in u):
         return u
     return _RELEASE_FALLBACK
+
+
+MAX_MIDI_BYTES = 50 * 1024 * 1024     # v22ze-321: the largest MIDI file ever opened (real ones are usually under 1 MB)
+MIN_MIDI_LIMIT = 1024 * 1024           # a low memory reading never makes the limit smaller than this
+MIDI_MEMORY_FACTOR = 60                # memory needed per byte of file (measured about 20 for the piece itself)
+MAX_PATH_CHARS = 4096
+MAX_NAME_CHARS = 255
+
+
+def available_memory_bytes():
+    """Free memory for a new piece, in bytes, or None when it cannot be read (then the fixed cap is used)."""
+    try:
+        if sys.platform.startswith("linux"):
+            with open("/proc/meminfo") as f:
+                for line in f:
+                    if line.startswith("MemAvailable:"):
+                        return int(line.split()[1]) * 1024
+            return None
+        if sys.platform.startswith("win"):
+            import ctypes
+
+            class _MemStatus(ctypes.Structure):
+                _fields_ = [("dwLength", ctypes.c_ulong), ("dwMemoryLoad", ctypes.c_ulong),
+                            ("ullTotalPhys", ctypes.c_ulonglong), ("ullAvailPhys", ctypes.c_ulonglong),
+                            ("ullTotalPageFile", ctypes.c_ulonglong), ("ullAvailPageFile", ctypes.c_ulonglong),
+                            ("ullTotalVirtual", ctypes.c_ulonglong), ("ullAvailVirtual", ctypes.c_ulonglong),
+                            ("ullAvailExtendedVirtual", ctypes.c_ulonglong)]
+            ms = _MemStatus()
+            ms.dwLength = ctypes.sizeof(ms)
+            if ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(ms)):
+                return int(ms.ullAvailPhys)
+            return None
+        if sys.platform == "darwin":
+            return os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES") // 4    # a cautious stand-in for "free"
+    except Exception:
+        pass
+    return None
+
+
+def midi_size_limit(avail="auto"):
+    """The largest MIDI file to open: the smaller of the fixed cap and free memory / 60, never below 1 MB."""
+    if avail == "auto":
+        avail = available_memory_bytes()
+    limit = MAX_MIDI_BYTES
+    if isinstance(avail, int) and not isinstance(avail, bool) and avail > 0:
+        limit = min(limit, max(MIN_MIDI_LIMIT, avail // MIDI_MEMORY_FACTOR))
+    return limit
+
+
+def check_midi_path(path, limit=None):
+    """None when the file may be opened; otherwise one plain sentence saying why not.  Nothing is read."""
+    import stat as _stat
+    if not isinstance(path, str) or not path:
+        return "No file was chosen."
+    if len(path) > MAX_PATH_CHARS or len(os.path.basename(path)) > MAX_NAME_CHARS:
+        return "The file name or folder path is too long."
+    if any(ord(c) < 32 or ord(c) == 127 for c in path):
+        return "The file name contains characters that are not allowed (such as a line break)."
+    try:
+        st = os.stat(path)
+    except OSError:
+        return "That file could not be found or cannot be read."
+    if not _stat.S_ISREG(st.st_mode):
+        return "That is not an ordinary file (it may be a folder or a device)."
+    if not os.access(path, os.R_OK):
+        return "That file could not be found or cannot be read."
+    if st.st_size == 0:
+        return "That file is empty."
+    if limit is None:
+        limit = midi_size_limit()
+    if st.st_size > limit:
+        return ("That file is %.1f MB. The largest this computer can open safely right now is %.1f MB. "
+                "A real MIDI file is usually under 1 MB, so this may not be a MIDI file."
+                % (st.st_size / 1048576.0, limit / 1048576.0))
+    return None
 
 
 def fetch_latest_release(url=None, timeout=6):
