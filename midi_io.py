@@ -164,6 +164,7 @@ _fs_active = False  # True once FluidSynth is ready to receive notes
 # v22ze-112: the "built-in FluidSynth" choice, as offered in the startup
 # window and stored in settings when the user ticks "Remember".
 FLUIDSYNTH_BUILTIN = "FluidSynth (built-in)"
+TIMIDITY_START = "TiMidity (start it now)"   # v22ze-320: a choice in the output window, not a port name
 
 
 def _fluidsynth_importable():
@@ -682,6 +683,42 @@ def _launch_timidity():
     except Exception as exc:
         print(f"[TiMidity] Launch failed: {exc}", file=sys.stderr)
         return False
+
+
+def timidity_installed():
+    """True when a TiMidity program is installed where it may safely be run (see _trusted_executable)."""
+    import shutil
+    return _trusted_executable(shutil.which("timidity"))
+
+
+def _timidity_port():
+    try:
+        for p in mido.get_output_names():
+            if "timidity" in p.lower():
+                return p
+    except Exception:
+        pass
+    return None
+
+
+def start_timidity(wait=3.0):
+    """Return the name of a TiMidity output port, starting TiMidity first when none is running.
+    Raises RuntimeError (with a plain message) when that is not possible."""
+    port = _timidity_port()
+    if port:
+        return port
+    if not timidity_installed():
+        raise RuntimeError("TiMidity is not installed, or it is in a folder that is not protected, so it was not started.")
+    _launch_timidity()
+    end = time.time() + wait
+    while True:
+        port = _timidity_port()
+        if port:
+            return port
+        if time.time() >= end:
+            break
+        time.sleep(0.2)
+    raise RuntimeError("TiMidity was started but no TiMidity port appeared.\nTo see why, run this in a terminal:\n\n" + TIMIDITY_HINT)
 
 
 def _prompt_midi_output_choice(trusted_ports):

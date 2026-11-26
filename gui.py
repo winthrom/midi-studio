@@ -23442,6 +23442,12 @@ class MidisoftStudio:
         except ImportError:
             pass
 
+        try:   # v22ze-320: TiMidity installed but not running: offer to start it (nothing starts until it is chosen)
+            if midi_io.timidity_installed() and not any("timidity" in o.lower() for o in outs):
+                options.append(midi_io.TIMIDITY_START)
+        except Exception:
+            pass
+
         if not options:
             messagebox.showinfo("MIDI Output Device",
                 "No MIDI output ports were found, and FluidSynth is not "
@@ -23498,6 +23504,8 @@ class MidisoftStudio:
                 # the new output before closing the old one, silences the old
                 # one, keeps the current output if the switch fails, and (per
                 # v22ze-112) clears the remembered startup choice.
+                if chosen == midi_io.TIMIDITY_START:   # v22ze-320
+                    chosen = midi_io.start_timidity()
                 midi_io.select_output(chosen)
 
                 self._update_status()

@@ -199,7 +199,7 @@ Most windows that ask you to choose something have a **Help** button (or press *
 **Setup**
 
 - **MIDI I/O Info**: shows (I/O means Input/Output) what the program found for sound output and for a connected keyboard.
-- **MIDI Output Device…**: choose which "synthesizer" makes the sound, and its volume (section 10).
+- **MIDI Output Device…**: choose which "synthesizer" makes the sound, and its volume (section 10). If TiMidity is installed on your computer but not running, the list also offers **TiMidity (start it now)**; choose it and the program starts TiMidity and switches to it.
 
 **Help**
 
