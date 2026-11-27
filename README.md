@@ -1,5 +1,22 @@
-# midi-studio
-MIDI notation editor and synthesizer inspired by MidiSoft Studio for Windows
+# MIDI Studio: a free MIDI sequencer and notation editor
+
+**MIDI Studio** is a free MIDI sequencer, MIDI editor and notation program for Windows, Linux and macOS (macOS is experimental).
+Open a MIDI file and it draws the music as sheet music, shows it as a piano roll, and plays it with a built-in synthesizer.
+
+**[Download](#download)** | **[Releases](https://github.com/winthrom/midi-studio/releases)** | **[User guide](docs/USER_GUIDE.md)**
+
+What you can do with it:
+
+- **Read and play** a MIDI file as a score or as a piano roll (horizontal or vertical, right hand and left hand in different
+  colours, keys that light up as the notes sound), with a tempo you can change.
+- **Record** from a MIDI keyboard, and mute, solo and choose the sound of each instrument in a mixer.
+- **Tidy a score that was played by hand**: separate the hands, fix chords and measures. These repair tools change how the
+  score is drawn and keep the original sound (Quantize is the exception, and says so), and everything can be undone.
+- **Add suggested fingering and marks** to piano music (suggestions only: check them with a teacher or performer).
+- **Print** the score, or export it as MIDI, LilyPond or MusicXML to carry on in other notation software.
+
+MIDI Studio was inspired by MidiSoft Studio for Windows. It is developed for the Sterling Lions Club, Virginia, USA, and is
+free software ([GNU General Public License, version 3 or later](LICENSE)).
 
 ## Supporting the Sterling Lions Club
 
