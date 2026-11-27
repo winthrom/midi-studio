@@ -312,7 +312,12 @@ roll plan below (decided 2026-11-21). Fixes to a patch are numbered with letters
    - TiMidity start reviewed (v22ze-319): runs the full path found once (refused when relative or in a folder anyone can
      write to), with the AppImage's library settings removed, and is stopped at exit when this program started it.
      The settings are fixed strings; no user text reaches the command.
-   - Still to review: file-path handling on open, drag-in and export; what the problem-report zip contains.
+   - Open path done (v22ze-321: size limit = the smaller of 50 MB and free memory / 60; nothing is read or closed when a file is
+     refused).  Export done (v22ze-322): every save goes through a temporary file and one replace; save names are checked;
+     external programs get the clean environment; Print cleans up after itself.  LilyPond text injection was tested with
+     LilyPond 2.24.3 and does not work against our output; LilyPond's own safe mode no longer exists (removed in 2.23.12), so
+     the escaping in to_ly() is the only defence and is covered by tests/test_export_safety.py.  There is no file drag-in.
+   - Still to review: what the problem-report zip contains (personal paths in the logs, the temporary copy of the piece).
    - On GitHub (maintainer, free for a public repository): switch on Dependabot alerts and CodeQL in Settings > Code security.
 2. **Help with the browser closed, Linux (FIXED, v22ze-304/305, tested 2026-11-20 on two Kubuntu machines, one with snap
    Firefox).** Cause: the AppImage mounts itself under /tmp, and a snap browser cannot see that /tmp. The guide is now copied

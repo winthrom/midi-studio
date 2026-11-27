@@ -108,6 +108,9 @@ def _child_env():
     return env
 
 
+child_env = _child_env   # v22ze-322: the same clean environment, for the other programs we start
+
+
 def _trusted_executable(path):
     """True for an absolute path to a runnable file whose folder is not writable by everyone (POSIX)."""
     try:

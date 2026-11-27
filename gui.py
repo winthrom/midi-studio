@@ -277,8 +277,11 @@ from sys_platform import (
     APP_VERSION,
     LIONS_DONATE_URL,
     LIONS_WEBSITE_URL,
+    atomic_write,
     check_midi_path,
+    check_save_path,
     fetch_latest_release,
+    remove_old_temp_files,
     safe_release_url,
     update_is_newer,
 )
@@ -21310,6 +21313,9 @@ class MidisoftStudio:
         return n
 
     def _write_mid(self, path):   # v22ze-213
+        _why = check_save_path(path)   # v22ze-322
+        if _why:
+            raise OSError(_why)
         match = False
         n = self._score_only_changes()
         if n:
@@ -21319,7 +21325,7 @@ class MidisoftStudio:
                 + "Yes = save the file to match the score (those notes are joined up as shown; the sound is slightly more connected)." + chr(10)
                 + "No = keep the sound exactly as recorded (the usual choice).",
                 default="no", parent=self.root))
-        self.song.to_mid(path, match)
+        atomic_write(path, lambda _p: self.song.to_mid(_p, match))   # v22ze-322: a failed save keeps the old file
         self._update_title()
 
     def _save(self):
@@ -21431,6 +21437,10 @@ class MidisoftStudio:
             filetypes=[("MusicXML", "*.musicxml *.xml"), ("All", "*.*")])
         if not path:
             return
+        _why = check_save_path(path)   # v22ze-322
+        if _why:
+            messagebox.showerror("MusicXML Export Failed", _why, parent=self.root)
+            return
         import tempfile
         try:
             with tempfile.TemporaryDirectory() as tmpdir:
@@ -21463,7 +21473,7 @@ class MidisoftStudio:
             _fix_musicxml_ties(xml_doc, _musicxml_true_ties(self.song))   # v22ze-242
             _add_musicxml_velocity(xml_doc, self.song)   # v22ze-244
             _fix_musicxml_octave_shift(xml_doc)   # v22ze-245
-            xml_doc.write(path)
+            atomic_write(path, xml_doc.write)
         except Exception as e:
             messagebox.showerror("MusicXML Export Failed", str(e), parent=self.root)
             return
@@ -21491,8 +21501,13 @@ class MidisoftStudio:
             filetypes=[("MIDI", "*.mid *.midi"), ("All", "*.*")])
         if not path:
             return
+        _why = check_save_path(path)   # v22ze-322
+        if _why:
+            messagebox.showerror("Export failed", _why, parent=self.root)
+            return
+        path = os.path.abspath(path)
         try:
-            self.song.to_mid(path)
+            atomic_write(path, self.song.to_mid)
         except Exception as e:
             messagebox.showerror("Export failed", str(e), parent=self.root)
             return
@@ -21501,7 +21516,7 @@ class MidisoftStudio:
         launched = False
         for exe in _musescore_paths():   # v22ze-312: full path from shutil.which, not a bare name
             try:
-                subprocess.Popen([exe, path])
+                subprocess.Popen([exe, path], env=midi_io.child_env())
                 launched = True
                 break
             except OSError:
@@ -21603,12 +21618,16 @@ class MidisoftStudio:
             defaultextension=".ly",
             filetypes=[("LilyPond", "*.ly"), ("All", "*.*")])
         if path:
+            _why = check_save_path(path)   # v22ze-322
+            if _why:
+                messagebox.showerror("Error", _why, parent=self.root)
+                return
             try:
                 _src = self.song   # already swapped to rationalized version when active
-                _src.to_ly(path,
+                atomic_write(path, lambda _p: _src.to_ly(_p,
                            show_bar_numbers=show_bar_numbers,
                            staff_size=staff_size,
-                           short_rests=bool(getattr(self, '_short_rests_var', None) and self._short_rests_var.get()))
+                           short_rests=bool(getattr(self, '_short_rests_var', None) and self._short_rests_var.get())))
                 messagebox.showinfo("Exported",
                     f"Saved {os.path.basename(path)}\n\n"
                     f"Compile to PDF with:\n  lilypond {os.path.basename(path)!r}",
@@ -21632,6 +21651,7 @@ class MidisoftStudio:
         # v22ze-148: LilyPond runs in a background thread so the program does
         # not freeze while it works (a long piece can take a minute or more).
         import threading
+        tmpdir = None
         try:
             tmpdir = tempfile.mkdtemp(prefix="midistudio_print_")
             ly_path = os.path.join(tmpdir, "score.ly")
@@ -21640,6 +21660,8 @@ class MidisoftStudio:
                             show_bar_numbers=show_bar_numbers,
                             staff_size=staff_size, short_rests=bool(getattr(self, '_short_rests_var', None) and self._short_rests_var.get()))  # uses active song
         except Exception as exc:
+            if tmpdir:
+                shutil.rmtree(tmpdir, ignore_errors=True)   # v22ze-322: no folder left behind
             messagebox.showerror("Print Error", str(exc), parent=self.root)
             return
 
@@ -21653,7 +21675,7 @@ class MidisoftStudio:
                 proc = subprocess.Popen(
                     [lp, "--pdf", "-o", os.path.join(tmpdir, "score"), ly_path],
                     stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
-                    text=True, **_kw)
+                    text=True, env=midi_io.child_env(), **_kw)
                 state["proc"] = proc
                 _o, _e = proc.communicate()
                 state["err"] = _e or ""
@@ -21708,6 +21730,7 @@ class MidisoftStudio:
                         "usually in the last lines below (use the scroll "
                         "bar). Click Copy text to send it to me.", err)
                     return
+                remove_old_temp_files("midistudio_score_", ".pdf")   # v22ze-322: our own old score PDFs
                 stable = tempfile.NamedTemporaryFile(
                     suffix=".pdf", delete=False, prefix="midistudio_score_")
                 stable.close()
@@ -21716,9 +21739,9 @@ class MidisoftStudio:
                 if _plat == "Windows":
                     os.startfile(stable.name)
                 elif _plat == "Darwin":
-                    subprocess.Popen(["open", stable.name])
+                    subprocess.Popen(["open", stable.name], env=midi_io.child_env())
                 else:
-                    subprocess.Popen(["xdg-open", stable.name])
+                    subprocess.Popen(["xdg-open", stable.name], env=midi_io.child_env())
             except Exception as exc:  # noqa: BLE001
                 messagebox.showerror("Print Error", str(exc), parent=self.root)
             finally:
@@ -24311,9 +24334,9 @@ class MidisoftStudio:
             if sys.platform == "win32":
                 os.startfile(d)
             elif sys.platform == "darwin":
-                subprocess.Popen(["open", d])
+                subprocess.Popen(["open", d], env=midi_io.child_env())
             else:
-                subprocess.Popen(["xdg-open", d])
+                subprocess.Popen(["xdg-open", d], env=midi_io.child_env())
         except Exception:
             messagebox.showinfo("Tester Log", "The log folder is:" + chr(10) + d, parent=self.root)
 

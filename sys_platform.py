@@ -11,7 +11,7 @@ import time
 from datetime import datetime
 
 # Application identity (update APP_VERSION each release)
-APP_VERSION = "22ze-321"
+APP_VERSION = "22ze-322"
 APP_RELEASE = "0.4.2-dev"
 APP_FULL_NAME = "Midi-Studio — a Synthesizer in the Spirit of MidiSoft Studio4"
 APP_TIMESTAMP = "2026-11-23"  # build date (was: launch time)
@@ -125,6 +125,91 @@ def check_midi_path(path, limit=None):
                 "A real MIDI file is usually under 1 MB, so this may not be a MIDI file."
                 % (st.st_size / 1048576.0, limit / 1048576.0))
     return None
+
+
+def check_save_path(path):
+    """None when `path` may be written to; otherwise one plain sentence.  Nothing is written."""
+    import stat as _stat
+    if not isinstance(path, str) or not path:
+        return "No file name was chosen."
+    if len(path) > MAX_PATH_CHARS or len(os.path.basename(path)) > MAX_NAME_CHARS:
+        return "The file name or folder path is too long."
+    if any(ord(c) < 32 or ord(c) == 127 for c in path):
+        return "The file name contains characters that are not allowed (such as a line break)."
+    full = os.path.abspath(path)
+    folder = os.path.dirname(full)
+    if not os.path.isdir(folder):
+        return "That folder does not exist."
+    if not os.access(folder, os.W_OK | os.X_OK):
+        return "You do not have permission to save in that folder."
+    if os.path.lexists(full):
+        try:
+            st = os.stat(full)
+        except OSError:
+            return "That name is a link to something that does not exist."
+        if not _stat.S_ISREG(st.st_mode):
+            return "That name belongs to a folder or device, not an ordinary file."
+        if not os.access(full, os.W_OK):
+            return "That file is read-only."
+    return None
+
+
+def atomic_write(path, writer):
+    """Call writer(temporary_path), then put the result at `path` in one step.  A failure, a full disk or a crash leaves any
+    existing file exactly as it was, and the temporary file is removed.  Raises whatever the writer raised."""
+    import tempfile
+    target = os.path.realpath(path)            # a link to a file stays a link; the file it points to is replaced
+    fd, tmp = tempfile.mkstemp(prefix=".midistudio-", suffix=".part", dir=os.path.dirname(target))
+    os.close(fd)
+    try:
+        writer(tmp)
+        if os.path.getsize(tmp) == 0:
+            raise OSError("Nothing was written, so the existing file was left as it is.")
+        if not sys.platform.startswith("win"):
+            try:
+                if os.path.exists(target):
+                    shutil.copymode(target, tmp)
+                else:
+                    os.chmod(tmp, 0o644)
+            except OSError:
+                pass
+        os.replace(tmp, target)
+    except BaseException:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+        raise
+
+
+def remove_old_temp_files(prefix, suffix, max_age_seconds=86400, directory=None):
+    """Delete this program's own old temporary files: ordinary files (not links) that we own, whose names start with
+    `prefix` and end with `suffix` and that are older than max_age_seconds.  Returns how many were removed."""
+    import stat as _stat
+    import tempfile
+    folder = directory or tempfile.gettempdir()
+    try:
+        names = os.listdir(folder)
+    except OSError:
+        return 0
+    now, removed = time.time(), 0
+    for nm in names:
+        if not (nm.startswith(prefix) and nm.endswith(suffix)):
+            continue
+        p = os.path.join(folder, nm)
+        try:
+            st = os.lstat(p)
+            if not _stat.S_ISREG(st.st_mode):
+                continue
+            if hasattr(os, "getuid") and st.st_uid != os.getuid():
+                continue
+            if now - st.st_mtime < max_age_seconds:
+                continue
+            os.remove(p)
+            removed += 1
+        except OSError:
+            continue
+    return removed
 
 
 def fetch_latest_release(url=None, timeout=6):
